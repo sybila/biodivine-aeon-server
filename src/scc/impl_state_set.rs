@@ -148,6 +148,9 @@ impl StateSet {
 
     // just for debugging
     pub(crate) fn cardinalities(&self) -> Vec<(usize, f64)> {
-        return self.iter().map(|(s, p)| (s.into(), p.cardinality())).collect()
+        return self
+            .iter()
+            .map(|(s, p)| (s.into(), p.cardinality()))
+            .collect();
     }
 }

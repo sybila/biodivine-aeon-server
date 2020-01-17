@@ -38,7 +38,11 @@ where
     queue.push(initial);
 
     while let Some(universe) = queue.pop() {
-        println!("Universe state count: {} Remaining work queue: {}", universe.iter().count(), queue.len());
+        println!(
+            "Universe state count: {} Remaining work queue: {}",
+            universe.iter().count(),
+            queue.len()
+        );
         let pivots = find_pivots(&universe);
         println!("Pivots state count: {}", pivots.iter().count());
         let forward = guarded_reach(&fwd, &pivots, &universe);

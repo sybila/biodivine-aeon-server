@@ -18,6 +18,7 @@ debug = true
 biodivine-lib-bdd = { git = "https://github.com/sybila/biodivine-lib-bdd.git" }
 biodivine-lib-std = { git = "https://github.com/sybila/biodivine-lib-std.git" }
 biodivine-lib-param-bn = { git = "https://github.com/sybila/biodivine-lib-param-bn.git" }
+rocket = "0.4.2"
 
 [features]
 # With shields_up you enable explicit assertions of pre/post conditions and invariants in critical

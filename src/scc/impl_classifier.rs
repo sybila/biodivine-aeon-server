@@ -1,26 +1,32 @@
-use super::{Classifier, Class, Behaviour, StateSet};
+use super::{Behaviour, Class, Classifier, StateSet};
 use crate::scc::algo_components::find_pivots;
-use std::collections::HashMap;
-use biodivine_lib_param_bn::bdd_params::BddParams;
-use biodivine_lib_std::param_graph::{Params, Graph, EvolutionOperator};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
+use biodivine_lib_param_bn::bdd_params::BddParams;
+use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
+use std::collections::HashMap;
 
-impl <'a> Classifier<'a> {
-
+impl<'a> Classifier<'a> {
     pub fn new(graph: &AsyncGraph) -> Classifier {
         let mut map: HashMap<Class, BddParams> = HashMap::new();
         map.insert(Class::new_empty(), graph.unit_params().clone());
         return Classifier {
             graph,
-            classes: map
-        }
+            classes: map,
+        };
+    }
+
+    pub fn export_result(self) -> HashMap<Class, BddParams> {
+        return self.classes;
     }
 
     pub fn add_component(&mut self, component: StateSet) {
         // first, remove all sink states
         let component_without_sinks = StateSet::new_with_fun(component.capacity(), |s| {
             if let Some(in_component) = component.get(s) {
-                let has_next = self.graph.fwd().step(s)
+                let has_next = self
+                    .graph
+                    .fwd()
+                    .step(s)
                     .fold(self.graph.empty_params(), |a, (_, b)| a.union(&b));
                 let is_sink = in_component.minus(&has_next);
                 if !is_sink.is_empty() {
@@ -35,7 +41,8 @@ impl <'a> Classifier<'a> {
         let not_sink_params = component_without_sinks.fold_union();
         if let Some(not_sink_params) = not_sink_params {
             let pivots = find_pivots(&component_without_sinks);
-            let mut oscillator = Oscillator::new_with_pivots(pivots.clone(), self.graph.empty_params());
+            let mut oscillator =
+                Oscillator::new_with_pivots(pivots.clone(), self.graph.empty_params());
 
             let mut disorder = self.graph.empty_params();
             let mut params_to_match = not_sink_params.clone();
@@ -105,13 +112,11 @@ impl <'a> Classifier<'a> {
             println!("Class {:?}, cardinality: {}", c, p.cardinality());
         }
     }
-
 }
 
 struct Oscillator(Vec<StateSet>, BddParams);
 
 impl Oscillator {
-
     pub fn new_with_pivots(pivots: StateSet, empty: BddParams) -> Oscillator {
         return Oscillator(vec![pivots], empty);
     }
@@ -132,13 +137,14 @@ impl Oscillator {
             let mut class_wave_intersection = self.1.clone();
             for (s, class_p) in class.iter() {
                 if let Some(wave_p) = wave.get(s) {
-                    class_wave_intersection = class_wave_intersection.union(&class_p.intersect(wave_p));
+                    class_wave_intersection =
+                        class_wave_intersection.union(&class_p.intersect(wave_p));
                 }
             }
             let no_oscillation = already_found.intersect(&class_wave_intersection); // parameters which already have intersection
             not_oscillating = not_oscillating.union(&no_oscillation);
             already_found = already_found.union(&class_wave_intersection);
-            new_class = new_class.minus(&class_wave_intersection);         // remove discovered parameters
+            new_class = new_class.minus(&class_wave_intersection); // remove discovered parameters
             intersections.push(class_wave_intersection);
         }
 
@@ -165,5 +171,4 @@ impl Oscillator {
 
         return (not_oscillating, continue_params);
     }
-
 }
