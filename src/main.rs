@@ -125,7 +125,6 @@ fn get_info() -> BackendResponse {
 
 #[get("/get_result")]
 fn get_result() -> BackendResponse {
-
     let result = unsafe { SERVER_STATE.get_result() };
     if let None = result {
         return BackendResponse::new(&String::from("None"));
@@ -134,9 +133,7 @@ fn get_result() -> BackendResponse {
     let lines: Vec<String> = result
         .unwrap()
         .iter()
-        .map(|(c, p)| {
-            format!("{{\"sat_count\":{},\"phenotype\":{}}}", p.cardinality(), c)
-        })
+        .map(|(c, p)| format!("{{\"sat_count\":{},\"phenotype\":{}}}", p.cardinality(), c))
         .collect();
 
     println!("Result {:?}", lines);
@@ -174,7 +171,6 @@ fn sbml_to_aeon(data: String) -> BackendResponse {
 
 #[get("/set_model/<boolnet>")]
 fn set_model(boolnet: String) -> BackendResponse {
-
     println!("Boolnet: {}", boolnet);
     unsafe {
         if SERVER_STATE.is_busy() {
@@ -190,7 +186,7 @@ fn set_model(boolnet: String) -> BackendResponse {
                 Err(message) => {
                     println!("Set model result err: {}", message);
                     BackendResponse::new(&message)
-                },
+                }
             }
         }
     }
@@ -199,9 +195,9 @@ fn set_model(boolnet: String) -> BackendResponse {
 fn main() {
     test_main::run();
     /*rocket::ignite()
-        .mount(
-            "/",
-            routes![get_info, get_model, get_result, set_model, sbml_to_aeon],
-        )
-        .launch();*/
+    .mount(
+        "/",
+        routes![get_info, get_model, get_result, set_model, sbml_to_aeon],
+    )
+    .launch();*/
 }

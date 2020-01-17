@@ -1,9 +1,9 @@
 use super::StateSet;
+use crate::scc::CircularQueue;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Params};
 use biodivine_lib_std::IdState;
 use std::collections::HashSet;
-use crate::scc::CircularQueue;
 
 pub fn guarded_reach<G>(fwd: &G, initial: &StateSet, guard: &StateSet) -> StateSet
 where

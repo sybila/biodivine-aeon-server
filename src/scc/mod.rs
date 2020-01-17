@@ -1,9 +1,10 @@
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::bdd_params::BddParams;
-use std::collections::HashMap;
 use biodivine_lib_std::IdState;
+use std::collections::HashMap;
 
 pub mod algo_components;
+mod algo_par_reach;
 mod algo_reach;
 mod impl_class;
 mod impl_classifier;
@@ -68,6 +69,6 @@ impl CircularQueue {
             }
         }
         // nothing found, so there is nothing in there
-        return None
+        return None;
     }
 }

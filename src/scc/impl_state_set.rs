@@ -64,18 +64,19 @@ impl StateSet {
         let value = self.get_mut(state);
         return if let Some(current) = value {
             let new = current.union(params);
-            if new.eq(current) { // we can abuse the fact that Bdd-s are canonical
+            if new.eq(current) {
+                // we can abuse the fact that Bdd-s are canonical
                 false
             } else {
                 *value = Some(new);
                 true
             }
-            /*if params.is_subset(current) {
-                false
-            } else {
-                *value = Some(current.union(params));
-                true
-            }*/
+        /*if params.is_subset(current) {
+            false
+        } else {
+            *value = Some(current.union(params));
+            true
+        }*/
         } else {
             *value = Some(params.clone());
             true

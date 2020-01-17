@@ -1,7 +1,7 @@
 use crate::scc::algo_components::components;
 use crate::scc::Classifier;
-use biodivine_lib_param_bn::BooleanNetwork;
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
+use biodivine_lib_param_bn::BooleanNetwork;
 use std::convert::TryFrom;
 
 pub fn run() {
@@ -19,38 +19,39 @@ pub fn run() {
     ").unwrap();*/
 
     /*let model = BooleanNetwork::try_from(
-        "
-    SSF -> SWI5
+            "
+        SSF -> SWI5
 
-    SSF -> ACE2
+        SSF -> ACE2
 
-    SBF -> SSF
-    HCM1 -> SSF
+        SBF -> SSF
+        HCM1 -> SSF
 
-    MBF -> YHP1
-    SBF -> YHP1
+        MBF -> YHP1
+        SBF -> YHP1
 
-    MBF -> HCM1
-    SBF -> HCM1
+        MBF -> HCM1
+        SBF -> HCM1
 
-    MBF -> YOX1
-    SBF -> YOX1
+        MBF -> YOX1
+        SBF -> YOX1
 
-    CLN3 -> SBF
-    MBF -> SBF
-    YHP1 -| SBF
-    YOX1 -| SBF
+        CLN3 -> SBF
+        MBF -> SBF
+        YHP1 -| SBF
+        YOX1 -| SBF
 
-    CLN3 -> MBF
+        CLN3 -> MBF
 
-    ACE2 -> CLN3
-    YHP1 -| CLN3
-    SWI5 -> CLN3
-    YOX1 -| CLN3
-",
-    )
-    .unwrap();*/
-    let model = BooleanNetwork::try_from("\
+        ACE2 -> CLN3
+        YHP1 -| CLN3
+        SWI5 -> CLN3
+        YOX1 -| CLN3
+    ",
+        )
+        .unwrap();*/
+    let model = BooleanNetwork::try_from(
+        "\
         start -> SK
 
         Cdc2 -| Ste9
@@ -86,7 +87,9 @@ pub fn run() {
         Ste9 -| Cdc2A
         Rum1 -| Cdc2A
         Slp1 -| Cdc2A
-    ").unwrap();
+    ",
+    )
+    .unwrap();
 
     println!("Model: {}", model);
 
