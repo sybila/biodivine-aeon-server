@@ -1,5 +1,5 @@
 use super::{Behaviour, Class, Classifier, StateSet};
-use crate::scc::algo_components::find_pivots;
+use crate::scc::algo_components::{find_pivots, find_pivots_basic};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
@@ -40,7 +40,7 @@ impl<'a> Classifier<'a> {
 
         let not_sink_params = component_without_sinks.fold_union();
         if let Some(not_sink_params) = not_sink_params {
-            let pivots = find_pivots(&component_without_sinks);
+            let pivots = find_pivots_basic(&component_without_sinks);
             let mut oscillator =
                 Oscillator::new_with_pivots(pivots.clone(), self.graph.empty_params());
 

@@ -160,7 +160,7 @@ fn get_model() -> BackendResponse {
     }
 }
 
-#[post("/sbml_to_aeon", data = "<data>")]
+/*#[post("/sbml_to_aeon", data = "<data>")]
 fn sbml_to_aeon(data: String) -> BackendResponse {
     println!("data was {}", data);
 
@@ -170,7 +170,7 @@ fn sbml_to_aeon(data: String) -> BackendResponse {
         _ => BackendResponse::new(&String::from("None")),
     }*/
     BackendResponse::new(&String::from("None"))
-}
+}*/
 
 #[get("/set_model/<boolnet>")]
 fn set_model(boolnet: String) -> BackendResponse {
@@ -197,11 +197,11 @@ fn set_model(boolnet: String) -> BackendResponse {
 }
 
 fn main() {
-    //test_main::run();
-    rocket::ignite()
+    test_main::run();
+    /*rocket::ignite()
         .mount(
             "/",
             routes![get_info, get_model, get_result, set_model, sbml_to_aeon],
         )
-        .launch();
+        .launch();*/
 }

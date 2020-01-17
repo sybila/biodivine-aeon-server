@@ -18,7 +18,7 @@ pub fn run() {
         DNA -| M2N
     ").unwrap();*/
 
-    let model = BooleanNetwork::try_from(
+    /*let model = BooleanNetwork::try_from(
         "
     SSF -> SWI5
 
@@ -49,7 +49,46 @@ pub fn run() {
     YOX1 -| CLN3
 ",
     )
-    .unwrap();
+    .unwrap();*/
+    let model = BooleanNetwork::try_from("\
+        start -> SK
+
+        Cdc2 -| Ste9
+        PP -> Ste9
+        SK -| Ste9
+        Ste9 -> Ste9
+        Cdc2A -| Ste9
+
+        Cdc2 -| Rum1
+        PP -> Rum1
+        SK -| Rum1
+        Rum1 -> Rum1
+        Cdc2A -| Rum1
+
+        Ste9 -| Cdc2
+        Rum1 -| Cdc2
+        Slp1 -| Cdc2
+
+        Cdc2 -> Cdc25
+        Cdc25 -> Cdc25
+        PP -| Cdc25
+
+        Slp1 -> PP
+
+        Cdc2A -> Slp1
+
+        Cdc2 -| Wee1
+        PP -> Wee1
+        Wee1 -> Wee1
+
+        Cdc25 -> Cdc2A
+        Wee1 -| Cdc2A
+        Ste9 -| Cdc2A
+        Rum1 -| Cdc2A
+        Slp1 -| Cdc2A
+    ").unwrap();
+
+    println!("Model: {}", model);
 
     for id in model.graph().variable_ids() {
         println!("Var: {}", model.graph().get_variable(id));

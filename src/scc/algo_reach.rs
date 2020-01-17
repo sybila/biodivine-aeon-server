@@ -3,21 +3,23 @@ use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Params};
 use biodivine_lib_std::IdState;
 use std::collections::HashSet;
+use crate::scc::CircularQueue;
 
 pub fn guarded_reach<G>(fwd: &G, initial: &StateSet, guard: &StateSet) -> StateSet
 where
     G: EvolutionOperator<State = IdState, Params = BddParams>,
 {
     let mut result = initial.clone();
-    let mut queue: HashSet<IdState> = HashSet::new();
+    let mut queue = CircularQueue::new(initial.capacity());
 
     // add initial states
     result.iter().for_each(|(s, _)| {
         queue.insert(s);
     });
 
-    while let Some(s) = queue.iter().next().map(|s| *s) {
-        queue.remove(&s);
+    let mut iter = 0;
+    while let Some(s) = queue.dequeue() {
+        iter += 1;
         for (t, edge) in fwd.step(s) {
             if let Some(current) = result.get(s) {
                 if let Some(guard) = guard.get(t) {
@@ -30,6 +32,8 @@ where
         }
     }
 
+    println!("Iters: {}", iter);
+
     return result;
 }
 
@@ -38,14 +42,15 @@ where
     G: EvolutionOperator<State = IdState, Params = BddParams>,
 {
     let mut result = initial.clone();
-    let mut queue: HashSet<IdState> = HashSet::new();
+    let mut queue = CircularQueue::new(initial.capacity());
 
     result.iter().for_each(|(s, _)| {
         queue.insert(s);
     });
 
-    while let Some(s) = queue.iter().next().map(|s| *s) {
-        queue.remove(&s);
+    let mut iter = 0;
+    while let Some(s) = queue.dequeue() {
+        iter += 1;
         for (t, edge) in fwd.step(s) {
             if let Some(current) = result.get(s) {
                 let to_add = current.intersect(&edge);
@@ -55,6 +60,7 @@ where
             }
         }
     }
+    println!("Iters: {}", iter);
 
     return result;
 }

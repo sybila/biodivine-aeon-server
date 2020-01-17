@@ -1,6 +1,7 @@
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use std::collections::HashMap;
+use biodivine_lib_std::IdState;
 
 pub mod algo_components;
 mod algo_reach;
@@ -30,4 +31,43 @@ pub struct Class(Vec<Behaviour>);
 pub struct Classifier<'a> {
     graph: &'a AsyncGraph,
     classes: HashMap<Class, BddParams>,
+}
+
+pub struct CircularQueue(Vec<bool>, usize);
+
+impl CircularQueue {
+    pub fn new(capacity: usize) -> CircularQueue {
+        return CircularQueue(vec![false; capacity], 0);
+    }
+    pub fn insert(&mut self, state: IdState) {
+        let index: usize = state.into();
+        self.0[index] = true;
+    }
+    pub fn dequeue(&mut self) -> Option<IdState> {
+        // try to finish current run
+        while self.1 < self.0.len() {
+            if self.0[self.1] {
+                let result = IdState::from(self.1);
+                self.0[self.1] = false;
+                self.1 += 1;
+                return Some(result);
+            } else {
+                self.1 += 1;
+            }
+        }
+        // nothing found, restart once
+        self.1 = 0;
+        while self.1 < self.0.len() {
+            if self.0[self.1] {
+                let result = IdState::from(self.1);
+                self.0[self.1] = false;
+                self.1 += 1;
+                return Some(result);
+            } else {
+                self.1 += 1;
+            }
+        }
+        // nothing found, so there is nothing in there
+        return None
+    }
 }
