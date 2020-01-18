@@ -18,7 +18,7 @@ pub fn run() {
         DNA -| M2N
     ").unwrap();*/
 
-    /*let model = BooleanNetwork::try_from(
+    let model = BooleanNetwork::try_from(
             "
         SSF -> SWI5
 
@@ -49,8 +49,8 @@ pub fn run() {
         YOX1 -| CLN3
     ",
         )
-        .unwrap();*/
-    let model = BooleanNetwork::try_from(
+        .unwrap();
+    /*let model = BooleanNetwork::try_from(
         "\
         start -> SK
 
@@ -89,7 +89,7 @@ pub fn run() {
         Slp1 -| Cdc2A
     ",
     )
-    .unwrap();
+    .unwrap();*/
 
     println!("Model: {}", model);
 
