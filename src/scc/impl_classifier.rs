@@ -1,5 +1,5 @@
 use super::{Behaviour, Class, Classifier, StateSet};
-use crate::scc::algo_components::{find_pivots, find_pivots_basic};
+use crate::scc::algo_components::find_pivots_basic;
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};

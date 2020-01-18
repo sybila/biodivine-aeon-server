@@ -19,7 +19,7 @@ pub fn run() {
     ").unwrap();*/
 
     let model = BooleanNetwork::try_from(
-            "
+        "
         SSF -> SWI5
 
         SSF -> ACE2
@@ -48,8 +48,8 @@ pub fn run() {
         SWI5 -> CLN3
         YOX1 -| CLN3
     ",
-        )
-        .unwrap();
+    )
+    .unwrap();
     /*let model = BooleanNetwork::try_from(
         "\
         start -> SK

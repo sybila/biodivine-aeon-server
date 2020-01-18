@@ -1,10 +1,10 @@
 use super::StateSet;
+use crate::scc::algo_par_reach::guarded_reach;
 use biodivine_lib_param_bn::async_graph::{AsyncGraph, FwdIterator};
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
 use biodivine_lib_std::IdState;
 use std::option::Option::Some;
-use crate::scc::algo_par_reach::{guarded_reach, guarded_reach_fwd, guarded_reach_bwd};
 
 pub fn components<F>(graph: &AsyncGraph, mut on_component: F)
 where
@@ -25,7 +25,7 @@ where
             sinks.put(s, is_sink);
         }
     }
-    let can_reach_sink = guarded_reach_bwd(graph, &sinks, &initial);
+    let can_reach_sink = guarded_reach(&bwd, &sinks, &initial);
     on_component(sinks); // notify about the sinks we have found
     let initial = StateSet::new_with_fun(num_states, |i| {
         if let Some(sink) = can_reach_sink.get(i) {
@@ -50,8 +50,8 @@ where
         );
         let pivots = find_pivots(graph, &universe);
         println!("Pivots state count: {}", pivots.iter().count());
-        let forward = guarded_reach_fwd(graph, &pivots, &universe);
-        let component_with_pivots = guarded_reach_bwd(graph, &pivots, &forward);
+        let forward = guarded_reach(&fwd, &pivots, &universe);
+        let component_with_pivots = guarded_reach(&bwd, &pivots, &forward);
         let reachable_terminals = forward.minus(&component_with_pivots);
 
         let leaves_current = reachable_terminals
@@ -68,7 +68,7 @@ where
             on_component(terminal);
         }
 
-        let basins_of_reachable_terminals = guarded_reach_bwd(graph, &forward, &universe);
+        let basins_of_reachable_terminals = guarded_reach(&bwd, &forward, &universe);
         let empty = graph.empty_params();
         let unreachable_terminals = StateSet::new_with_fun(num_states, |s| {
             let in_basin = basins_of_reachable_terminals.get(s).unwrap_or(&empty);
@@ -131,7 +131,7 @@ pub fn find_dfs_pivot(graph: &AsyncGraph, universe: &StateSet, remaining: &BddPa
     let init = universe
         .iter()
         .map(|(s, p)| (s, p.intersect(remaining)))
-        .filter(|(s, p)| !p.is_empty())
+        .filter(|(_, p)| !p.is_empty())
         .next()
         .unwrap(); // something must be found, otherwise someone messed up really bad
     let fwd = graph.fwd();
