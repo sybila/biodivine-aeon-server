@@ -15,7 +15,7 @@ where
     let bwd = graph.bwd();
     // TODO: There is a bug if we are not detecting sinks, but maybe its in classifier...
     let initial = StateSet::new_with_fun(num_states, |_| Some(graph.unit_params().clone()));
-    let mut sinks = StateSet::new(num_states);
+    /*let mut sinks = StateSet::new(num_states);
     for s in graph.states() {
         let has_next = fwd
             .step(s)
@@ -33,7 +33,7 @@ where
         } else {
             Some(graph.unit_params().clone())
         }
-    });
+    });*/
 
     if initial.iter().next() == None {
         return;

@@ -4,6 +4,8 @@ use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
 use std::collections::HashMap;
+use rayon::prelude::*;
+use biodivine_lib_std::IdState;
 
 impl<'a> Classifier<'a> {
     pub fn new(graph: &AsyncGraph) -> Classifier {
@@ -21,26 +23,12 @@ impl<'a> Classifier<'a> {
 
     pub fn add_component(&mut self, component: StateSet) {
         // first, remove all sink states
-        let component_without_sinks = StateSet::new_with_fun(component.capacity(), |s| {
-            if let Some(in_component) = component.get(s) {
-                let has_next = self
-                    .graph
-                    .fwd()
-                    .step(s)
-                    .fold(self.graph.empty_params(), |a, (_, b)| a.union(&b));
-                let is_sink = in_component.minus(&has_next);
-                if !is_sink.is_empty() {
-                    self.push(Behaviour::Stability, &is_sink);
-                }
-                Some(has_next.intersect(in_component))
-            } else {
-                None
-            }
-        });
+        let capacity = component.capacity();
+        let without_sinks = self.filter_sinks(component);
 
-        let not_sink_params = component_without_sinks.fold_union();
+        let not_sink_params = without_sinks.fold_union();
         if let Some(not_sink_params) = not_sink_params {
-            let pivots = find_pivots_basic(&component_without_sinks);
+            let pivots = find_pivots_basic(&without_sinks);
             let mut oscillator =
                 Oscillator::new_with_pivots(pivots.clone(), self.graph.empty_params());
 
@@ -50,7 +38,7 @@ impl<'a> Classifier<'a> {
 
             while !params_to_match.is_empty() {
                 let fwd = self.graph.fwd();
-                let mut reachable = StateSet::new(component.capacity());
+                let mut reachable = StateSet::new(capacity);
                 for (s, current_s) in current_level.iter() {
                     for (t, edge) in fwd.step(s) {
                         let target = current_s.intersect(&edge).intersect(&params_to_match);
@@ -67,16 +55,16 @@ impl<'a> Classifier<'a> {
             let oscillates = not_sink_params.minus(&disorder);
 
             if !disorder.is_empty() {
-                self.push(Behaviour::Disorder, &disorder);
+                self.push(Behaviour::Disorder, disorder);
             }
 
             if !oscillates.is_empty() {
-                self.push(Behaviour::Oscillation, &oscillates);
+                self.push(Behaviour::Oscillation, oscillates);
             }
         }
     }
 
-    fn push(&mut self, class: Behaviour, params: &BddParams) {
+    fn push(&mut self, class: Behaviour, params: BddParams) {
         let mut original_classes: Vec<Class> = self.classes.keys().map(|c| c.clone()).collect();
         original_classes.sort();
         original_classes.reverse(); // we need classes from largest to smallest
@@ -111,6 +99,40 @@ impl<'a> Classifier<'a> {
         for (c, p) in &self.classes {
             println!("Class {:?}, cardinality: {}", c, p.cardinality());
         }
+    }
+
+    /// Remove all sink states from the given component (and push them into the classifier)
+    fn filter_sinks(&mut self, component: StateSet) -> StateSet {
+        let fwd = self.graph.fwd();
+        let mut result = component.clone();
+        let data: Vec<(IdState, BddParams)> = component.into_iter().collect();
+        let processed: Vec<(IdState, BddParams, BddParams)> = data.par_iter()
+            .filter_map(|(s, p): &(IdState, BddParams)| {
+                let has_successor = fwd
+                    .step(*s)
+                    .fold(self.graph.empty_params(), |a, (_, b)| {
+                        a.union(&b)
+                    });
+                let is_sink = p.minus(&has_successor);
+                if is_sink.is_empty() {
+                    None
+                } else {
+                    let remaining = p.intersect(&has_successor);
+                    Some((*s, is_sink, remaining))
+                }
+            })
+            .collect();
+
+        for (state, is_sink, remaining) in processed {
+            self.push(Behaviour::Stability, is_sink);
+            if remaining.is_empty() {
+                result.clear_key(state);
+            } else {
+                result.put(state, remaining);
+            }
+        }
+
+        return result;
     }
 }
 

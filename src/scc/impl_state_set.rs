@@ -2,6 +2,7 @@ use super::{StateSet, StateSetIterator};
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::Params;
 use biodivine_lib_std::IdState;
+use crate::scc::StateSetIntoIterator;
 
 impl StateSet {
     pub fn new(capacity: usize) -> StateSet {
@@ -144,6 +145,10 @@ impl StateSet {
         return StateSetIterator { set: self, next: 0 };
     }
 
+    pub fn into_iter(self) -> StateSetIntoIterator {
+        return StateSetIntoIterator { set: self.0.into_iter(), next: 0 };
+    }
+
     pub fn fold_union(&self) -> Option<BddParams> {
         return self.iter().fold(None, |a, (_, b)| {
             if let Some(a) = a {
@@ -152,5 +157,12 @@ impl StateSet {
                 Some(b.clone())
             }
         });
+    }
+
+    pub(crate) fn cardinalities(&self) -> Vec<(usize, f64)> {
+        return self
+            .iter()
+            .map(|(s, p)| (s.into(), p.cardinality()))
+            .collect();
     }
 }
