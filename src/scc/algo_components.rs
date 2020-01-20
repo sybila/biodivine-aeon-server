@@ -26,6 +26,7 @@ where
         }
     }
     let can_reach_sink = guarded_reach(&bwd, &sinks, &initial);
+    // This is not correct - on_component is called with individual components - sinks are multiple different components.
     on_component(sinks); // notify about the sinks we have found
     let initial = StateSet::new_with_fun(num_states, |i| {
         if let Some(sink) = can_reach_sink.get(i) {

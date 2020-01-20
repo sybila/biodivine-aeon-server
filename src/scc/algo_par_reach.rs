@@ -5,6 +5,68 @@ use biodivine_lib_std::IdState;
 use rayon::prelude::*;
 use std::collections::HashSet;
 
+fn all_possible_successors<F>(fwd: &F, set: &HashSet<IdState>) -> HashSet<IdState> where
+    F: EvolutionOperator<State = IdState, Params = BddParams> + Send + Sync
+{
+    return set.par_iter()
+        .flat_map(|s| fwd.step(*s).map(|(t, _)| t).collect::<Vec<_>>())
+        .collect();
+}
+
+trait FoldUnion {
+    fn fold_union(self) -> Option<BddParams>;
+}
+
+impl<I> FoldUnion for I where I: Iterator<Item=Option<BddParams>> {
+    fn fold_union(self) -> Option<BddParams> {
+        return self.fold(None, |a, b| match (a, b) {
+            (Some(a), Some(b)) => Some(a.union(&b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        });
+    }
+}
+
+pub fn next_step<F, B>(fwd: &F, initial: &StateSet) -> StateSet where
+    F: InvertibleEvolutionOperator<State = IdState, Params = BddParams, InvertedOperator = B> + Send + Sync,
+    B: EvolutionOperator<State = IdState, Params = BddParams> + Send + Sync
+{
+    let bwd = fwd.invert();
+    let items: Vec<(IdState, &BddParams)> = initial.iter().collect();
+    let initial_states: HashSet<IdState> = items.iter().map(|(s, _)| *s).collect();
+    let recompute: HashSet<IdState> = all_possible_successors(fwd, &initial_states);
+
+    let result_items: Vec<(IdState, BddParams)> = recompute
+        .par_iter()
+        .filter_map(|t| {
+            let add_to_t: Option<BddParams> = bwd
+                .step(*t)
+                .map(|(s, edge)| {
+                    if let Some(initial_s) = initial.get(s) {
+                        let s_to_t = initial_s.intersect(&edge);
+                        if !s_to_t.is_empty() {
+                            Some(s_to_t)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .fold_union();
+            add_to_t.map(|p| (*t, p))
+        })
+        .collect();
+
+    let mut result = StateSet::new(initial.capacity());
+    for (s, p) in result_items {
+        result.put(s, p);
+    }
+
+    return result;
+}
+
 pub fn guarded_reach<F, B>(fwd: &F, initial: &StateSet, guard: &StateSet) -> StateSet
 where
     F: InvertibleEvolutionOperator<State = IdState, Params = BddParams, InvertedOperator = B>
@@ -25,10 +87,7 @@ where
         println!("Wave size: {}", changed.len());
 
         // All successors of changed states
-        let recompute: HashSet<IdState> = changed
-            .par_iter()
-            .flat_map(|s| fwd.step(*s).map(|(t, _)| t).collect::<Vec<_>>())
-            .collect();
+        let recompute: HashSet<IdState> = all_possible_successors(fwd, &changed);
 
         let update: Vec<(IdState, BddParams)> = recompute
             .par_iter()
@@ -45,7 +104,7 @@ where
                                     if !s_adds_to_t.is_empty() {
                                         Some(s_adds_to_t)
                                     } else {
-                                        // empy sets are pointless
+                                        // empty sets are pointless
                                         None
                                     }
                                 } else {
@@ -57,12 +116,7 @@ where
                                 None
                             }
                         })
-                        .fold(None, |a, b| match (a, b) {
-                            (Some(a), Some(b)) => Some(a.union(&b)),
-                            (Some(a), None) => Some(a),
-                            (None, Some(b)) => Some(b),
-                            (None, None) => None,
-                        });
+                        .fold_union();
                     let current_t = result_set.get(*t);
                     let add_to_t = if let Some(current_t) = current_t {
                         // if there already is something in t, we have to check if we are adding something new

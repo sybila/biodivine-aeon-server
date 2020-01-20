@@ -10,6 +10,14 @@ impl Class {
         self.0.push(behaviour);
         self.0.sort();
     }
+
+    pub fn clone_extended(&self, behaviour: Behaviour) -> Class {
+        let mut vec = self.0.clone();
+        vec.push(behaviour);
+        vec.sort();
+        return Class(vec);
+    }
+
 }
 
 impl Display for Class {

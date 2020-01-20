@@ -3,6 +3,7 @@ use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::Params;
 use biodivine_lib_std::IdState;
 use crate::scc::StateSetIntoIterator;
+use rayon::prelude::*;
 
 impl StateSet {
     pub fn new(capacity: usize) -> StateSet {
@@ -53,7 +54,11 @@ impl StateSet {
 
     pub fn put(&mut self, state: IdState, params: BddParams) {
         let index: usize = state.into();
-        self.0[index] = Some(params);
+        if params.is_empty() {
+            self.0[index] = None;
+        } else {
+            self.0[index] = Some(params);
+        }
     }
 
     pub fn clear_key(&mut self, state: IdState) {
@@ -91,7 +96,7 @@ impl StateSet {
         }
     }
 
-    pub fn subtract_key(&mut self, state: IdState, params: &BddParams) {
+    pub fn minus_key(&mut self, state: IdState, params: &BddParams) {
         if let Some(current) = self.get(state) {
             let result = current.minus(params);
             if result.is_empty() {
@@ -104,7 +109,14 @@ impl StateSet {
 
     pub fn intersect(&self, other: &Self) -> Self {
         return self.element_binary_op(other, |a, b| match (a, b) {
-            (Some(a), Some(b)) => Some(a.intersect(b)),
+            (Some(a), Some(b)) => {
+                let result = a.intersect(b);
+                if result.is_empty() {
+                    None
+                } else {
+                    Some(result)
+                }
+            },
             _ => None,
         });
     }
@@ -120,7 +132,14 @@ impl StateSet {
 
     pub fn minus(&self, other: &Self) -> Self {
         return self.element_binary_op(other, |a, b| match (a, b) {
-            (Some(a), Some(b)) => Some(a.minus(b)),
+            (Some(a), Some(b)) => {
+                let result = a.minus(b);
+                if result.is_empty() {
+                    None
+                } else {
+                    Some(result)
+                }
+            },
             (Some(a), _) => Some(a.clone()),
             _ => None,
         });
@@ -147,6 +166,32 @@ impl StateSet {
 
     pub fn into_iter(self) -> StateSetIntoIterator {
         return StateSetIntoIterator { set: self.0.into_iter(), next: 0 };
+    }
+
+    pub fn minus_in_place(&mut self, other: &Self) {
+        for i in 0..self.0.len() {
+            if let Some(other) = &other.0[i] {
+                let current = &mut self.0[i];
+                if let Some(current) = current.as_mut() {
+                    let new = current.minus(other);
+                    *current = new;
+                }
+            }   // else its none, dont minus anything
+        }
+    }
+
+    /// Intersect all values in this state set with the given params (in parallel).
+    pub fn par_restrict_to_params(&mut self, params: &BddParams) {
+        self.0.par_iter_mut().for_each(|value: &mut Option<BddParams>| {
+            if value.is_some() {
+                let new_params = params.intersect(value.as_ref().unwrap());
+                if new_params.is_empty() {
+                    *value = None;
+                } else {
+                    *value = Some(new_params);
+                }
+            }
+        });
     }
 
     pub fn fold_union(&self) -> Option<BddParams> {
