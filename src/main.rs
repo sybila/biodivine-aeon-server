@@ -2,29 +2,37 @@
 #[macro_use]
 extern crate rocket;
 
+#[macro_use]
+extern crate lazy_static;
+
 use rocket::http::hyper::header::AccessControlAllowOrigin;
 use rocket::http::ContentType;
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
-use crate::scc::{Class, Classifier};
+use crate::scc::{Class, Classifier, Behaviour};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use scc::algo_components::components;
 use std::convert::TryFrom;
 
-mod scc;
+pub mod scc;
 mod test_main;
 
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use std::collections::HashMap;
+use std::sync::{Mutex, Arc};
 
-static mut SERVER_STATE: ServerState = ServerState::new();
+lazy_static! {
+    static ref SERVER_STATE: Mutex<ServerState> = Mutex::new(ServerState::new());
+}
+
+//static mut SERVER_STATE: ServerState = ServerState::new();
 
 struct ServerState {
-    is_busy: bool,
-    model: Option<BooleanNetwork>,
-    result: Option<HashMap<Class, BddParams>>,
+    is_busy: bool,  // true = computation is in progress
+    model: Option<BooleanNetwork>,  // Some(..) = model is set
+    result: Option<Arc<(AsyncGraph, Classifier)>>,     // Some(..) = computation is in progress or done (if is_busy = false)
 }
 
 impl ServerState {
@@ -36,50 +44,91 @@ impl ServerState {
         }
     }
 
+    /// Check if computation is running in some thread.
     pub fn is_busy(&self) -> bool {
         self.is_busy
     }
 
-    pub fn set_model(&mut self, model: &BooleanNetwork) {
-        self.model = Some(model.clone());
-        self.result = None;
-    }
-
-    pub fn get_result(&mut self) -> Option<&HashMap<Class, BddParams>> {
-        if let None = self.result {
-            self.compute()
+    /// Update model
+    pub fn set_model(&mut self, model: &str) -> Result<(), String> {
+        if self.is_busy {
+            // If we are computing, we can't delete classifier because somebody is using it
+            return Err("Computation in progress".to_string());
+        } else {
+            let bn = BooleanNetwork::try_from(model)?;
+            self.model = Some(bn);
+            self.result = None;
+            return Ok(());
         }
-
-        self.result.as_ref()
     }
 
-    pub fn get_model(&self) -> Option<&BooleanNetwork> {
-        self.model.as_ref()
+    pub fn get_result(&self) -> Option<HashMap<Class, BddParams>> {
+        return self.result.as_ref().map(|c| c.1.export_result());
+    }
+
+    pub fn get_model(&self) -> Option<BooleanNetwork> {
+        return self.model.as_ref().map(|m| m.clone());
     }
 
     fn set_busy(&mut self, new: bool) {
         self.is_busy = new;
     }
 
-    fn compute(&mut self) {
-        if let None = self.model {
-            return;
+    /// Start computation in a background thread, assuming it is not already running.
+    pub fn start_compute(&mut self) -> Result<(), String> {
+        if self.is_busy {
+            return Err("Computation in progress.".to_string());
         }
+        return if let Some(model) = &self.model {
+            self.is_busy = true;
+            match AsyncGraph::new(model.clone()) {
+                Ok(graph) => {
+                    let classifier = Classifier::new(&graph);
+                    self.result = Some(Arc::new((graph, classifier)));
 
-        self.set_busy(true);
-        let model = self.model.as_ref().unwrap().clone();
-        let graph = AsyncGraph::new(model).unwrap(); // TODO
-
-        let mut classifier = Classifier::new(&graph);
-        components(&graph, |component| {
-            let size = component.iter().count();
-            println!("Component {}", size);
-            classifier.add_component(component);
-        });
-
-        self.result = Some(classifier.export_result());
-        self.set_busy(false);
+                    let ctx = self.result.as_ref().unwrap().clone();
+                    std::thread::spawn(move || {
+                        components(&ctx.0, |component| {
+                            let size = component.iter().count();
+                            println!("Component {}", size);
+                            ctx.1.add_component(component, &ctx.0);
+                        });
+                        SERVER_STATE.lock().unwrap().is_busy = false;   // mark as done
+                    });
+                }
+                Err(message) => {
+                    self.is_busy = false;
+                    return Err(message)
+                }
+            }
+            Ok(())
+        } else {
+            Err("No model set.".to_string())
+        }
     }
+
+    pub fn make_witness(&mut self, class: &Class) -> Result<BooleanNetwork, String> {
+        if self.is_busy {
+            return Err("Computation in progress.".to_string());
+        }
+        let result = self.result.as_ref();
+        if let Some(result) = result {
+            let result_data = self.get_result();
+            if let Some(result_data) = result_data {
+                if let Some(result_params) = result_data.get(class) {
+                    let witness = result.clone().0.make_witness(result_params);
+                    return Ok(witness);
+                } else {
+                    return Err(format!("No witnesses for class {}", class))
+                }
+            } else {
+                return Err("Results not available. Cannot make witness.".to_string())
+            }
+        } else {
+            return Err("Results not available. Cannot make witness.".to_string())
+        }
+    }
+
 }
 
 struct BackendResponse {
@@ -87,10 +136,12 @@ struct BackendResponse {
 }
 
 impl BackendResponse {
-    fn new(message: &String) -> Self {
-        BackendResponse {
-            message: message.clone(),
-        }
+    fn ok(message: &String) -> Self {
+        return BackendResponse { message: format!("{{ status: true, result: {} }}", message) };
+    }
+
+    fn err(message: &String) -> Self {
+        return BackendResponse { message: format!("{{ status: false, message: {} }}", message) };
     }
 }
 
@@ -109,51 +160,73 @@ impl<'r> Responder<'r> for BackendResponse {
 
 #[get("/get_info")]
 fn get_info() -> BackendResponse {
-    unsafe {
-        let (ru, mo, re) = (
-            SERVER_STATE.is_busy,
-            SERVER_STATE.model.is_some(),
-            SERVER_STATE.result.is_some(),
-        );
+    let state = SERVER_STATE.lock().unwrap();
+    let (ru, mo, re) = (
+        state.is_busy,
+        state.model.is_some(),
+        state.result.is_some(),
+    );
 
-        BackendResponse::new(&format!(
-            "{{\"busy\": {}, \"has_model\": {}, \"has_result\": {}}}",
-            ru, mo, re
-        ))
-    }
+    BackendResponse::ok(&format!(
+        "{{\"busy\": {}, \"has_model\": {}, \"has_result\": {}}}",
+        ru, mo, re
+    ))
 }
 
 #[get("/get_result")]
 fn get_result() -> BackendResponse {
-    let result = unsafe { SERVER_STATE.get_result() };
-    if let None = result {
-        return BackendResponse::new(&String::from("None"));
+    let result = { SERVER_STATE.lock().unwrap().get_result() };
+    return if let Some(data) = result {
+        let lines: Vec<String> = data
+            .iter()
+            .map(|(c, p)| format!("{{\"sat_count\":{},\"phenotype\":{}}}", p.cardinality(), c))
+            .collect();
+
+        println!("Result {:?}", lines);
+
+        let mut json = String::new();
+        for index in 0..lines.len() - 1 {
+            json += &format!("{},", lines[index]);
+        }
+        json = format!("[{}{}]", json, lines.last().unwrap());
+
+        BackendResponse::ok(&json)
+    } else {
+        // (if the computation is running, we won't be able to start a new one)
+        let computation_started = { SERVER_STATE.lock().unwrap().start_compute() };
+        match computation_started {
+            Ok(()) => BackendResponse::err(&"Result not available. Computation started.".to_string()),
+            Err(message) => BackendResponse::err(&message),
+        }
     }
-
-    let lines: Vec<String> = result
-        .unwrap()
-        .iter()
-        .map(|(c, p)| format!("{{\"sat_count\":{},\"phenotype\":{}}}", p.cardinality(), c))
-        .collect();
-
-    println!("Result {:?}", lines);
-
-    let mut json = String::new();
-    for index in 0..lines.len() - 1 {
-        json += &format!("{},", lines[index]);
-    }
-    json = format!("{{\"result\":[{}{}]}}", json, lines.last().unwrap());
-
-    BackendResponse::new(&json)
 }
 
-#[get("/get_model")]
-fn get_model() -> BackendResponse {
-    unsafe {
-        BackendResponse::new(&match SERVER_STATE.get_model() {
-            None => String::from("None"),
-            Some(model) => model.to_string(),
-        })
+#[get("/get_model/<class_str>")]
+fn get_model(class_str: String) -> BackendResponse {
+    return if class_str.is_empty() {
+        let model = { SERVER_STATE.lock().unwrap().get_model() };
+        if let Some(model) = model {
+            BackendResponse::ok(&format!("\"{}\"", model))
+        } else {
+            BackendResponse::err(&"No model set.".to_string())
+        }
+    } else {
+        let mut class = Class::new_empty();
+        for char in class_str.chars() {
+            match char {
+                'D' => class.extend(Behaviour::Disorder),
+                'O' => class.extend(Behaviour::Oscillation),
+                'S' => class.extend(Behaviour::Stability),
+                _ => {
+                    return BackendResponse::err(&"Invalid class.".to_string())
+                }
+            }
+        }
+        let witness = { SERVER_STATE.lock().unwrap().make_witness(&class) };
+        match witness {
+            Ok(network) => BackendResponse::ok(&format!("\"{}\"", network)),
+            Err(message) => BackendResponse::err(&message),
+        }
     }
 }
 
@@ -171,33 +244,16 @@ fn sbml_to_aeon(data: String) -> BackendResponse {
 
 #[get("/set_model/<boolnet>")]
 fn set_model(boolnet: String) -> BackendResponse {
-    println!("Boolnet: {}", boolnet);
-    unsafe {
-        if SERVER_STATE.is_busy() {
-            BackendResponse::new(&"server is busy.".to_string())
-        } else {
-            let bn = BooleanNetwork::try_from(boolnet.as_str());
-            match bn {
-                Ok(bn) => {
-                    SERVER_STATE.set_model(&bn);
-                    println!("Set model result ok");
-                    BackendResponse::new(&"Ok".to_string())
-                }
-                Err(message) => {
-                    println!("Set model result err: {}", message);
-                    BackendResponse::new(&message)
-                }
-            }
-        }
-    }
+    let set_model_result = { SERVER_STATE.lock().unwrap().set_model(boolnet.as_str()) };
+    return match set_model_result {
+        Ok(()) => BackendResponse::ok(&"\"\"".to_string()),
+        Err(message) => BackendResponse::err(&message),
+    };
 }
 
 fn main() {
-    test_main::run();
-    /*rocket::ignite()
-    .mount(
-        "/",
-        routes![get_info, get_model, get_result, set_model, sbml_to_aeon],
-    )
-    .launch();*/
+    //test_main::run();
+    rocket::ignite()
+        .mount("/", routes![get_info, get_model, get_result, set_model])
+        .launch();
 }
