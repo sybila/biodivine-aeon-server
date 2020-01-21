@@ -1,0 +1,46 @@
+CycA -| CycE
+CycE -| CycE
+E2F -> CycE
+Rb -| CycE
+P27 -> CycE
+
+CycA -| P27
+CycD -| P27
+CycE -| P27
+CycB -| P27
+P27 -> P27
+
+CycA -> CycA
+Cdc20 -| CycA
+E2F -> CycA
+Rb -| CycA
+UbcH10 -| CycA
+Cdh1 -| CycA
+
+CycA -| E2F
+CycB -| E2F
+Rb -| E2F
+P27 -> E2F
+
+CycA -| Rb
+CycD -| Rb
+CycE -| Rb
+CycB -| Rb
+P27 -> Rb
+
+CycB -> Cdc20
+Cdh1 -| Cdc20
+
+CycA -| Cdh1
+Cdc20 -> Cdh1
+CycB -| Cdh1
+P27 -> Cdh1
+
+CycA -> UbcH10
+Cdc20 -> UbcH10
+CycB -> UbcH10
+UbcH10 -> UbcH10
+Cdh1 -| UbcH10
+
+Cdc20 -| CycB
+Cdh1 -| CycB

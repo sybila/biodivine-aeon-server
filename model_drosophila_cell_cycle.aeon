@@ -1,0 +1,52 @@
+Rb -| CycE
+E2F -> CycE
+Dap -| CycE
+Ago -| CycE
+
+CycE -> Dap
+Notch -| Dap
+
+CycD -| Rb
+Rux -> Rb
+CycA -| Rb
+CycE -| Rb
+CycB -| Rb
+
+Rb -| CycA
+Fzy -| CycA
+E2F -> CycA
+Fzr -| CycA
+
+Rb -| E2F
+Rux -> E2F
+CycA -| E2F
+CycB -| E2F
+
+Rux -> Rux
+CycA -| Rux
+CycB -| Rux
+CycD -| Rux
+CycE -| Rux
+
+Wee -| CycB
+Fzy -| CycB
+Fzr -| CycB
+Stg -> CycB
+
+Rb -| Stg
+Rux -| Stg
+E2F -> Stg
+Notch -| Stg
+CycB -> Stg
+
+Rux -> Wee
+CycB -| Wee
+
+Rux -> Fzr
+CycA -| Fzr
+CycE -| Fzr
+Notch -> Fzr
+CycB -| Fzr
+
+Rux -| Fzy
+CycB -> Fzy

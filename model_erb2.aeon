@@ -1,0 +1,67 @@
+CDK2 -> pRB1
+CDK4 -> pRB1
+CDK6 -> pRB1
+
+P27 -| CDK4
+P21 -| CDK4
+CyclinD1 -> CDK4
+
+CyclinD1 -> CDK6
+
+CyclinE1 -> CDK2
+P27 -| CDK2
+P21 -| CDK2
+
+MEK1 -> CyclinD1
+ERalpha -> CyclinD1
+MYC -> CyclinD1
+AKT1 -> CyclinD1
+
+CDK4 -| P27
+ERalpha -> P27
+MYC -| P27
+CDK2 -| P27
+AKT1 -| P27
+
+CDK4 -| P21
+ERalpha -> P21
+MYC -| P21
+AKT1 -| P21
+
+MYC -> CyclinE1
+
+MEK1 -> ERalpha
+AKT1 -> ERalpha
+
+MEK1 -> MYC
+ERalpha -> MYC
+AKT1 -> MYC
+
+ERBB2_3 -> AKT1
+ERBB1 -> AKT1
+IGF1R -> AKT1
+ERBB1_3 -> AKT1
+ERBB1_2 -> AKT1
+
+ERBB2_3 -> MEK1
+ERBB1 -> MEK1
+IGF1R -> MEK1
+ERBB1_3 -> MEK1
+ERBB1_2 -> MEK1
+
+ERBB2_3 -| IGF1R
+ERalpha -> IGF1R
+AKT1 -> IGF1R
+
+ERBB2 -> ERBB2_3
+ERBB3 -> ERBB2_3
+
+ERBB1 -> ERBB1_3
+ERBB3 -> ERBB1_3
+
+ERBB1 -> ERBB1_2
+ERBB2 -> ERBB1_2
+
+EGF -> ERBB1
+EGF -> ERBB2
+EGF -> ERBB3
