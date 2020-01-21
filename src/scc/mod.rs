@@ -1,4 +1,3 @@
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use std::collections::HashMap;
 use std::vec::IntoIter;
@@ -53,8 +52,8 @@ impl PartialOrd for Class {
     }
 }
 
-pub struct Classifier<'a> {
-    graph: &'a AsyncGraph,
+pub struct Classifier {
+    //graph: &'a AsyncGraph,
     classes: Mutex<HashMap<Class, BddParams>>
 }
 

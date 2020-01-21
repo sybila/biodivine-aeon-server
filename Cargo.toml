@@ -21,6 +21,7 @@ biodivine-lib-param-bn = { git = "https://github.com/sybila/biodivine-lib-param-
 rocket = "0.4.2"
 rayon = "1.3.0"
 crossbeam = "0.7.3"
+lazy_static = "1.4.0"
 
 [features]
 # With shields_up you enable explicit assertions of pre/post conditions and invariants in critical

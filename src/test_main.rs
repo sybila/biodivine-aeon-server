@@ -111,7 +111,7 @@ pub fn run() {
 
     println!("Unit BDD: {}", graph.unit_params().cardinality());
 
-    let mut classifier = Classifier::new(&graph);
+    let classifier = Classifier::new(&graph);
     components(&graph, |component| {
         let size = component.iter().count();
         println!("Component {}", size);
@@ -122,7 +122,7 @@ pub fn run() {
                 if p.is_empty() { None } else { Some(s) }
             }).collect::<Vec<_>>())
         }*/
-        classifier.add_component(component);
+        classifier.add_component(component, &graph);
     });
 
     classifier.print();

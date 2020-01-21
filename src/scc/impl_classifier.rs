@@ -8,40 +8,39 @@ use rayon::prelude::*;
 use biodivine_lib_std::IdState;
 use std::sync::Mutex;
 
-impl<'a> Classifier<'a> {
+impl Classifier {
     pub fn new(graph: &AsyncGraph) -> Classifier {
         let mut map: HashMap<Class, BddParams> = HashMap::new();
         map.insert(Class::new_empty(), graph.unit_params().clone());
         return Classifier {
-            graph,
             classes: Mutex::new(map),
         };
     }
 
-    pub fn export_result(self) -> HashMap<Class, BddParams> {
+    pub fn export_result(&self) -> HashMap<Class, BddParams> {
         let data = self.classes.lock().unwrap();
         return (*data).clone();
     }
 
-    pub fn add_component(&self, component: StateSet) {
+    pub fn add_component(&self, component: StateSet, graph: &AsyncGraph) {
         // first, remove all sink states
         let capacity = component.capacity();
-        let without_sinks = self.filter_sinks(component);
+        let without_sinks = self.filter_sinks(component, graph);
         //let (real_oscillation, real_disorder) = self.decide_oscillation_vs_disorder(without_sinks.clone());
 
         let not_sink_params = without_sinks.fold_union();
         if let Some(not_sink_params) = not_sink_params {
             let pivots = find_pivots_basic(&without_sinks);
             let mut oscillator =
-                Oscillator::new_with_pivots(pivots.clone(), self.graph.empty_params());
+                Oscillator::new_with_pivots(pivots.clone(), graph.empty_params());
 
-            let mut disorder = self.graph.empty_params();
+            let mut disorder = graph.empty_params();
             let mut params_to_match = not_sink_params.clone();
             let mut current_level = pivots;
 
             while !params_to_match.is_empty() {
                 //println!("Simulation step size: {:?} cardinality: {}, history: {}", current_level.iter().count(), current_level.fold_union().unwrap().cardinality(), oscillator.0.len());
-                let fwd = self.graph.fwd();
+                let fwd = graph.fwd();
                 let mut reachable = StateSet::new(capacity);
                 //println!("Current: {:?}", current_level.cardinalities());
                 for (s, current_s) in current_level.iter() {
@@ -76,7 +75,7 @@ impl<'a> Classifier<'a> {
 
             if !real_oscillation.is_subset(&oscillates) {
                 let new_oscillation = real_oscillation.minus(&oscillates);
-                let witness = self.graph.make_witness(&new_oscillation);
+                let witness = graph.make_witness(&new_oscillation);
                 println!("{}", witness);
                 panic!("Found oscillation which old marked as disorder");
             }*/
@@ -122,15 +121,15 @@ impl<'a> Classifier<'a> {
     }
 
     /// Remove all sink states from the given component (and push them into the classifier).
-    fn filter_sinks(&self, component: StateSet) -> StateSet {
-        let fwd = self.graph.fwd();
+    fn filter_sinks(&self, component: StateSet, graph: &AsyncGraph) -> StateSet {
+        let fwd = graph.fwd();
         let mut result = component.clone();
         let data: Vec<(IdState, BddParams)> = component.into_iter().collect();
         let processed: Vec<(IdState, BddParams, BddParams)> = data.par_iter()
             .filter_map(|(s, p): &(IdState, BddParams)| {
                 let has_successor = fwd
                     .step(*s)
-                    .fold(self.graph.empty_params(), |a, (_, b)| {
+                    .fold(graph.empty_params(), |a, (_, b)| {
                         a.union(&b)
                     });
                 let is_sink = p.minus(&has_successor);
