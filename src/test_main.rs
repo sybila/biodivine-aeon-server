@@ -11,6 +11,7 @@ pub fn run() {
 
     let model = BooleanNetwork::try_from(buffer.as_str()).unwrap();
     println!("Model: {}", model);
+    println!("Model vars: {}", model.graph().num_vars());
 
     let graph = AsyncGraph::new(model).unwrap();
 

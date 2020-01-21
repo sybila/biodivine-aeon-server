@@ -6,6 +6,7 @@ use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
 use biodivine_lib_std::IdState;
 use std::option::Option::Some;
 use crate::scc::ProgressTracker;
+use rayon::prelude::*;
 
 pub fn components<F>(graph: &AsyncGraph, on_component: F)
 where
@@ -16,20 +17,29 @@ where
         let fwd = graph.fwd();
         let bwd = graph.bwd();
         let initial = StateSet::new_with_fun(num_states, |_| Some(graph.unit_params().clone()));
+        let sink_pairs: Vec<(IdState, BddParams)> = graph.states().collect::<Vec<_>>()
+            .par_iter()
+            .filter_map(|s| {
+                let has_next = fwd
+                    .step(*s)
+                    .fold(graph.empty_params(), |a, (_, b)| a.union(&b));
+                let is_sink = graph.unit_params().minus(&has_next);
+                if !is_sink.is_empty() {
+                    let mut sink_set = StateSet::new(num_states);
+                    sink_set.put(*s, is_sink.clone());
+                    scope.spawn(|_| {
+                        on_component(sink_set);
+                    });
+                    Some((*s, is_sink))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         let mut sinks = StateSet::new(num_states);
-        for s in graph.states() {
-            let has_next = fwd
-                .step(s)
-                .fold(graph.empty_params(), |a, (_, b)| a.union(&b));
-            let is_sink = graph.unit_params().minus(&has_next);
-            if !is_sink.is_empty() {
-                sinks.put(s, is_sink.clone());
-                let mut sink_set = StateSet::new(num_states);
-                sink_set.put(s, is_sink);
-                scope.spawn(|_| {
-                    on_component(sink_set);
-                });
-            }
+        for (s, is_sink) in sink_pairs {
+            sinks.put(s, is_sink);
         }
         let can_reach_sink = guarded_reach(&bwd, &sinks, &initial);
         // This is not correct - on_component is called with individual components - sinks are multiple different components.
