@@ -12,6 +12,7 @@ mod impl_class;
 mod impl_classifier;
 mod impl_state_set;
 mod impl_state_set_iterator;
+mod impl_progress_tracker;
 
 #[derive(Clone, Debug)]
 pub struct StateSet(Vec<Option<BddParams>>);
@@ -55,4 +56,9 @@ impl PartialOrd for Class {
 pub struct Classifier<'a> {
     graph: &'a AsyncGraph,
     classes: Mutex<HashMap<Class, BddParams>>
+}
+
+pub struct ProgressTracker {
+    total: f64,
+    remaining: Mutex<f64>
 }

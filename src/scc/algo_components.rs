@@ -5,50 +5,59 @@ use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
 use biodivine_lib_std::IdState;
 use std::option::Option::Some;
+use crate::scc::ProgressTracker;
 
 pub fn components<F>(graph: &AsyncGraph, on_component: F)
 where
     F: Fn(StateSet) -> () + Send + Sync,
 {
-    let num_states = graph.states().count();
-    let fwd = graph.fwd();
-    let bwd = graph.bwd();
-    let initial = StateSet::new_with_fun(num_states, |_| Some(graph.unit_params().clone()));
-    /*let mut sinks = StateSet::new(num_states);
-    for s in graph.states() {
-        let has_next = fwd
-            .step(s)
-            .fold(graph.empty_params(), |a, (_, b)| a.union(&b));
-        let is_sink = graph.unit_params().minus(&has_next);
-        if !is_sink.is_empty() {
-            sinks.put(s, is_sink);
-        }
-    }
-    let can_reach_sink = guarded_reach(&bwd, &sinks, &initial);
-    // This is not correct - on_component is called with individual components - sinks are multiple different components.
-    on_component(sinks); // notify about the sinks we have found
-    let initial = StateSet::new_with_fun(num_states, |i| {
-        if let Some(sink) = can_reach_sink.get(i) {
-            Some(graph.unit_params().minus(sink))
-        } else {
-            Some(graph.unit_params().clone())
-        }
-    });*/
-
-    if initial.iter().next() == None {
-        return;
-    }
-
-    let mut queue: Vec<StateSet> = Vec::new();
-    queue.push(initial);
-
     crossbeam::thread::scope(|scope| {
-        while let Some(universe) = queue.pop() {
+        let num_states = graph.states().count();
+        let fwd = graph.fwd();
+        let bwd = graph.bwd();
+        let initial = StateSet::new_with_fun(num_states, |_| Some(graph.unit_params().clone()));
+        let mut sinks = StateSet::new(num_states);
+        for s in graph.states() {
+            let has_next = fwd
+                .step(s)
+                .fold(graph.empty_params(), |a, (_, b)| a.union(&b));
+            let is_sink = graph.unit_params().minus(&has_next);
+            if !is_sink.is_empty() {
+                sinks.put(s, is_sink.clone());
+                let mut sink_set = StateSet::new(num_states);
+                sink_set.put(s, is_sink);
+                scope.spawn(|_| {
+                    on_component(sink_set);
+                });
+            }
+        }
+        let can_reach_sink = guarded_reach(&bwd, &sinks, &initial);
+        // This is not correct - on_component is called with individual components - sinks are multiple different components.
+        //on_component(sinks); // notify about the sinks we have found
+        let initial = StateSet::new_with_fun(num_states, |i| {
+            if let Some(sink) = can_reach_sink.get(i) {
+                Some(graph.unit_params().minus(sink))
+            } else {
+                Some(graph.unit_params().clone())
+            }
+        });
+
+        if initial.iter().next() == None {
+            return;
+        }
+
+        let progress = ProgressTracker::new(graph);
+        let mut queue: Vec<(StateSet, f64)> = Vec::new();
+        queue.push(with_cardinality(initial));
+
+        while let Some((universe, universe_cardinality)) = queue.pop() {
             println!(
                 "Universe state count: {} Remaining work queue: {}",
                 universe.iter().count(),
                 queue.len()
             );
+            let remaining: f64 = queue.iter().map(|(_, b)| *b).sum::<f64>() + universe_cardinality;
+            progress.update_remaining(remaining);
             let pivots = find_pivots(graph, &universe);
             println!("Pivots state count: {}", pivots.iter().count());
             let forward = guarded_reach(&fwd, &pivots, &universe);
@@ -79,13 +88,19 @@ where
             });
 
             if !leaves_current.is_empty() {
-                queue.push(reachable_terminals);
+                queue.push(with_cardinality(reachable_terminals));
             }
             if unreachable_terminals.iter().next() != None {
-                queue.push(unreachable_terminals);
+                queue.push(with_cardinality(unreachable_terminals));
             }
         }
     }).unwrap();
+}
+
+// Augment a state set with the cardinality of the set
+fn with_cardinality(set: StateSet) -> (StateSet, f64) {
+    let cardinality = set.iter().map(|(_, p)| p.cardinality()).sum();
+    return (set, cardinality);
 }
 
 pub fn find_pivots_basic(universe: &StateSet) -> StateSet {
