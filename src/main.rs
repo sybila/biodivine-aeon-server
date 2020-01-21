@@ -137,11 +137,11 @@ struct BackendResponse {
 
 impl BackendResponse {
     fn ok(message: &String) -> Self {
-        return BackendResponse { message: format!("{{ status: true, result: {} }}", message) };
+        return BackendResponse { message: format!("{{ \"status\": true, \"result\": {} }}", message) };
     }
 
     fn err(message: &String) -> Self {
-        return BackendResponse { message: format!("{{ status: false, message: {} }}", message) };
+        return BackendResponse { message: format!("{{ \"status\": false, \"message\": {} }}", message) };
     }
 }
 
