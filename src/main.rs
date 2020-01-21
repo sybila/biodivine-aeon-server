@@ -87,14 +87,15 @@ impl ServerState {
                     self.result = Some(Arc::new((graph, classifier)));
 
                     let ctx = self.result.as_ref().unwrap().clone();
-                    std::thread::spawn(move || {
+                    //std::thread::spawn(move || {
                         components(&ctx.0, |component| {
                             let size = component.iter().count();
                             println!("Component {}", size);
                             ctx.1.add_component(component, &ctx.0);
                         });
-                        SERVER_STATE.lock().unwrap().is_busy = false;   // mark as done
-                    });
+                    self.is_busy = false;
+                        //SERVER_STATE.lock().unwrap().is_busy = false;   // mark as done
+                    //});
                 }
                 Err(message) => {
                     self.is_busy = false;
@@ -176,6 +177,11 @@ fn get_info() -> BackendResponse {
 #[get("/get_result")]
 fn get_result() -> BackendResponse {
     let result = { SERVER_STATE.lock().unwrap().get_result() };
+    if result.is_none() {
+        // start compute is now blocking...
+        SERVER_STATE.lock().unwrap().start_compute();
+    }
+    let result = { SERVER_STATE.lock().unwrap().get_result() };
     return if let Some(data) = result {
         let lines: Vec<String> = data
             .iter()
@@ -203,7 +209,7 @@ fn get_result() -> BackendResponse {
 
 #[get("/get_model/<class_str>")]
 fn get_model(class_str: String) -> BackendResponse {
-    return if class_str.is_empty() {
+    return if class_str == "original".to_string() {
         let model = { SERVER_STATE.lock().unwrap().get_model() };
         if let Some(model) = model {
             BackendResponse::ok(&format!("\"{}\"", model))
