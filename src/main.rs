@@ -212,7 +212,7 @@ fn get_model(class_str: String) -> BackendResponse {
     return if class_str == "original".to_string() {
         let model = { SERVER_STATE.lock().unwrap().get_model() };
         if let Some(model) = model {
-            BackendResponse::ok(&format!("\"{}\"", model))
+            BackendResponse::ok(&format!("\"{}\"", model).replace('\n', "\\n"))
         } else {
             BackendResponse::err(&"No model set.".to_string())
         }
@@ -230,7 +230,7 @@ fn get_model(class_str: String) -> BackendResponse {
         }
         let witness = { SERVER_STATE.lock().unwrap().make_witness(&class) };
         match witness {
-            Ok(network) => BackendResponse::ok(&format!("\"{}\"", network)),
+            Ok(network) => BackendResponse::ok(&format!("\"{}\"", network).replace('\n', "\\n")),
             Err(message) => BackendResponse::err(&message),
         }
     }
