@@ -141,7 +141,7 @@ impl BackendResponse {
     }
 
     fn err(message: &String) -> Self {
-        return BackendResponse { message: format!("{{ \"status\": false, \"message\": {} }}", message) };
+        return BackendResponse { message: format!("{{ \"status\": false, \"message\": \"{}\" }}", message) };
     }
 }
 
