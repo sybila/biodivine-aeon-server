@@ -6,6 +6,7 @@ use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
 use std::collections::HashMap;
 use rayon::prelude::*;
 use biodivine_lib_std::IdState;
+use std::sync::Mutex;
 
 impl<'a> Classifier<'a> {
     pub fn new(graph: &AsyncGraph) -> Classifier {
@@ -13,15 +14,16 @@ impl<'a> Classifier<'a> {
         map.insert(Class::new_empty(), graph.unit_params().clone());
         return Classifier {
             graph,
-            classes: map,
+            classes: Mutex::new(map),
         };
     }
 
     pub fn export_result(self) -> HashMap<Class, BddParams> {
-        return self.classes;
+        let data = self.classes.lock().unwrap();
+        return (*data).clone();
     }
 
-    pub fn add_component(&mut self, component: StateSet) {
+    pub fn add_component(&self, component: StateSet) {
         // first, remove all sink states
         let capacity = component.capacity();
         let without_sinks = self.filter_sinks(component);
@@ -81,13 +83,14 @@ impl<'a> Classifier<'a> {
         }
     }
 
-    fn push(&mut self, behaviour: Behaviour, params: BddParams) {
-        let mut original_classes: Vec<Class> = self.classes.keys().map(|c| c.clone()).collect();
+    fn push(&self, behaviour: Behaviour, params: BddParams) {
+        let mut classes = self.classes.lock().unwrap();
+        let mut original_classes: Vec<Class> = (*classes).keys().map(|c| c.clone()).collect();
         original_classes.sort();
         original_classes.reverse(); // we need classes from largest to smallest
 
         for class in original_classes {
-            let class_params= &self.classes[&class];
+            let class_params= &(*classes)[&class];
             let should_move_up = class_params.intersect(&params);
             if !should_move_up.is_empty() {
                 let extended_class = class.clone_extended(behaviour);
@@ -95,30 +98,31 @@ impl<'a> Classifier<'a> {
                 // remove moving params from class
                 let new_c_p = class_params.minus(&should_move_up);
                 if new_c_p.is_empty() {
-                    self.classes.remove(&class);
+                    (*classes).remove(&class);
                 } else {
-                    self.classes.insert(class, new_c_p);
+                    (*classes).insert(class, new_c_p);
                 }
 
                 // add moving params to larger_class
-                if let Some(extended_class_params) = self.classes.get(&extended_class) {
+                if let Some(extended_class_params) = (*classes).get(&extended_class) {
                     let new_extended_params = extended_class_params.union(&should_move_up);
-                    self.classes.insert(extended_class, new_extended_params);
+                    (*classes).insert(extended_class, new_extended_params);
                 } else {
-                    self.classes.insert(extended_class, should_move_up);
+                    (*classes).insert(extended_class, should_move_up);
                 }
             }
         }
     }
 
     pub fn print(&self) {
-        for (c, p) in &self.classes {
+        let classes = self.classes.lock().unwrap();
+        for (c, p) in &(*classes) {
             println!("Class {:?}, cardinality: {}", c, p.cardinality());
         }
     }
 
     /// Remove all sink states from the given component (and push them into the classifier).
-    fn filter_sinks(&mut self, component: StateSet) -> StateSet {
+    fn filter_sinks(&self, component: StateSet) -> StateSet {
         let fwd = self.graph.fwd();
         let mut result = component.clone();
         let data: Vec<(IdState, BddParams)> = component.into_iter().collect();

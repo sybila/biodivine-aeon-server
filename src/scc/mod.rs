@@ -3,6 +3,7 @@ use biodivine_lib_param_bn::bdd_params::BddParams;
 use std::collections::HashMap;
 use std::vec::IntoIter;
 use std::cmp::Ordering;
+use std::sync::Mutex;
 
 pub mod algo_components;
 pub mod algo_par_reach;
@@ -53,5 +54,5 @@ impl PartialOrd for Class {
 
 pub struct Classifier<'a> {
     graph: &'a AsyncGraph,
-    classes: HashMap<Class, BddParams>,
+    classes: Mutex<HashMap<Class, BddParams>>
 }

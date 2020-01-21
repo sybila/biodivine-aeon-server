@@ -6,9 +6,9 @@ use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
 use biodivine_lib_std::IdState;
 use std::option::Option::Some;
 
-pub fn components<F>(graph: &AsyncGraph, mut on_component: F)
+pub fn components<F>(graph: &AsyncGraph, on_component: F)
 where
-    F: FnMut(StateSet) -> (),
+    F: Fn(StateSet) -> () + Send + Sync,
 {
     let num_states = graph.states().count();
     let fwd = graph.fwd();
@@ -42,46 +42,50 @@ where
     let mut queue: Vec<StateSet> = Vec::new();
     queue.push(initial);
 
-    while let Some(universe) = queue.pop() {
-        println!(
-            "Universe state count: {} Remaining work queue: {}",
-            universe.iter().count(),
-            queue.len()
-        );
-        let pivots = find_pivots(graph, &universe);
-        println!("Pivots state count: {}", pivots.iter().count());
-        let forward = guarded_reach(&fwd, &pivots, &universe);
-        let component_with_pivots = guarded_reach(&bwd, &pivots, &forward);
-        let reachable_terminals = forward.minus(&component_with_pivots);
+    crossbeam::thread::scope(|scope| {
+        while let Some(universe) = queue.pop() {
+            println!(
+                "Universe state count: {} Remaining work queue: {}",
+                universe.iter().count(),
+                queue.len()
+            );
+            let pivots = find_pivots(graph, &universe);
+            println!("Pivots state count: {}", pivots.iter().count());
+            let forward = guarded_reach(&fwd, &pivots, &universe);
+            let component_with_pivots = guarded_reach(&bwd, &pivots, &forward);
+            let reachable_terminals = forward.minus(&component_with_pivots);
 
-        let leaves_current = reachable_terminals
-            .fold_union()
-            .unwrap_or(graph.empty_params());
-        let is_terminal = graph.unit_params().minus(&leaves_current);
+            let leaves_current = reachable_terminals
+                .fold_union()
+                .unwrap_or(graph.empty_params());
+            let is_terminal = graph.unit_params().minus(&leaves_current);
 
-        if !is_terminal.is_empty() {
-            let terminal = StateSet::new_with_fun(num_states, |s| {
-                component_with_pivots
-                    .get(s)
-                    .map(|p| p.intersect(&is_terminal))
+            if !is_terminal.is_empty() {
+                let terminal = StateSet::new_with_fun(num_states, |s| {
+                    component_with_pivots
+                        .get(s)
+                        .map(|p| p.intersect(&is_terminal))
+                });
+                scope.spawn(|_| {
+                    on_component(terminal);
+                });
+            }
+
+            let basins_of_reachable_terminals = guarded_reach(&bwd, &forward, &universe);
+            let empty = graph.empty_params();
+            let unreachable_terminals = StateSet::new_with_fun(num_states, |s| {
+                let in_basin = basins_of_reachable_terminals.get(s).unwrap_or(&empty);
+                universe.get(s).map(|p| p.minus(in_basin))
             });
-            on_component(terminal);
-        }
 
-        let basins_of_reachable_terminals = guarded_reach(&bwd, &forward, &universe);
-        let empty = graph.empty_params();
-        let unreachable_terminals = StateSet::new_with_fun(num_states, |s| {
-            let in_basin = basins_of_reachable_terminals.get(s).unwrap_or(&empty);
-            universe.get(s).map(|p| p.minus(in_basin))
-        });
-
-        if !leaves_current.is_empty() {
-            queue.push(reachable_terminals);
+            if !leaves_current.is_empty() {
+                queue.push(reachable_terminals);
+            }
+            if unreachable_terminals.iter().next() != None {
+                queue.push(unreachable_terminals);
+            }
         }
-        if unreachable_terminals.iter().next() != None {
-            queue.push(unreachable_terminals);
-        }
-    }
+    }).unwrap();
 }
 
 pub fn find_pivots_basic(universe: &StateSet) -> StateSet {
