@@ -6,7 +6,6 @@ use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
 use std::collections::HashMap;
 use rayon::prelude::*;
 use biodivine_lib_std::IdState;
-use crate::scc::algo_par_reach::next_step;
 
 impl<'a> Classifier<'a> {
     pub fn new(graph: &AsyncGraph) -> Classifier {
@@ -25,11 +24,10 @@ impl<'a> Classifier<'a> {
     pub fn add_component(&mut self, component: StateSet) {
         // first, remove all sink states
         let capacity = component.capacity();
-        let fwd = self.graph.fwd();
         let without_sinks = self.filter_sinks(component);
-        self.decide_oscillation_vs_disorder(without_sinks);
+        //let (real_oscillation, real_disorder) = self.decide_oscillation_vs_disorder(without_sinks.clone());
 
-        /*let not_sink_params = without_sinks.fold_union();
+        let not_sink_params = without_sinks.fold_union();
         if let Some(not_sink_params) = not_sink_params {
             let pivots = find_pivots_basic(&without_sinks);
             let mut oscillator =
@@ -40,10 +38,10 @@ impl<'a> Classifier<'a> {
             let mut current_level = pivots;
 
             while !params_to_match.is_empty() {
-                println!("Simulation step size: {:?} cardinality: {}, history: {}", current_level.iter().count(), current_level.fold_union().unwrap().cardinality(), oscillator.0.len());
+                //println!("Simulation step size: {:?} cardinality: {}, history: {}", current_level.iter().count(), current_level.fold_union().unwrap().cardinality(), oscillator.0.len());
                 let fwd = self.graph.fwd();
                 let mut reachable = StateSet::new(capacity);
-                println!("Current: {:?}", current_level.cardinalities());
+                //println!("Current: {:?}", current_level.cardinalities());
                 for (s, current_s) in current_level.iter() {
                     for (t, edge) in fwd.step(s) {
                         let target = current_s.intersect(&edge).intersect(&params_to_match);
@@ -52,7 +50,7 @@ impl<'a> Classifier<'a> {
                         }
                     }
                 }
-                println!("Reachable: {:?}", reachable.cardinalities());
+                //println!("Reachable: {:?}", reachable.cardinalities());
 
                 let (not_oscillating, continue_with) = oscillator.push_wave(&reachable);
                 disorder = disorder.union(&not_oscillating);
@@ -69,7 +67,18 @@ impl<'a> Classifier<'a> {
             if !oscillates.is_empty() {
                 self.push(Behaviour::Oscillation, oscillates);
             }
-        }*/
+
+            /*if !real_disorder.is_subset(&disorder) {
+                panic!("Found disorder which old marked as oscialltion.")
+            }
+
+            if !real_oscillation.is_subset(&oscillates) {
+                let new_oscillation = real_oscillation.minus(&oscillates);
+                let witness = self.graph.make_witness(&new_oscillation);
+                println!("{}", witness);
+                panic!("Found oscillation which old marked as disorder");
+            }*/
+        }
     }
 
     fn push(&mut self, behaviour: Behaviour, params: BddParams) {
@@ -142,6 +151,7 @@ impl<'a> Classifier<'a> {
         return result;
     }
 
+    /*
     /// Split the parameters in the component between oscillating and disordered
     /// (and push them into the classifier).
     ///
@@ -155,7 +165,7 @@ impl<'a> Classifier<'a> {
     /// at some point and we will have a simulation step that intersects more than one
     /// history step.
     ///
-    fn decide_oscillation_vs_disorder(&mut self, component: StateSet) {
+    fn decide_oscillation_vs_disorder(&mut self, component: StateSet) -> (BddParams, BddParams) {
         if let Some(to_decide) = component.fold_union() {
             let fwd = self.graph.fwd();
             let mut history: Vec<StateSet> = Vec::new();
@@ -233,16 +243,24 @@ impl<'a> Classifier<'a> {
                 }
             }
 
+            println!("{:?}", history.iter().map(|step| {
+                step.cardinalities()
+            }).collect::<Vec<_>>());
+
             // At this point the oscillation and disorder sets should be correctly partitioned
             if !oscillation.is_empty() {
-                self.push(Behaviour::Oscillation, oscillation);
+                self.push(Behaviour::Oscillation, oscillation.clone());
             }
             if !disorder.is_empty() {
-                self.push(Behaviour::Disorder, disorder);
+                self.push(Behaviour::Disorder, disorder.clone());
             }
 
+            return (oscillation, disorder)
         }   // component is empty, nothing to do here...
-    }
+         else {
+             return (self.graph.empty_params(), self.graph.empty_params())
+         }
+    }*/
 
 }
 

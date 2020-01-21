@@ -1,5 +1,6 @@
 use crate::scc::algo_components::components;
 use crate::scc::Classifier;
+use biodivine_lib_std::param_graph::{Graph, EvolutionOperator, Params};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use std::convert::TryFrom;
@@ -47,6 +48,16 @@ pub fn run() {
         YHP1 -| CLN3
         SWI5 -> CLN3
         YOX1 -| CLN3
+# Problematic model - according to the new implementation, it oscillates
+#$ACE2: SSF
+#$CLN3: (ACE2 | (SWI5 & (!YHP1 | !YOX1)))
+#$HCM1: (MBF & SBF)
+#$MBF: CLN3
+#$SBF: ((CLN3 & (MBF | (!YHP1 | !YOX1))) | (!CLN3 & (MBF | (!YHP1 & !YOX1))))
+#$SSF: (HCM1 & SBF)
+#$SWI5: SSF
+#$YHP1: (MBF | SBF)
+#$YOX1: (MBF | SBF)
     ",
     )
     .unwrap();
@@ -105,6 +116,13 @@ pub fn run() {
     components(&graph, |component| {
         let size = component.iter().count();
         println!("Component {}", size);
+        /*println!("{:?}", component.cardinalities());
+        let fwd = (&graph).fwd();
+        for (s, _) in component.iter() {
+            println!("Succ of {:?} are {:?}", s, fwd.step(s).filter_map(|(s, p)| {
+                if p.is_empty() { None } else { Some(s) }
+            }).collect::<Vec<_>>())
+        }*/
         classifier.add_component(component);
     });
 

@@ -13,7 +13,6 @@ where
     let num_states = graph.states().count();
     let fwd = graph.fwd();
     let bwd = graph.bwd();
-    // TODO: There is a bug if we are not detecting sinks, but maybe its in classifier...
     let initial = StateSet::new_with_fun(num_states, |_| Some(graph.unit_params().clone()));
     /*let mut sinks = StateSet::new(num_states);
     for s in graph.states() {
