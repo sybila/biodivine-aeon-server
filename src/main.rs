@@ -22,6 +22,8 @@ mod test_main;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use std::collections::HashMap;
 use std::sync::{Mutex, Arc};
+use rocket::Data;
+use std::io::Read;
 
 lazy_static! {
     static ref SERVER_STATE: Mutex<ServerState> = Mutex::new(ServerState::new());
@@ -257,9 +259,37 @@ fn set_model(boolnet: String) -> BackendResponse {
     };
 }
 
+/// Accept a partial model containing only the necessary regulations and one update function.
+/// Return cardinality of such model (i.e. the number of instantiations of this update function)
+/// or error if the update function (or model) is invalid.
+#[post("/check_update_function", format="plain", data="<data>")]
+fn check_update_function(data: Data) -> BackendResponse {
+    let mut stream = data.open().take(10_000_000);    // limit model size to 10MB
+    let mut model_string = String::new();
+    return match stream.read_to_string(&mut model_string) {
+        Ok(_) => {
+            println!("Check update function: ");
+            println!("{}", model_string);
+            match BooleanNetwork::try_from(model_string.as_str()).and_then(|model| AsyncGraph::new(model)) {
+                Ok(graph) => {
+                    BackendResponse::ok(&format!("{{\"cardinality\":\"{}\"}}", graph.unit_params().cardinality()))
+                }
+                Err(error) => BackendResponse::err(&error)
+            }
+        }
+        Err(error) => BackendResponse::err(&format!("{}", error))
+    }
+}
+
+#[get("/ping")]
+fn ping() -> BackendResponse {
+    println!("...ping...");
+    return BackendResponse::ok(&"\"Ok\"".to_string());
+}
+
 fn main() {
     //test_main::run();
     rocket::ignite()
-        .mount("/", routes![get_info, get_model, get_result, set_model])
+        .mount("/", routes![ping,check_update_function])
         .launch();
 }
