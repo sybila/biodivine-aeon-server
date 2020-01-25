@@ -5,6 +5,9 @@ extern crate rocket;
 #[macro_use]
 extern crate lazy_static;
 
+#[macro_use]
+extern crate json;
+
 use rocket::http::hyper::header::AccessControlAllowOrigin;
 use rocket::http::ContentType;
 use rocket::request::Request;
@@ -262,15 +265,21 @@ fn set_model(boolnet: String) -> BackendResponse {
 /// Accept a partial model containing only the necessary regulations and one update function.
 /// Return cardinality of such model (i.e. the number of instantiations of this update function)
 /// or error if the update function (or model) is invalid.
+/// TODO: On some large models, this sometimes returns some bogus number even though the model is too large to run :O
 #[post("/check_update_function", format="plain", data="<data>")]
 fn check_update_function(data: Data) -> BackendResponse {
     let mut stream = data.open().take(10_000_000);    // limit model size to 10MB
     let mut model_string = String::new();
     return match stream.read_to_string(&mut model_string) {
         Ok(_) => {
-            println!("Check update function: ");
-            println!("{}", model_string);
-            match BooleanNetwork::try_from(model_string.as_str()).and_then(|model| AsyncGraph::new(model)) {
+            let graph = BooleanNetwork::try_from(model_string.as_str()).and_then(|model| {
+                if model.graph().num_vars() <= 5 {
+                    AsyncGraph::new(model)
+                } else {
+                    Err("Function too large for on-the-fly analysis.".to_string())
+                }
+            });
+            match graph {
                 Ok(graph) => {
                     BackendResponse::ok(&format!("{{\"cardinality\":\"{}\"}}", graph.unit_params().cardinality()))
                 }
@@ -287,9 +296,34 @@ fn ping() -> BackendResponse {
     return BackendResponse::ok(&"\"Ok\"".to_string());
 }
 
+/// Accept an SBML (XML) file and try to parse it into a `BooleanNetwork`.
+/// If everything goes well, return a standard result object with a parsed model, or
+/// error if something fails.
+#[post("/sbml_to_aeon", format="plain", data="<data>")]
+fn sbml_to_aeon(data: Data) -> BackendResponse {
+    let mut stream = data.open().take(10_000_000);  // limit model to 10MB
+    let mut sbml_string = String::new();
+    return match stream.read_to_string(&mut sbml_string) {
+        Ok(_) => {
+            match BooleanNetwork::from_sbml(&sbml_string) {
+                Ok((model, layout)) => {
+                    let mut model_string = format!("{}", model);    // convert back to aeon
+                    model_string += "\n";
+                    for (var, (x,y)) in layout {
+                        model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
+                    }
+                    BackendResponse::ok(&object!{ "model" => model_string }.to_string())
+                }
+                Err(error) => BackendResponse::err(&error)
+            }
+        }
+        Err(error) => BackendResponse::err(&format!("{}", error))
+    }
+}
+
 fn main() {
     //test_main::run();
     rocket::ignite()
-        .mount("/", routes![ping,check_update_function])
+        .mount("/", routes![ping,check_update_function,sbml_to_aeon])
         .launch();
 }
