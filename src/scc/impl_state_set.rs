@@ -204,7 +204,7 @@ impl StateSet {
         });
     }
 
-    pub(crate) fn cardinalities(&self) -> Vec<(usize, f64)> {
+    pub(crate) fn _cardinalities(&self) -> Vec<(usize, f64)> {
         return self
             .iter()
             .map(|(s, p)| (s.into(), p.cardinality()))

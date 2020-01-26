@@ -59,5 +59,6 @@ pub struct Classifier {
 
 pub struct ProgressTracker {
     total: f64,
-    remaining: Mutex<f64>
+    remaining: Mutex<f64>,
+    last_wave: Mutex<usize>,
 }

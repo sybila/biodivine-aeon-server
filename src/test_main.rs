@@ -1,5 +1,5 @@
 use crate::scc::algo_components::components;
-use crate::scc::Classifier;
+use crate::scc::{Classifier, ProgressTracker};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use std::convert::TryFrom;
@@ -18,7 +18,8 @@ pub fn run() {
     println!("Unit BDD: {}", graph.unit_params().cardinality());
 
     let classifier = Classifier::new(&graph);
-    components(&graph, |component| {
+    let progress = ProgressTracker::new(&graph);
+    components(&graph, &progress, |component| {
         let size = component.iter().count();
         println!("Component {}", size);
         /*println!("{:?}", component.cardinalities());

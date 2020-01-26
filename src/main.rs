@@ -13,21 +13,22 @@ use rocket::http::ContentType;
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
-use crate::scc::{Class, Classifier, Behaviour};
+use crate::scc::{Classifier, ProgressTracker};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
-use scc::algo_components::components;
 use std::convert::TryFrom;
 use regex::Regex;
 
 pub mod scc;
 mod test_main;
 
-use biodivine_lib_param_bn::bdd_params::BddParams;
 use std::collections::HashMap;
-use std::sync::{Mutex, Arc};
+use std::sync::{Arc, RwLock};
 use rocket::Data;
 use std::io::Read;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
+use crate::scc::algo_components::components;
 /*
 lazy_static! {
     static ref SERVER_STATE: Mutex<ServerState> = Mutex::new(ServerState::new());
@@ -138,33 +139,6 @@ impl ServerState {
 
 }
 
-struct BackendResponse {
-    message: String,
-}
-
-impl BackendResponse {
-    fn ok(message: &String) -> Self {
-        return BackendResponse { message: format!("{{ \"status\": true, \"result\": {} }}", message) };
-    }
-
-    fn err(message: &String) -> Self {
-        return BackendResponse { message: format!("{{ \"status\": false, \"message\": \"{}\" }}", message) };
-    }
-}
-
-impl<'r> Responder<'r> for BackendResponse {
-    fn respond_to(self, _: &Request) -> response::Result<'r> {
-        use std::io::Cursor;
-
-        let cursor = Cursor::new(self.message);
-        Response::build()
-            .header(ContentType::Plain)
-            .header(AccessControlAllowOrigin::Any)
-            .sized_body(cursor)
-            .ok()
-    }
-}
-
 #[get("/get_info")]
 fn get_info() -> BackendResponse {
     let state = SERVER_STATE.lock().unwrap();
@@ -242,15 +216,22 @@ fn get_model(class_str: String) -> BackendResponse {
     }
 }
 
-#[get("/set_model/<boolnet>")]
-fn set_model(boolnet: String) -> BackendResponse {
-    let set_model_result = { SERVER_STATE.lock().unwrap().set_model(boolnet.as_str()) };
-    return match set_model_result {
-        Ok(()) => BackendResponse::ok(&"\"\"".to_string()),
-        Err(message) => BackendResponse::err(&message),
-    };
-}
 */
+
+/// Computation keeps all information
+struct Computation {
+    is_cancelled: AtomicBool,   // indicate to the server that the computation should be cancelled
+    input_model: String,        // .aeon string representation of the model
+    graph: Option<Arc<AsyncGraph>>,          // Model graph - used to create witnesses
+    classifier: Option<Arc<Classifier>>,     // Classifier used to store the results of the computation
+    progress: Option<Arc<ProgressTracker>>,  // Used to access progress of the computation
+    thread: Option<JoinHandle<()>>,     // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
+    error: Option<String>,              // A string error from the computation
+}
+
+lazy_static! {
+    static ref COMPUTATION: Arc<RwLock<Option<Computation>>> = Arc::new(RwLock::new(None));
+}
 
 /// Accept a partial model containing only the necessary regulations and one update function.
 /// Return cardinality of such model (i.e. the number of instantiations of this update function)
@@ -283,7 +264,132 @@ fn check_update_function(data: Data) -> BackendResponse {
 #[get("/ping")]
 fn ping() -> BackendResponse {
     println!("...ping...");
-    return BackendResponse::ok(&"\"Ok\"".to_string());
+    let mut response = object!{
+        "has_computation" => false,
+        "is_cancelled" => false,
+        "running" => false,
+        "progress" => "unknown".to_string(),
+        "error" => json::Null,
+    };
+    {   // Read data from current computation if available...
+        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+        // TODO: Computation contains classifier that can be locked for quite some time
+        // Maybe that one should have a separate lock so that it does not block ping.
+        let cmp = cmp.read().unwrap();
+        if let Some(computation) = &*cmp {
+            response["has_computation"] = true.into();
+            response["is_cancelled"] = computation.is_cancelled.load(Ordering::SeqCst).into();
+            if let Some(progress) = &computation.progress {
+                response["progress"] = progress.get_percent_string().into();
+            }
+            response["is_running"] = computation.thread.is_some().into();
+            if let Some(error) = &computation.error {
+                response["error"] = error.clone().into();
+            }
+        }
+    }
+    return BackendResponse::ok(&response.to_string());
+}
+
+/// Accept an Aeon model, parse it and start a new computation (if there is no computation running).
+#[post("/start_computation", format="plain", data="<data>")]
+fn start_computation(data: Data) -> BackendResponse {
+    let mut stream = data.open().take(10_000_000);  // limit model to 10MB
+    let mut aeon_string = String::new();
+    return match stream.read_to_string(&mut aeon_string) {
+        Ok(_) => {
+            // First, try to parse the network so that the user can at least verify it is correct...
+            match BooleanNetwork::try_from(aeon_string.as_str()) {
+                Ok(network) => {
+                    // Now we can try to start the computation...
+                    let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+                    {
+                        // First, just try to read the computation, if there is something
+                        // there, we just want to quit fast...
+                        let cmp = cmp.read().unwrap();
+                        if let Some(computation) = &*cmp {
+                            if computation.thread.is_some() {
+                                return BackendResponse::err(&"Previous computation is still running. Cancel it before starting a new one.".to_string());
+                            }
+                        }
+                    }
+                    {
+                        // Now actually get the write lock, but check again because race conditions...
+                        let mut cmp = cmp.write().unwrap();
+                        if let Some(computation) = &*cmp {
+                            if computation.thread.is_some() {
+                                return BackendResponse::err(&"Previous computation is still running. Cancel it before starting a new one.".to_string());
+                            }
+                        }
+                        let mut new_cmp = Computation {
+                            is_cancelled: AtomicBool::new(false),
+                            input_model: aeon_string.clone(),
+                            graph: None, classifier: None,
+                            progress: None, thread: None,
+                            error: None,
+                        };
+                        // Prepare thread - not that we have computation locked, so the thread
+                        // will have to wait for us to end before writing down the graph and other
+                        // stuff.
+                        let cmp_thread = std::thread::spawn(move || {
+                            let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+                            match AsyncGraph::new(network) {
+                                Ok(graph) => {
+                                    // Now that we have graph, we can create classifier and progress
+                                    // and save them into the computation.
+                                    let classifier = Arc::new(Classifier::new(&graph));
+                                    let progress = Arc::new(ProgressTracker::new(&graph));
+                                    let graph = Arc::new(graph);
+                                    {
+                                        if let Some(cmp) = cmp.write().unwrap().as_mut() {
+                                            cmp.graph = Some(graph.clone());
+                                            cmp.progress = Some(progress.clone());
+                                            cmp.classifier = Some(classifier.clone());
+                                        } else {
+                                            panic!("Cannot save graph. No computation found.")
+                                        }
+                                    }
+
+                                    // Now we can actually start the computation...
+                                    components(&graph, &progress, |component| {
+                                        classifier.add_component(component, &graph);
+                                    });
+
+                                    println!("Component search done...");
+                                }
+                                Err(error) => {
+                                    {
+                                        if let Some(cmp) = cmp.write().unwrap().as_mut() {
+                                            cmp.error = Some(error);
+                                        } else {
+                                            panic!("Cannot save computation error. No computation found.")
+                                        }
+                                    }
+                                }
+                            }
+                            {
+                                // Remove reference to thread, since we are done now...
+                                if let Some(cmp) = cmp.write().unwrap().as_mut() {
+                                    cmp.thread = None;
+                                } else {
+                                    panic!("Cannot finalize thread. No computation found.");
+                                }
+                            }
+                            return ();
+                        });
+                        new_cmp.thread = Some(cmp_thread);
+
+                        // Now write the new computation to the global state...
+                        *cmp = Some(new_cmp);
+
+                        BackendResponse::ok(&"\"Ok\"".to_string())  // status of the computation can be obtained via ping...
+                    }
+                }
+                Err(error) => BackendResponse::err(&error)
+            }
+        }
+        Err(error) => BackendResponse::err(&format!("{}", error))
+    };
 }
 
 /// Accept an SBML (XML) file and try to parse it into a `BooleanNetwork`.
@@ -373,6 +479,41 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
 fn main() {
     //test_main::run();
     rocket::ignite()
-        .mount("/", routes![ping,check_update_function,sbml_to_aeon,aeon_to_sbml,aeon_to_sbml_instantiated])
+        .mount("/", routes![
+            ping,
+            start_computation,
+            check_update_function,
+            sbml_to_aeon,
+            aeon_to_sbml,
+            aeon_to_sbml_instantiated
+        ])
         .launch();
+}
+
+
+struct BackendResponse {
+    message: String,
+}
+
+impl BackendResponse {
+    fn ok(message: &String) -> Self {
+        return BackendResponse { message: format!("{{ \"status\": true, \"result\": {} }}", message) };
+    }
+
+    fn err(message: &String) -> Self {
+        return BackendResponse { message: format!("{{ \"status\": false, \"message\": \"{}\" }}", message) };
+    }
+}
+
+impl<'r> Responder<'r> for BackendResponse {
+    fn respond_to(self, _: &Request) -> response::Result<'r> {
+        use std::io::Cursor;
+
+        let cursor = Cursor::new(self.message);
+        Response::build()
+            .header(ContentType::Plain)
+            .header(AccessControlAllowOrigin::Any)
+            .sized_body(cursor)
+            .ok()
+    }
 }

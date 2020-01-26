@@ -1,4 +1,4 @@
-use crate::scc::StateSet;
+use crate::scc::{StateSet, ProgressTracker};
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, InvertibleEvolutionOperator, Params};
 use biodivine_lib_std::IdState;
@@ -67,7 +67,7 @@ pub fn next_step<F, B>(fwd: &F, initial: &StateSet) -> StateSet where
     return result;
 }
 
-pub fn guarded_reach<F, B>(fwd: &F, initial: &StateSet, guard: &StateSet) -> StateSet
+pub fn guarded_reach<F, B>(fwd: &F, initial: &StateSet, guard: &StateSet, progress: &ProgressTracker) -> StateSet
 where
     F: InvertibleEvolutionOperator<State = IdState, Params = BddParams, InvertedOperator = B>
         + Send
@@ -84,6 +84,7 @@ where
     }
 
     while !changed.is_empty() {
+        progress.update_last_wave(changed.len());
         println!("Wave size: {}", changed.len());
 
         // All successors of changed states
@@ -140,6 +141,8 @@ where
             result_set.put(s, p);
         }
     }
+
+    progress.update_last_wave(0);
 
     return result_set;
 }
