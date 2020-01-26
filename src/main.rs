@@ -220,7 +220,7 @@ fn get_model(class_str: String) -> BackendResponse {
 
 /// Computation keeps all information
 struct Computation {
-    is_cancelled: AtomicBool,   // indicate to the server that the computation should be cancelled
+    is_cancelled: Arc<AtomicBool>,   // indicate to the server that the computation should be cancelled
     input_model: String,        // .aeon string representation of the model
     graph: Option<Arc<AsyncGraph>>,          // Model graph - used to create witnesses
     classifier: Option<Arc<Classifier>>,     // Classifier used to store the results of the computation
@@ -322,12 +322,13 @@ fn start_computation(data: Data) -> BackendResponse {
                             }
                         }
                         let mut new_cmp = Computation {
-                            is_cancelled: AtomicBool::new(false),
+                            is_cancelled: Arc::new(AtomicBool::new(false)),
                             input_model: aeon_string.clone(),
                             graph: None, classifier: None,
                             progress: None, thread: None,
                             error: None,
                         };
+                        let cancelled = new_cmp.is_cancelled.clone();
                         // Prepare thread - not that we have computation locked, so the thread
                         // will have to wait for us to end before writing down the graph and other
                         // stuff.
@@ -351,7 +352,7 @@ fn start_computation(data: Data) -> BackendResponse {
                                     }
 
                                     // Now we can actually start the computation...
-                                    components(&graph, &progress, |component| {
+                                    components(&graph, &progress, &*cancelled,|component| {
                                         classifier.add_component(component, &graph);
                                     });
 
@@ -390,6 +391,38 @@ fn start_computation(data: Data) -> BackendResponse {
         }
         Err(error) => BackendResponse::err(&format!("{}", error))
     };
+}
+
+#[post("/cancel_computation", format="plain")]
+fn cancel_computation() -> BackendResponse {
+    let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+    {
+        // first just check there is something to cancel
+        let cmp = cmp.read().unwrap();
+        if let Some(cmp) = &*cmp {
+            if cmp.thread.is_none() {
+                return BackendResponse::err(&"Nothing to cancel. Computation already done.".to_string());
+            }
+            if cmp.is_cancelled.load(Ordering::SeqCst) {
+                return BackendResponse::err(&"Computation already cancelled.".to_string());
+            }
+        } else {
+            return BackendResponse::err(&"No computation to cancel.".to_string());
+        }
+    }
+    let cmp = cmp.write().unwrap();
+    if let Some(cmp) = &*cmp {
+        if cmp.thread.is_none() {
+            return BackendResponse::err(&"Nothing to cancel. Computation already done.".to_string());
+        }
+        if cmp.is_cancelled.swap(true, Ordering::SeqCst) == false {
+            return BackendResponse::ok(&"\"ok\"".to_string());
+        } else {
+            return BackendResponse::err(&"Computation already cancelled.".to_string());
+        }
+    } else {
+        return BackendResponse::err(&"No computation to cancel.".to_string());
+    }
 }
 
 /// Accept an SBML (XML) file and try to parse it into a `BooleanNetwork`.
@@ -482,6 +515,7 @@ fn main() {
         .mount("/", routes![
             ping,
             start_computation,
+            cancel_computation,
             check_update_function,
             sbml_to_aeon,
             aeon_to_sbml,

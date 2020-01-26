@@ -7,8 +7,9 @@ use biodivine_lib_std::IdState;
 use std::option::Option::Some;
 use crate::scc::ProgressTracker;
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-pub fn components<F>(graph: &AsyncGraph, progress: &ProgressTracker, on_component: F)
+pub fn components<F>(graph: &AsyncGraph, progress: &ProgressTracker, cancelled: &AtomicBool, on_component: F)
 where
     F: Fn(StateSet) -> () + Send + Sync,
 {
@@ -37,11 +38,15 @@ where
             })
             .collect();
 
+        if cancelled.load(Ordering::SeqCst) {
+            return ();
+        }
+
         let mut sinks = StateSet::new(num_states);
         for (s, is_sink) in sink_pairs {
             sinks.put(s, is_sink);
         }
-        let can_reach_sink = guarded_reach(&bwd, &sinks, &initial, &progress);
+        let can_reach_sink = guarded_reach(&bwd, &sinks, &initial, &AtomicBool::new(false), &progress);
         // This is not correct - on_component is called with individual components - sinks are multiple different components.
         //on_component(sinks); // notify about the sinks we have found
         let initial = StateSet::new_with_fun(num_states, |i| {
@@ -60,6 +65,11 @@ where
         queue.push(with_cardinality(initial));
 
         while let Some((universe, universe_cardinality)) = queue.pop() {
+
+            if cancelled.load(Ordering::SeqCst) {
+                return ();
+            }
+
             println!(
                 "Universe state count: {} Remaining work queue: {}",
                 universe.iter().count(),
@@ -69,8 +79,18 @@ where
             progress.update_remaining(remaining);
             let pivots = find_pivots(graph, &universe);
             println!("Pivots state count: {}", pivots.iter().count());
-            let forward = guarded_reach(&fwd, &pivots, &universe, &progress);
-            let component_with_pivots = guarded_reach(&bwd, &pivots, &forward, &progress);
+            let forward = guarded_reach(&fwd, &pivots, &universe, cancelled, &progress);
+
+            if cancelled.load(Ordering::SeqCst) {
+                return ();
+            }
+
+            let component_with_pivots = guarded_reach(&bwd, &pivots, &forward, cancelled, &progress);
+
+            if cancelled.load(Ordering::SeqCst) {
+                return ();
+            }
+
             let reachable_terminals = forward.minus(&component_with_pivots);
 
             let leaves_current = reachable_terminals
@@ -89,7 +109,12 @@ where
                 });
             }
 
-            let basins_of_reachable_terminals = guarded_reach(&bwd, &forward, &universe, &progress);
+            let basins_of_reachable_terminals = guarded_reach(&bwd, &forward, &universe, cancelled, &progress);
+
+            if cancelled.load(Ordering::SeqCst) {
+                return ();
+            }
+
             let empty = graph.empty_params();
             let unreachable_terminals = StateSet::new_with_fun(num_states, |s| {
                 let in_basin = basins_of_reachable_terminals.get(s).unwrap_or(&empty);

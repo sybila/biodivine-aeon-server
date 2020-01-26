@@ -4,6 +4,7 @@ use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use std::convert::TryFrom;
 use std::io::Read;
+use std::sync::atomic::AtomicBool;
 
 pub fn run() {
     let mut buffer = String::new();
@@ -19,7 +20,7 @@ pub fn run() {
 
     let classifier = Classifier::new(&graph);
     let progress = ProgressTracker::new(&graph);
-    components(&graph, &progress, |component| {
+    components(&graph, &progress, &AtomicBool::new(false), |component| {
         let size = component.iter().count();
         println!("Component {}", size);
         /*println!("{:?}", component.cardinalities());

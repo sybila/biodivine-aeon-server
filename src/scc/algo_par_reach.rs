@@ -4,6 +4,7 @@ use biodivine_lib_std::param_graph::{EvolutionOperator, InvertibleEvolutionOpera
 use biodivine_lib_std::IdState;
 use rayon::prelude::*;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 fn all_possible_successors<F>(fwd: &F, set: &HashSet<IdState>) -> HashSet<IdState> where
     F: EvolutionOperator<State = IdState, Params = BddParams> + Send + Sync
@@ -67,7 +68,7 @@ pub fn next_step<F, B>(fwd: &F, initial: &StateSet) -> StateSet where
     return result;
 }
 
-pub fn guarded_reach<F, B>(fwd: &F, initial: &StateSet, guard: &StateSet, progress: &ProgressTracker) -> StateSet
+pub fn guarded_reach<F, B>(fwd: &F, initial: &StateSet, guard: &StateSet, cancelled: &AtomicBool, progress: &ProgressTracker) -> StateSet
 where
     F: InvertibleEvolutionOperator<State = IdState, Params = BddParams, InvertedOperator = B>
         + Send
@@ -84,6 +85,11 @@ where
     }
 
     while !changed.is_empty() {
+
+        if cancelled.load(Ordering::SeqCst) {
+            return result_set;  // result is incorrect, but we are cancelled so we don't care...
+        }
+
         progress.update_last_wave(changed.len());
         println!("Wave size: {}", changed.len());
 
