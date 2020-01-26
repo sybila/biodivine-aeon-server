@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, Arc};
 use rocket::Data;
 use std::io::Read;
-
+/*
 lazy_static! {
     static ref SERVER_STATE: Mutex<ServerState> = Mutex::new(ServerState::new());
 }
@@ -250,6 +250,7 @@ fn set_model(boolnet: String) -> BackendResponse {
         Err(message) => BackendResponse::err(&message),
     };
 }
+*/
 
 /// Accept a partial model containing only the necessary regulations and one update function.
 /// Return cardinality of such model (i.e. the number of instantiations of this update function)
@@ -310,6 +311,21 @@ fn sbml_to_aeon(data: Data) -> BackendResponse {
     }
 }
 
+/// Try to read the model layout metadata from the given aeon file.
+fn read_layout(aeon_string: &str) -> HashMap<String, (f64, f64)> {
+    let re = Regex::new(r"^\s*#position:(?P<var>[a-zA-Z0-9_]+):(?P<x>[+-]?\d+(\.\d+)?),(?P<y>[+-]?\d+(\.\d+)?)\s*$").unwrap();
+    let mut layout = HashMap::new();
+    for line in aeon_string.lines() {
+        if let Some(captures) = re.captures(line) {
+            let var = captures["var"].to_string();
+            let x = captures["x"].parse::<f64>().unwrap();
+            let y = captures["y"].parse::<f64>().unwrap();
+            layout.insert(var, (x,y));
+        }
+    }
+    return layout;
+}
+
 /// Accept an Aeon file, try to parse it into a `BooleanNetwork`
 /// which will then be translated into SBML (XML) representation.
 /// Preserve layout metadata.
@@ -319,18 +335,9 @@ fn aeon_to_sbml(data: Data) -> BackendResponse {
     let mut aeon_string = String::new();
     return match stream.read_to_string(&mut aeon_string) {
         Ok(_) => {
-            match BooleanNetwork::try_from(&aeon_string) {
+            match BooleanNetwork::try_from(aeon_string.as_str()) {
                 Ok(network) => {
-                    let re = Regex::new(r"^\s*#position:(?P<var>[a-zA-Z0-9_]+):(?P<x>[+-]?\d+(\.\d+)?),(?P<y>[+-]?\d+(\.\d+)?)\s*$").unwrap();
-                    let mut layout = HashMap::new();
-                    for line in aeon_string.lines() {
-                        if let Some(captures) = re.captures(line) {
-                            let var = captures["var"].to_string();
-                            let x = captures["x"].parse::<f64>().unwrap();
-                            let y = captures["y"].parse::<f64>().unwrap();
-                            layout.insert(var, (x,y));
-                        }
-                    }
+                    let layout = read_layout(&aeon_string);
                     let sbml_string = network.to_sbml(&layout);
                     BackendResponse::ok(&object!{ "model" => sbml_string }.to_string())
                 }
@@ -341,9 +348,31 @@ fn aeon_to_sbml(data: Data) -> BackendResponse {
     }
 }
 
+/// Accept an Aeon file and create an SBML version with all parameters instantiated (a witness model).
+/// Note that this can take quite a while for large models since we have to actually build
+/// the unit BDD right now (in the future, we might opt to use a SAT solver which might be faster).
+#[post("/aeon_to_sbml_instantiated", format="plain", data="<data>")]
+fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
+    let mut stream = data.open().take(10_000_000);  // limit model to 10MB
+    let mut aeon_string = String::new();
+    return match stream.read_to_string(&mut aeon_string) {
+        Ok(_) => {
+            match BooleanNetwork::try_from(aeon_string.as_str()).and_then(|bn| AsyncGraph::new(bn)) {
+                Ok(graph) => {
+                    let witness = graph.make_witness(graph.unit_params());
+                    let layout = read_layout(&aeon_string);
+                    BackendResponse::ok(&object! { "model" => witness.to_sbml(&layout) }.to_string())
+                }
+                Err(error) => BackendResponse::err(&error)
+            }
+        }
+        Err(error) => BackendResponse::err(&format!("{}", error))
+    };
+}
+
 fn main() {
     //test_main::run();
     rocket::ignite()
-        .mount("/", routes![ping,check_update_function,sbml_to_aeon,aeon_to_sbml])
+        .mount("/", routes![ping,check_update_function,sbml_to_aeon,aeon_to_sbml,aeon_to_sbml_instantiated])
         .launch();
 }
