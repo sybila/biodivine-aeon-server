@@ -18,6 +18,7 @@ use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use scc::algo_components::components;
 use std::convert::TryFrom;
+use regex::Regex;
 
 pub mod scc;
 mod test_main;
@@ -241,18 +242,6 @@ fn get_model(class_str: String) -> BackendResponse {
     }
 }
 
-/*#[post("/sbml_to_aeon", data = "<data>")]
-fn sbml_to_aeon(data: String) -> BackendResponse {
-    println!("data was {}", data);
-
-    /*let boolnet = BooleanNetwork::from_sbml(&data);
-    match boolnet {
-        //Ok(result) => BackendResponse::new(&String::from(result.to_string())),
-        _ => BackendResponse::new(&String::from("None")),
-    }*/
-    BackendResponse::new(&String::from("None"))
-}*/
-
 #[get("/set_model/<boolnet>")]
 fn set_model(boolnet: String) -> BackendResponse {
     let set_model_result = { SERVER_STATE.lock().unwrap().set_model(boolnet.as_str()) };
@@ -321,9 +310,40 @@ fn sbml_to_aeon(data: Data) -> BackendResponse {
     }
 }
 
+/// Accept an Aeon file, try to parse it into a `BooleanNetwork`
+/// which will then be translated into SBML (XML) representation.
+/// Preserve layout metadata.
+#[post("/aeon_to_sbml", format="plain", data="<data>")]
+fn aeon_to_sbml(data: Data) -> BackendResponse {
+    let mut stream = data.open().take(10_000_000);  // limit model to 10MB
+    let mut aeon_string = String::new();
+    return match stream.read_to_string(&mut aeon_string) {
+        Ok(_) => {
+            match BooleanNetwork::try_from(&aeon_string) {
+                Ok(network) => {
+                    let re = Regex::new(r"^\s*#position:(?P<var>[a-zA-Z0-9_]+):(?P<x>[+-]?\d+(\.\d+)?),(?P<y>[+-]?\d+(\.\d+)?)\s*$").unwrap();
+                    let mut layout = HashMap::new();
+                    for line in aeon_string.lines() {
+                        if let Some(captures) = re.captures(line) {
+                            let var = captures["var"].to_string();
+                            let x = captures["x"].parse::<f64>().unwrap();
+                            let y = captures["y"].parse::<f64>().unwrap();
+                            layout.insert(var, (x,y));
+                        }
+                    }
+                    let sbml_string = network.to_sbml(&layout);
+                    BackendResponse::ok(&object!{ "model" => sbml_string }.to_string())
+                }
+                Err(error) => BackendResponse::err(&error)
+            }
+        }
+        Err(error) => BackendResponse::err(&format!("{}", error))
+    }
+}
+
 fn main() {
     //test_main::run();
     rocket::ignite()
-        .mount("/", routes![ping,check_update_function,sbml_to_aeon])
+        .mount("/", routes![ping,check_update_function,sbml_to_aeon,aeon_to_sbml])
         .launch();
 }
