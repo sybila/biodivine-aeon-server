@@ -1,8 +1,8 @@
 use super::{StateSet, StateSetIterator};
+use crate::scc::StateSetIntoIterator;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::Params;
 use biodivine_lib_std::IdState;
-use crate::scc::StateSetIntoIterator;
 use rayon::prelude::*;
 
 impl StateSet {
@@ -116,7 +116,7 @@ impl StateSet {
                 } else {
                     Some(result)
                 }
-            },
+            }
             _ => None,
         });
     }
@@ -139,7 +139,7 @@ impl StateSet {
                 } else {
                     Some(result)
                 }
-            },
+            }
             (Some(a), _) => Some(a.clone()),
             _ => None,
         });
@@ -165,7 +165,10 @@ impl StateSet {
     }
 
     pub fn into_iter(self) -> StateSetIntoIterator {
-        return StateSetIntoIterator { set: self.0.into_iter(), next: 0 };
+        return StateSetIntoIterator {
+            set: self.0.into_iter(),
+            next: 0,
+        };
     }
 
     pub fn minus_in_place(&mut self, other: &Self) {
@@ -176,22 +179,24 @@ impl StateSet {
                     let new = current.minus(other);
                     *current = new;
                 }
-            }   // else its none, dont minus anything
+            } // else its none, dont minus anything
         }
     }
 
     /// Intersect all values in this state set with the given params (in parallel).
     pub fn par_restrict_to_params(&mut self, params: &BddParams) {
-        self.0.par_iter_mut().for_each(|value: &mut Option<BddParams>| {
-            if value.is_some() {
-                let new_params = params.intersect(value.as_ref().unwrap());
-                if new_params.is_empty() {
-                    *value = None;
-                } else {
-                    *value = Some(new_params);
+        self.0
+            .par_iter_mut()
+            .for_each(|value: &mut Option<BddParams>| {
+                if value.is_some() {
+                    let new_params = params.intersect(value.as_ref().unwrap());
+                    if new_params.is_empty() {
+                        *value = None;
+                    } else {
+                        *value = Some(new_params);
+                    }
                 }
-            }
-        });
+            });
     }
 
     pub fn fold_union(&self) -> Option<BddParams> {

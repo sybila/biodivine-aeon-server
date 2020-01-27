@@ -13,32 +13,32 @@ use rocket::http::ContentType;
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
-use crate::scc::{Classifier, ProgressTracker, Class, Behaviour};
+use crate::scc::{Behaviour, Class, Classifier, ProgressTracker};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
-use std::convert::TryFrom;
 use regex::Regex;
+use std::convert::TryFrom;
 
 pub mod scc;
 mod test_main;
 
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use crate::scc::algo_components::components;
 use rocket::Data;
+use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
-use crate::scc::algo_components::components;
 
 /// Computation keeps all information
 struct Computation {
-    is_cancelled: Arc<AtomicBool>,   // indicate to the server that the computation should be cancelled
-    input_model: String,        // .aeon string representation of the model
-    graph: Option<Arc<AsyncGraph>>,          // Model graph - used to create witnesses
-    classifier: Option<Arc<Classifier>>,     // Classifier used to store the results of the computation
-    progress: Option<Arc<ProgressTracker>>,  // Used to access progress of the computation
-    thread: Option<JoinHandle<()>>,     // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
-    error: Option<String>,              // A string error from the computation
+    is_cancelled: Arc<AtomicBool>, // indicate to the server that the computation should be cancelled
+    input_model: String,           // .aeon string representation of the model
+    graph: Option<Arc<AsyncGraph>>, // Model graph - used to create witnesses
+    classifier: Option<Arc<Classifier>>, // Classifier used to store the results of the computation
+    progress: Option<Arc<ProgressTracker>>, // Used to access progress of the computation
+    thread: Option<JoinHandle<()>>, // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
+    error: Option<String>,          // A string error from the computation
 }
 
 lazy_static! {
@@ -49,9 +49,9 @@ lazy_static! {
 /// Return cardinality of such model (i.e. the number of instantiations of this update function)
 /// or error if the update function (or model) is invalid.
 /// TODO: On some large models, this sometimes returns some bogus number even though the model is too large to run :O
-#[post("/check_update_function", format="plain", data="<data>")]
+#[post("/check_update_function", format = "plain", data = "<data>")]
 fn check_update_function(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000);    // limit model size to 10MB
+    let mut stream = data.open().take(10_000_000); // limit model size to 10MB
     let mut model_string = String::new();
     return match stream.read_to_string(&mut model_string) {
         Ok(_) => {
@@ -63,27 +63,29 @@ fn check_update_function(data: Data) -> BackendResponse {
                 }
             });
             match graph {
-                Ok(graph) => {
-                    BackendResponse::ok(&format!("{{\"cardinality\":\"{}\"}}", graph.unit_params().cardinality()))
-                }
-                Err(error) => BackendResponse::err(&error)
+                Ok(graph) => BackendResponse::ok(&format!(
+                    "{{\"cardinality\":\"{}\"}}",
+                    graph.unit_params().cardinality()
+                )),
+                Err(error) => BackendResponse::err(&error),
             }
         }
-        Err(error) => BackendResponse::err(&format!("{}", error))
-    }
+        Err(error) => BackendResponse::err(&format!("{}", error)),
+    };
 }
 
 #[get("/ping")]
 fn ping() -> BackendResponse {
     println!("...ping...");
-    let mut response = object!{
+    let mut response = object! {
         "has_computation" => false,
         "is_cancelled" => false,
         "running" => false,
         "progress" => "unknown".to_string(),
         "error" => json::Null,
     };
-    {   // Read data from current computation if available...
+    {
+        // Read data from current computation if available...
         let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
         // TODO: Computation contains classifier that can be locked for quite some time
         // Maybe that one should have a separate lock so that it does not block ping.
@@ -131,7 +133,12 @@ fn get_results() -> BackendResponse {
     for index in 0..lines.len() - 1 {
         json += &format!("{},", lines[index]);
     }
-    json = format!("{{ \"isPartial\":{}, \"data\":[{}{}] }}", is_partial, json, lines.last().unwrap());
+    json = format!(
+        "{{ \"isPartial\":{}, \"data\":[{}{}] }}",
+        is_partial,
+        json,
+        lines.last().unwrap()
+    );
 
     return BackendResponse::ok(&json);
 }
@@ -158,12 +165,12 @@ fn get_witness(class_str: String) -> BackendResponse {
                     if let Some(graph) = &cmp.graph {
                         let witness = graph.make_witness(&class);
                         let layout = read_layout(cmp.input_model.as_str());
-                        let mut model_string = format!("{}", witness);    // convert back to aeon
+                        let mut model_string = format!("{}", witness); // convert back to aeon
                         model_string += "\n";
-                        for (var, (x,y)) in layout {
+                        for (var, (x, y)) in layout {
                             model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
                         }
-                        BackendResponse::ok(&object!{ "model" => model_string }.to_string())
+                        BackendResponse::ok(&object! { "model" => model_string }.to_string())
                     } else {
                         return BackendResponse::err(&"No results available.".to_string());
                     }
@@ -180,9 +187,9 @@ fn get_witness(class_str: String) -> BackendResponse {
 }
 
 /// Accept an Aeon model, parse it and start a new computation (if there is no computation running).
-#[post("/start_computation", format="plain", data="<data>")]
+#[post("/start_computation", format = "plain", data = "<data>")]
 fn start_computation(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000);  // limit model to 10MB
+    let mut stream = data.open().take(10_000_000); // limit model to 10MB
     let mut aeon_string = String::new();
     return match stream.read_to_string(&mut aeon_string) {
         Ok(_) => {
@@ -212,8 +219,10 @@ fn start_computation(data: Data) -> BackendResponse {
                         let mut new_cmp = Computation {
                             is_cancelled: Arc::new(AtomicBool::new(false)),
                             input_model: aeon_string.clone(),
-                            graph: None, classifier: None,
-                            progress: None, thread: None,
+                            graph: None,
+                            classifier: None,
+                            progress: None,
+                            thread: None,
                             error: None,
                         };
                         let cancelled = new_cmp.is_cancelled.clone();
@@ -240,7 +249,7 @@ fn start_computation(data: Data) -> BackendResponse {
                                     }
 
                                     // Now we can actually start the computation...
-                                    components(&graph, &progress, &*cancelled,|component| {
+                                    components(&graph, &progress, &*cancelled, |component| {
                                         let size = component.iter().count();
                                         println!("Component {}", size);
                                         classifier.add_component(component, &graph);
@@ -249,12 +258,12 @@ fn start_computation(data: Data) -> BackendResponse {
                                     println!("Component search done...");
                                 }
                                 Err(error) => {
-                                    {
-                                        if let Some(cmp) = cmp.write().unwrap().as_mut() {
-                                            cmp.error = Some(error);
-                                        } else {
-                                            panic!("Cannot save computation error. No computation found.")
-                                        }
+                                    if let Some(cmp) = cmp.write().unwrap().as_mut() {
+                                        cmp.error = Some(error);
+                                    } else {
+                                        panic!(
+                                            "Cannot save computation error. No computation found."
+                                        )
                                     }
                                 }
                             }
@@ -273,17 +282,17 @@ fn start_computation(data: Data) -> BackendResponse {
                         // Now write the new computation to the global state...
                         *cmp = Some(new_cmp);
 
-                        BackendResponse::ok(&"\"Ok\"".to_string())  // status of the computation can be obtained via ping...
+                        BackendResponse::ok(&"\"Ok\"".to_string()) // status of the computation can be obtained via ping...
                     }
                 }
-                Err(error) => BackendResponse::err(&error)
+                Err(error) => BackendResponse::err(&error),
             }
         }
-        Err(error) => BackendResponse::err(&format!("{}", error))
+        Err(error) => BackendResponse::err(&format!("{}", error)),
     };
 }
 
-#[post("/cancel_computation", format="plain")]
+#[post("/cancel_computation", format = "plain")]
 fn cancel_computation() -> BackendResponse {
     let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
     {
@@ -291,7 +300,9 @@ fn cancel_computation() -> BackendResponse {
         let cmp = cmp.read().unwrap();
         if let Some(cmp) = &*cmp {
             if cmp.thread.is_none() {
-                return BackendResponse::err(&"Nothing to cancel. Computation already done.".to_string());
+                return BackendResponse::err(
+                    &"Nothing to cancel. Computation already done.".to_string(),
+                );
             }
             if cmp.is_cancelled.load(Ordering::SeqCst) {
                 return BackendResponse::err(&"Computation already cancelled.".to_string());
@@ -303,7 +314,9 @@ fn cancel_computation() -> BackendResponse {
     let cmp = cmp.write().unwrap();
     if let Some(cmp) = &*cmp {
         if cmp.thread.is_none() {
-            return BackendResponse::err(&"Nothing to cancel. Computation already done.".to_string());
+            return BackendResponse::err(
+                &"Nothing to cancel. Computation already done.".to_string(),
+            );
         }
         if cmp.is_cancelled.swap(true, Ordering::SeqCst) == false {
             return BackendResponse::ok(&"\"ok\"".to_string());
@@ -318,38 +331,41 @@ fn cancel_computation() -> BackendResponse {
 /// Accept an SBML (XML) file and try to parse it into a `BooleanNetwork`.
 /// If everything goes well, return a standard result object with a parsed model, or
 /// error if something fails.
-#[post("/sbml_to_aeon", format="plain", data="<data>")]
+#[post("/sbml_to_aeon", format = "plain", data = "<data>")]
 fn sbml_to_aeon(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000);  // limit model to 10MB
+    let mut stream = data.open().take(10_000_000); // limit model to 10MB
     let mut sbml_string = String::new();
     return match stream.read_to_string(&mut sbml_string) {
         Ok(_) => {
             match BooleanNetwork::from_sbml(&sbml_string) {
                 Ok((model, layout)) => {
-                    let mut model_string = format!("{}", model);    // convert back to aeon
+                    let mut model_string = format!("{}", model); // convert back to aeon
                     model_string += "\n";
-                    for (var, (x,y)) in layout {
+                    for (var, (x, y)) in layout {
                         model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
                     }
-                    BackendResponse::ok(&object!{ "model" => model_string }.to_string())
+                    BackendResponse::ok(&object! { "model" => model_string }.to_string())
                 }
-                Err(error) => BackendResponse::err(&error)
+                Err(error) => BackendResponse::err(&error),
             }
         }
-        Err(error) => BackendResponse::err(&format!("{}", error))
-    }
+        Err(error) => BackendResponse::err(&format!("{}", error)),
+    };
 }
 
 /// Try to read the model layout metadata from the given aeon file.
 fn read_layout(aeon_string: &str) -> HashMap<String, (f64, f64)> {
-    let re = Regex::new(r"^\s*#position:(?P<var>[a-zA-Z0-9_]+):(?P<x>[+-]?\d+(\.\d+)?),(?P<y>[+-]?\d+(\.\d+)?)\s*$").unwrap();
+    let re = Regex::new(
+        r"^\s*#position:(?P<var>[a-zA-Z0-9_]+):(?P<x>[+-]?\d+(\.\d+)?),(?P<y>[+-]?\d+(\.\d+)?)\s*$",
+    )
+    .unwrap();
     let mut layout = HashMap::new();
     for line in aeon_string.lines() {
         if let Some(captures) = re.captures(line) {
             let var = captures["var"].to_string();
             let x = captures["x"].parse::<f64>().unwrap();
             let y = captures["y"].parse::<f64>().unwrap();
-            layout.insert(var, (x,y));
+            layout.insert(var, (x, y));
         }
     }
     return layout;
@@ -358,64 +374,67 @@ fn read_layout(aeon_string: &str) -> HashMap<String, (f64, f64)> {
 /// Accept an Aeon file, try to parse it into a `BooleanNetwork`
 /// which will then be translated into SBML (XML) representation.
 /// Preserve layout metadata.
-#[post("/aeon_to_sbml", format="plain", data="<data>")]
+#[post("/aeon_to_sbml", format = "plain", data = "<data>")]
 fn aeon_to_sbml(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000);  // limit model to 10MB
+    let mut stream = data.open().take(10_000_000); // limit model to 10MB
     let mut aeon_string = String::new();
     return match stream.read_to_string(&mut aeon_string) {
-        Ok(_) => {
-            match BooleanNetwork::try_from(aeon_string.as_str()) {
-                Ok(network) => {
-                    let layout = read_layout(&aeon_string);
-                    let sbml_string = network.to_sbml(&layout);
-                    BackendResponse::ok(&object!{ "model" => sbml_string }.to_string())
-                }
-                Err(error) => BackendResponse::err(&error)
+        Ok(_) => match BooleanNetwork::try_from(aeon_string.as_str()) {
+            Ok(network) => {
+                let layout = read_layout(&aeon_string);
+                let sbml_string = network.to_sbml(&layout);
+                BackendResponse::ok(&object! { "model" => sbml_string }.to_string())
             }
-        }
-        Err(error) => BackendResponse::err(&format!("{}", error))
-    }
+            Err(error) => BackendResponse::err(&error),
+        },
+        Err(error) => BackendResponse::err(&format!("{}", error)),
+    };
 }
 
 /// Accept an Aeon file and create an SBML version with all parameters instantiated (a witness model).
 /// Note that this can take quite a while for large models since we have to actually build
 /// the unit BDD right now (in the future, we might opt to use a SAT solver which might be faster).
-#[post("/aeon_to_sbml_instantiated", format="plain", data="<data>")]
+#[post("/aeon_to_sbml_instantiated", format = "plain", data = "<data>")]
 fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000);  // limit model to 10MB
+    let mut stream = data.open().take(10_000_000); // limit model to 10MB
     let mut aeon_string = String::new();
     return match stream.read_to_string(&mut aeon_string) {
         Ok(_) => {
-            match BooleanNetwork::try_from(aeon_string.as_str()).and_then(|bn| AsyncGraph::new(bn)) {
+            match BooleanNetwork::try_from(aeon_string.as_str()).and_then(|bn| AsyncGraph::new(bn))
+            {
                 Ok(graph) => {
                     let witness = graph.make_witness(graph.unit_params());
                     let layout = read_layout(&aeon_string);
-                    BackendResponse::ok(&object! { "model" => witness.to_sbml(&layout) }.to_string())
+                    BackendResponse::ok(
+                        &object! { "model" => witness.to_sbml(&layout) }.to_string(),
+                    )
                 }
-                Err(error) => BackendResponse::err(&error)
+                Err(error) => BackendResponse::err(&error),
             }
         }
-        Err(error) => BackendResponse::err(&format!("{}", error))
+        Err(error) => BackendResponse::err(&format!("{}", error)),
     };
 }
 
 fn main() {
     //test_main::run();
     rocket::ignite()
-        .mount("/", routes![
-            ping,
-            start_computation,
-            cancel_computation,
-            get_results,
-            get_witness,
-            check_update_function,
-            sbml_to_aeon,
-            aeon_to_sbml,
-            aeon_to_sbml_instantiated
-        ])
+        .mount(
+            "/",
+            routes![
+                ping,
+                start_computation,
+                cancel_computation,
+                get_results,
+                get_witness,
+                check_update_function,
+                sbml_to_aeon,
+                aeon_to_sbml,
+                aeon_to_sbml_instantiated
+            ],
+        )
         .launch();
 }
-
 
 struct BackendResponse {
     message: String,
@@ -423,11 +442,15 @@ struct BackendResponse {
 
 impl BackendResponse {
     fn ok(message: &String) -> Self {
-        return BackendResponse { message: format!("{{ \"status\": true, \"result\": {} }}", message) };
+        return BackendResponse {
+            message: format!("{{ \"status\": true, \"result\": {} }}", message),
+        };
     }
 
     fn err(message: &String) -> Self {
-        return BackendResponse { message: format!("{{ \"status\": false, \"message\": \"{}\" }}", message) };
+        return BackendResponse {
+            message: format!("{{ \"status\": false, \"message\": \"{}\" }}", message),
+        };
     }
 }
 

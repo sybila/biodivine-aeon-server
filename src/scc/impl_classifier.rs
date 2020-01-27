@@ -3,9 +3,9 @@ use crate::scc::algo_components::find_pivots_basic;
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
-use std::collections::HashMap;
-use rayon::prelude::*;
 use biodivine_lib_std::IdState;
+use rayon::prelude::*;
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 impl Classifier {
@@ -36,8 +36,7 @@ impl Classifier {
         let not_sink_params = without_sinks.fold_union();
         if let Some(not_sink_params) = not_sink_params {
             let pivots = find_pivots_basic(&without_sinks);
-            let mut oscillator =
-                Oscillator::new_with_pivots(pivots.clone(), graph.empty_params());
+            let mut oscillator = Oscillator::new_with_pivots(pivots.clone(), graph.empty_params());
 
             let mut disorder = graph.empty_params();
             let mut params_to_match = not_sink_params.clone();
@@ -94,7 +93,7 @@ impl Classifier {
         original_classes.reverse(); // we need classes from largest to smallest
 
         for class in original_classes {
-            let class_params= &(*classes)[&class];
+            let class_params = &(*classes)[&class];
             let should_move_up = class_params.intersect(&params);
             if !should_move_up.is_empty() {
                 let extended_class = class.clone_extended(behaviour);
@@ -130,13 +129,12 @@ impl Classifier {
         let fwd = graph.fwd();
         let mut result = component.clone();
         let data: Vec<(IdState, BddParams)> = component.into_iter().collect();
-        let processed: Vec<(IdState, BddParams, BddParams)> = data.par_iter()
+        let processed: Vec<(IdState, BddParams, BddParams)> = data
+            .par_iter()
             .filter_map(|(s, p): &(IdState, BddParams)| {
                 let has_successor = fwd
                     .step(*s)
-                    .fold(graph.empty_params(), |a, (_, b)| {
-                        a.union(&b)
-                    });
+                    .fold(graph.empty_params(), |a, (_, b)| a.union(&b));
                 let is_sink = p.minus(&has_successor);
                 if is_sink.is_empty() {
                     None
@@ -269,7 +267,6 @@ impl Classifier {
              return (self.graph.empty_params(), self.graph.empty_params())
          }
     }*/
-
 }
 
 /// Oscillator partitions the

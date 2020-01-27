@@ -3,7 +3,6 @@ use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use std::sync::Mutex;
 
 impl ProgressTracker {
-
     pub fn new(graph: &AsyncGraph) -> ProgressTracker {
         let unit_cardinality = graph.unit_params().cardinality();
         let num_states = graph.num_states() as f64;
@@ -12,7 +11,7 @@ impl ProgressTracker {
             total: graph_size,
             remaining: Mutex::new(graph_size),
             last_wave: Mutex::new(0),
-        }
+        };
     }
 
     pub fn update_last_wave(&self, value: usize) {
@@ -37,7 +36,10 @@ impl ProgressTracker {
     }
 
     pub fn get_percent_string(&self) -> String {
-        return format!("{:.2}% (Reachability remaining: {})", 100.0 - (self.get_progress() * 100.0), { *self.last_wave.lock().unwrap() });
+        return format!(
+            "{:.2}% (Reachability remaining: {})",
+            100.0 - (self.get_progress() * 100.0),
+            { *self.last_wave.lock().unwrap() }
+        );
     }
-
 }

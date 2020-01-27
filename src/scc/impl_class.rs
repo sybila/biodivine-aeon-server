@@ -17,7 +17,6 @@ impl Class {
         vec.sort();
         return Class(vec);
     }
-
 }
 
 impl Display for Class {
