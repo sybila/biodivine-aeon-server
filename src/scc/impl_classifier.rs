@@ -17,6 +17,11 @@ impl Classifier {
         };
     }
 
+    pub fn get_params(&self, class: &Class) -> Option<BddParams> {
+        let data = self.classes.lock().unwrap();
+        return (*data).get(class).map(|p| p.clone());
+    }
+
     pub fn export_result(&self) -> HashMap<Class, BddParams> {
         let data = self.classes.lock().unwrap();
         return (*data).clone();

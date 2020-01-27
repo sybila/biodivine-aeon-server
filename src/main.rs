@@ -13,7 +13,7 @@ use rocket::http::ContentType;
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
-use crate::scc::{Classifier, ProgressTracker};
+use crate::scc::{Classifier, ProgressTracker, Class, Behaviour};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use std::convert::TryFrom;
@@ -29,194 +29,6 @@ use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use crate::scc::algo_components::components;
-/*
-lazy_static! {
-    static ref SERVER_STATE: Mutex<ServerState> = Mutex::new(ServerState::new());
-}
-
-//static mut SERVER_STATE: ServerState = ServerState::new();
-
-struct ServerState {
-    is_busy: bool,  // true = computation is in progress
-    model: Option<BooleanNetwork>,  // Some(..) = model is set
-    result: Option<Arc<(AsyncGraph, Classifier)>>,     // Some(..) = computation is in progress or done (if is_busy = false)
-}
-
-impl ServerState {
-    pub const fn new() -> Self {
-        ServerState {
-            is_busy: false,
-            model: None,
-            result: None,
-        }
-    }
-
-    /// Check if computation is running in some thread.
-    pub fn is_busy(&self) -> bool {
-        self.is_busy
-    }
-
-    /// Update model
-    pub fn set_model(&mut self, model: &str) -> Result<(), String> {
-        if self.is_busy {
-            // If we are computing, we can't delete classifier because somebody is using it
-            return Err("Computation in progress".to_string());
-        } else {
-            let bn = BooleanNetwork::try_from(model)?;
-            self.model = Some(bn);
-            self.result = None;
-            return Ok(());
-        }
-    }
-
-    pub fn get_result(&self) -> Option<HashMap<Class, BddParams>> {
-        return self.result.as_ref().map(|c| c.1.export_result());
-    }
-
-    pub fn get_model(&self) -> Option<BooleanNetwork> {
-        return self.model.as_ref().map(|m| m.clone());
-    }
-
-    fn set_busy(&mut self, new: bool) {
-        self.is_busy = new;
-    }
-
-    /// Start computation in a background thread, assuming it is not already running.
-    pub fn start_compute(&mut self) -> Result<(), String> {
-        if self.is_busy {
-            return Err("Computation in progress.".to_string());
-        }
-        return if let Some(model) = &self.model {
-            self.is_busy = true;
-            match AsyncGraph::new(model.clone()) {
-                Ok(graph) => {
-                    let classifier = Classifier::new(&graph);
-                    self.result = Some(Arc::new((graph, classifier)));
-
-                    let ctx = self.result.as_ref().unwrap().clone();
-                    //std::thread::spawn(move || {
-                        components(&ctx.0, |component| {
-                            let size = component.iter().count();
-                            println!("Component {}", size);
-                            ctx.1.add_component(component, &ctx.0);
-                        });
-                    self.is_busy = false;
-                        //SERVER_STATE.lock().unwrap().is_busy = false;   // mark as done
-                    //});
-                }
-                Err(message) => {
-                    self.is_busy = false;
-                    return Err(message)
-                }
-            }
-            Ok(())
-        } else {
-            Err("No model set.".to_string())
-        }
-    }
-
-    pub fn make_witness(&mut self, class: &Class) -> Result<BooleanNetwork, String> {
-        if self.is_busy {
-            return Err("Computation in progress.".to_string());
-        }
-        let result = self.result.as_ref();
-        if let Some(result) = result {
-            let result_data = self.get_result();
-            if let Some(result_data) = result_data {
-                if let Some(result_params) = result_data.get(class) {
-                    let witness = result.clone().0.make_witness(result_params);
-                    return Ok(witness);
-                } else {
-                    return Err(format!("No witnesses for class {}", class))
-                }
-            } else {
-                return Err("Results not available. Cannot make witness.".to_string())
-            }
-        } else {
-            return Err("Results not available. Cannot make witness.".to_string())
-        }
-    }
-
-}
-
-#[get("/get_info")]
-fn get_info() -> BackendResponse {
-    let state = SERVER_STATE.lock().unwrap();
-    let (ru, mo, re) = (
-        state.is_busy,
-        state.model.is_some(),
-        state.result.is_some(),
-    );
-
-    BackendResponse::ok(&format!(
-        "{{\"busy\": {}, \"has_model\": {}, \"has_result\": {}}}",
-        ru, mo, re
-    ))
-}
-
-#[get("/get_result")]
-fn get_result() -> BackendResponse {
-    let result = { SERVER_STATE.lock().unwrap().get_result() };
-    if result.is_none() {
-        // start compute is now blocking...
-        SERVER_STATE.lock().unwrap().start_compute();
-    }
-    let result = { SERVER_STATE.lock().unwrap().get_result() };
-    return if let Some(data) = result {
-        let lines: Vec<String> = data
-            .iter()
-            .map(|(c, p)| format!("{{\"sat_count\":{},\"phenotype\":{}}}", p.cardinality(), c))
-            .collect();
-
-        println!("Result {:?}", lines);
-
-        let mut json = String::new();
-        for index in 0..lines.len() - 1 {
-            json += &format!("{},", lines[index]);
-        }
-        json = format!("[{}{}]", json, lines.last().unwrap());
-
-        BackendResponse::ok(&json)
-    } else {
-        // (if the computation is running, we won't be able to start a new one)
-        let computation_started = { SERVER_STATE.lock().unwrap().start_compute() };
-        match computation_started {
-            Ok(()) => BackendResponse::err(&"Result not available. Computation started.".to_string()),
-            Err(message) => BackendResponse::err(&message),
-        }
-    }
-}
-
-#[get("/get_model/<class_str>")]
-fn get_model(class_str: String) -> BackendResponse {
-    return if class_str == "original".to_string() {
-        let model = { SERVER_STATE.lock().unwrap().get_model() };
-        if let Some(model) = model {
-            BackendResponse::ok(&format!("\"{}\"", model).replace('\n', "\\n"))
-        } else {
-            BackendResponse::err(&"No model set.".to_string())
-        }
-    } else {
-        let mut class = Class::new_empty();
-        for char in class_str.chars() {
-            match char {
-                'D' => class.extend(Behaviour::Disorder),
-                'O' => class.extend(Behaviour::Oscillation),
-                'S' => class.extend(Behaviour::Stability),
-                _ => {
-                    return BackendResponse::err(&"Invalid class.".to_string())
-                }
-            }
-        }
-        let witness = { SERVER_STATE.lock().unwrap().make_witness(&class) };
-        match witness {
-            Ok(network) => BackendResponse::ok(&format!("\"{}\"", network).replace('\n', "\\n")),
-            Err(message) => BackendResponse::err(&message),
-        }
-    }
-}
-
-*/
 
 /// Computation keeps all information
 struct Computation {
@@ -291,6 +103,82 @@ fn ping() -> BackendResponse {
     return BackendResponse::ok(&response.to_string());
 }
 
+#[get("/get_results")]
+fn get_results() -> BackendResponse {
+    let is_partial;
+    let data = {
+        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+        let cmp = cmp.read().unwrap();
+        if let Some(cmp) = &*cmp {
+            is_partial = cmp.thread.is_some();
+            if let Some(classes) = &cmp.classifier {
+                classes.export_result()
+            } else {
+                return BackendResponse::err(&"Results not available yet.".to_string());
+            }
+        } else {
+            return BackendResponse::err(&"No results available.".to_string());
+        }
+    };
+    let lines: Vec<String> = data
+        .iter()
+        .map(|(c, p)| format!("{{\"sat_count\":{},\"phenotype\":{}}}", p.cardinality(), c))
+        .collect();
+
+    println!("Result {:?}", lines);
+
+    let mut json = String::new();
+    for index in 0..lines.len() - 1 {
+        json += &format!("{},", lines[index]);
+    }
+    json = format!("{{ \"isPartial\":{}, \"data\":[{}{}] }}", is_partial, json, lines.last().unwrap());
+
+    return BackendResponse::ok(&json);
+}
+
+#[get("/get_witness/<class_str>")]
+fn get_witness(class_str: String) -> BackendResponse {
+    let mut class = Class::new_empty();
+    for char in class_str.chars() {
+        match char {
+            'D' => class.extend(Behaviour::Disorder),
+            'O' => class.extend(Behaviour::Oscillation),
+            'S' => class.extend(Behaviour::Stability),
+            _ => {
+                return BackendResponse::err(&"Invalid class.".to_string());
+            }
+        }
+    }
+    {
+        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+        let cmp = cmp.read().unwrap();
+        if let Some(cmp) = &*cmp {
+            if let Some(classifier) = &cmp.classifier {
+                if let Some(class) = classifier.get_params(&class) {
+                    if let Some(graph) = &cmp.graph {
+                        let witness = graph.make_witness(&class);
+                        let layout = read_layout(cmp.input_model.as_str());
+                        let mut model_string = format!("{}", witness);    // convert back to aeon
+                        model_string += "\n";
+                        for (var, (x,y)) in layout {
+                            model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
+                        }
+                        BackendResponse::ok(&object!{ "model" => model_string }.to_string())
+                    } else {
+                        return BackendResponse::err(&"No results available.".to_string());
+                    }
+                } else {
+                    return BackendResponse::err(&"Specified class has no witness.".to_string());
+                }
+            } else {
+                return BackendResponse::err(&"No results available.".to_string());
+            }
+        } else {
+            return BackendResponse::err(&"No results available.".to_string());
+        }
+    }
+}
+
 /// Accept an Aeon model, parse it and start a new computation (if there is no computation running).
 #[post("/start_computation", format="plain", data="<data>")]
 fn start_computation(data: Data) -> BackendResponse {
@@ -353,6 +241,8 @@ fn start_computation(data: Data) -> BackendResponse {
 
                                     // Now we can actually start the computation...
                                     components(&graph, &progress, &*cancelled,|component| {
+                                        let size = component.iter().count();
+                                        println!("Component {}", size);
                                         classifier.add_component(component, &graph);
                                     });
 
@@ -516,6 +406,8 @@ fn main() {
             ping,
             start_computation,
             cancel_computation,
+            get_results,
+            get_witness,
             check_update_function,
             sbml_to_aeon,
             aeon_to_sbml,
