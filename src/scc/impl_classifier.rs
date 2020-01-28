@@ -7,6 +7,7 @@ use biodivine_lib_std::IdState;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use crate::scc::algo_par_reach::next_step;
 
 impl Classifier {
     pub fn new(graph: &AsyncGraph) -> Classifier {
@@ -45,7 +46,8 @@ impl Classifier {
             while !params_to_match.is_empty() {
                 //println!("Simulation step size: {:?} cardinality: {}, history: {}", current_level.iter().count(), current_level.fold_union().unwrap().cardinality(), oscillator.0.len());
                 let fwd = graph.fwd();
-                let mut reachable = StateSet::new(capacity);
+                let reachable = next_step(&fwd, &current_level, &params_to_match);
+                /*let mut reachable = StateSet::new(capacity);
                 //println!("Current: {:?}", current_level.cardinalities());
                 for (s, current_s) in current_level.iter() {
                     for (t, edge) in fwd.step(s) {
@@ -54,7 +56,7 @@ impl Classifier {
                             reachable.union_key(t, &target);
                         }
                     }
-                }
+                }*/
                 //println!("Reachable: {:?}", reachable.cardinalities());
 
                 let (not_oscillating, continue_with) = oscillator.push_wave(&reachable);

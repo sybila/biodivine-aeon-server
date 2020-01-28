@@ -34,7 +34,7 @@ where
     }
 }
 
-pub fn next_step<F, B>(fwd: &F, initial: &StateSet) -> StateSet
+pub fn next_step<F, B>(fwd: &F, initial: &StateSet, guard: &BddParams) -> StateSet
 where
     F: InvertibleEvolutionOperator<State = IdState, Params = BddParams, InvertedOperator = B>
         + Send
@@ -53,7 +53,7 @@ where
                 .step(*t)
                 .map(|(s, edge)| {
                     if let Some(initial_s) = initial.get(s) {
-                        let s_to_t = initial_s.intersect(&edge);
+                        let s_to_t = initial_s.intersect(&edge).intersect(guard);
                         if !s_to_t.is_empty() {
                             Some(s_to_t)
                         } else {
