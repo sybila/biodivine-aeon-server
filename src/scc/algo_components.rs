@@ -21,6 +21,7 @@ pub fn components<F>(
         let num_states = graph.states().count();
         let fwd = graph.fwd();
         let bwd = graph.bwd();
+        println!("Start detecting sinks");
         let initial = StateSet::new_with_fun(num_states, |_| Some(graph.unit_params().clone()));
         let sink_pairs: Vec<(IdState, BddParams)> = graph
             .states()
@@ -47,6 +48,8 @@ pub fn components<F>(
         if cancelled.load(Ordering::SeqCst) {
             return ();
         }
+
+        println!("Sinks detected");
 
         let mut sinks = StateSet::new(num_states);
         for (s, is_sink) in sink_pairs {

@@ -9,7 +9,7 @@ extern crate lazy_static;
 extern crate json;
 
 use rocket::http::hyper::header::AccessControlAllowOrigin;
-use rocket::http::ContentType;
+use rocket::http::{ContentType, Header};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
@@ -462,6 +462,10 @@ impl<'r> Responder<'r> for BackendResponse {
         Response::build()
             .header(ContentType::Plain)
             .header(AccessControlAllowOrigin::Any)
+            // This magic set of headers might fix some CROS issues, but we are not sure yet...
+            .header(Header::new("Allow", "GET, POST, OPTIONS, PUT, DELETE"))
+            .header(Header::new("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE"))
+            .header(Header::new("Access-Control-Allow-Headers", "X-API-KEY, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method"))
             .sized_body(cursor)
             .ok()
     }
