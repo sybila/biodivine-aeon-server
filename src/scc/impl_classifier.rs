@@ -17,6 +17,23 @@ impl Classifier {
         };
     }
 
+    // Try to fetch the current number of discovered classes in a non-blocking manner
+    pub fn try_get_num_classes(&self) -> Option<usize> {
+        return match self.classes.try_lock() {
+            Ok(data) => Some((*data).len()),
+            _ => None,
+        };
+    }
+
+    // Try to obtain a copy of data in a non-blocking manner (useful if we want to check
+    // results but the computation is still running).
+    pub fn try_export_result(&self) -> Option<HashMap<Class, BddParams>> {
+        return match self.classes.try_lock() {
+            Ok(data) => Some((*data).clone()),
+            _ => None,
+        }
+    }
+
     pub fn get_params(&self, class: &Class) -> Option<BddParams> {
         let data = self.classes.lock().unwrap();
         return (*data).get(class).map(|p| p.clone());

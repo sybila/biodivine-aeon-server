@@ -33,11 +33,11 @@ pub fn components<F>(
                     .fold(graph.empty_params(), |a, (_, b)| a.union(&b));
                 let is_sink = graph.unit_params().minus(&has_next);
                 if !is_sink.is_empty() {
-                    let mut sink_set = StateSet::new(num_states);
+                    /*let mut sink_set = StateSet::new(num_states);
                     sink_set.put(*s, is_sink.clone());
                     scope.spawn(|_| {
                         on_component(sink_set);
-                    });
+                    });*/
                     Some((*s, is_sink))
                 } else {
                     None
@@ -55,10 +55,22 @@ pub fn components<F>(
         for (s, is_sink) in sink_pairs {
             sinks.put(s, is_sink);
         }
+
+        // This is technically not correct - on_component is called with individual components -
+        // sinks are multiple different components. it works for with our classifier and is a bit
+        // more efficient if there is a lot of sinks
+        let report = sinks.clone();
+        scope.spawn(|_| {
+            on_component(report); // notify about the sinks we have found
+        });
+
         let can_reach_sink =
-            guarded_reach(&bwd, &sinks, &initial, &AtomicBool::new(false), &progress);
-        // This is not correct - on_component is called with individual components - sinks are multiple different components.
-        //on_component(sinks); // notify about the sinks we have found
+            guarded_reach(&bwd, &sinks, &initial, &cancelled, &progress);
+
+        if cancelled.load(Ordering::SeqCst) {
+            return ();
+        }
+
         let initial = StateSet::new_with_fun(num_states, |i| {
             if let Some(sink) = can_reach_sink.get(i) {
                 Some(graph.unit_params().minus(sink))
