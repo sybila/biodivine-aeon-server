@@ -14,22 +14,30 @@ impl StateSet {
         return StateSet(vec![Some(default.clone()); capacity]);
     }
 
-    pub fn new_with_fun<F>(capacity: usize, mut init: F) -> StateSet
+    pub fn new_with_fun<F>(capacity: usize, init: F) -> StateSet
     where
-        F: FnMut(IdState) -> Option<BddParams>,
+        F: Fn(IdState) -> Option<BddParams> + Send + Sync,
     {
-        let mut data = Vec::new();
-        for i in 0..capacity {
-            let p = init(IdState::from(i));
-            if let Some(p) = p {
-                if !p.is_empty() {
-                    data.push(Some(p));
+        let mut data = vec![None; capacity];
+        let data_pairs: Vec<(usize, BddParams)> = (0..capacity)
+            .collect::<Vec<_>>()
+            .par_iter()
+            .filter_map(|i: &usize| {
+                let p = init(IdState::from(*i));
+                if let Some(p) = p {
+                    if !p.is_empty() {
+                        Some((*i, p))
+                    } else {
+                        None
+                    }
                 } else {
-                    data.push(None);
+                    None
                 }
-            } else {
-                data.push(None);
-            }
+            })
+            .collect::<Vec<_>>();
+
+        for (i, p) in data_pairs {
+            data[i] = Some(p);
         }
         return StateSet(data);
     }
@@ -147,15 +155,22 @@ impl StateSet {
 
     pub fn element_binary_op<F>(&self, other: &Self, op: F) -> Self
     where
-        F: Fn(&Option<BddParams>, &Option<BddParams>) -> Option<BddParams>,
+        F: Fn(&Option<BddParams>, &Option<BddParams>) -> Option<BddParams> + Send + Sync,
     {
         if self.0.len() != other.0.len() {
             panic!("Incompatible state sets!");
         }
-        let mut result = Vec::with_capacity(self.0.len());
-        for i in 0..self.0.len() {
-            let params = op(&self.0[i], &other.0[i]).filter(|p| !p.is_empty());
-            result.push(params);
+        let mut result = vec![None; self.0.len()];
+        let value_pairs: Vec<(usize, BddParams)> = (0..self.0.len()).collect::<Vec<_>>()
+            .par_iter()
+            .filter_map(|i: &usize| {
+                op(&self.0[*i], &other.0[*i])
+                    .filter(|p| !p.is_empty())
+                    .map(|p| (*i, p))
+            })
+            .collect::<Vec<_>>();
+        for (i,p) in value_pairs {
+            result[i] = Some(p);
         }
         return StateSet(result);
     }

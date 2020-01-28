@@ -86,6 +86,7 @@ pub fn components<F>(
             );
             let remaining: f64 = queue.iter().map(|(_, b)| *b).sum::<f64>() + universe_cardinality;
             progress.update_remaining(remaining);
+            println!("Look for pivots...");
             let pivots = find_pivots(graph, &universe);
             println!("Pivots state count: {}", pivots.iter().count());
             let forward = guarded_reach(&fwd, &pivots, &universe, cancelled, &progress);
@@ -139,6 +140,8 @@ pub fn components<F>(
                 queue.push(with_cardinality(unreachable_terminals));
             }
         }
+
+        println!("Main component loop done...");
     })
     .unwrap();
 }
