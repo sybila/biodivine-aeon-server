@@ -23,7 +23,7 @@ pub mod scc;
 mod test_main;
 
 use crate::scc::algo_components::components;
-use rocket::Data;
+use rocket::{Data, Config};
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,6 +31,7 @@ use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use biodivine_lib_param_bn::bdd_params::BddParams;
+use rocket::config::Environment;
 
 /// Computation keeps all information
 struct Computation {
@@ -487,7 +488,14 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
 
 fn main() {
     //test_main::run();
-    rocket::ignite()
+    let address = std::env::var("AEON_ADDR").unwrap_or("localhost".to_string());
+    let port: u16 = std::env::var("AEON_PORT").ok().and_then(|s| s.parse::<u16>().ok()).unwrap_or(8000);
+    let config = Config::build(Environment::Production)
+        .address(address)
+        .port(port)
+        .finalize();
+
+    rocket::custom(config.unwrap())
         .mount(
             "/",
             routes![
