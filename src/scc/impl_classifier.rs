@@ -35,6 +35,13 @@ impl Classifier {
         }
     }
 
+    pub fn try_get_params(&self, class: &Class) -> Option<Option<BddParams>> {
+        return match self.classes.try_lock() {
+            Ok(data) => Some((*data).get(class).map(|p| p.clone())),
+            _ => None,
+        }
+    }
+
     pub fn get_params(&self, class: &Class) -> Option<BddParams> {
         let data = self.classes.lock().unwrap();
         return (*data).get(class).map(|p| p.clone());
@@ -47,7 +54,6 @@ impl Classifier {
 
     pub fn add_component(&self, component: StateSet, graph: &AsyncGraph) {
         // first, remove all sink states
-        let capacity = component.capacity();
         let without_sinks = self.filter_sinks(component, graph);
         //let (real_oscillation, real_disorder) = self.decide_oscillation_vs_disorder(without_sinks.clone());
 

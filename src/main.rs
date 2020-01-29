@@ -30,6 +30,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use biodivine_lib_param_bn::bdd_params::BddParams;
 
 /// Computation keeps all information
 struct Computation {
@@ -117,6 +118,29 @@ fn ping() -> BackendResponse {
     return BackendResponse::ok(&response.to_string());
 }
 
+// Try to obtain current class data or none if classifier is busy
+fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> {
+    for _ in 0..5 {
+        if let Some(data) = classifier.try_export_result() {
+            return Some(data);
+        }
+        // wait a little - maybe the lock will become free
+        std::thread::sleep(Duration::new(1, 0));
+    }
+    return None;
+}
+
+fn try_get_class_params(classifier: &Classifier, class: &Class) -> Option<Option<BddParams>> {
+    for _ in 0..5 {
+        if let Some(data) = classifier.try_get_params(class) {
+            return Some(data);
+        }
+        // wait a little - maybe the lock will become free
+        std::thread::sleep(Duration::new(1, 0));
+    }
+    return None;
+}
+
 #[get("/get_results")]
 fn get_results() -> BackendResponse {
     let is_partial;
@@ -126,16 +150,7 @@ fn get_results() -> BackendResponse {
         if let Some(cmp) = &*cmp {
             is_partial = cmp.thread.is_some();
             if let Some(classes) = &cmp.classifier {
-                let mut result = None;
-                for _ in 0..5 {
-                    if let Some(data) = classes.try_export_result() {
-                        result = Some(data);
-                        break;
-                    }
-                    // wait a little - maybe the lock will become free
-                    std::thread::sleep(Duration::new(1, 0));
-                }
-                if let Some(result) = result {
+                if let Some(result) = try_get_result(classes) {
                     result
                 } else {
                     return BackendResponse::err(&"Classification running. Cannot export components right now.".to_string());
@@ -186,28 +201,32 @@ fn get_witness(class_str: String) -> BackendResponse {
         let cmp = cmp.read().unwrap();
         if let Some(cmp) = &*cmp {
             if let Some(classifier) = &cmp.classifier {
-                if let Some(class) = classifier.get_params(&class) {
-                    if let Some(graph) = &cmp.graph {
-                        let witness = graph.make_witness(&class);
-                        let layout = read_layout(cmp.input_model.as_str());
-                        let mut model_string = format!("{}", witness); // convert back to aeon
-                        model_string += "\n";
-                        for (var, (x, y)) in layout {
-                            model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
+                if let Some(has_class) = try_get_class_params(classifier, &class) {
+                    if let Some(class) = has_class {
+                        if let Some(graph) = &cmp.graph {
+                            let witness = graph.make_witness(&class);
+                            let layout = read_layout(cmp.input_model.as_str());
+                            let mut model_string = format!("{}", witness); // convert back to aeon
+                            model_string += "\n";
+                            for (var, (x, y)) in layout {
+                                model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
+                            }
+                            let (name, description) = read_metadata(cmp.input_model.as_str());
+                            if let Some(name) = name {
+                                model_string += format!("#name:{}\n", name).as_str();
+                            }
+                            if let Some(description) = description {
+                                model_string += format!("#description:{}\n", description).as_str();
+                            }
+                            BackendResponse::ok(&object! { "model" => model_string }.to_string())
+                        } else {
+                            return BackendResponse::err(&"No results available.".to_string());
                         }
-                        let (name, description) = read_metadata(cmp.input_model.as_str());
-                        if let Some(name) = name {
-                            model_string += format!("#name:{}\n", name).as_str();
-                        }
-                        if let Some(description) = description {
-                            model_string += format!("#description:{}\n", description).as_str();
-                        }
-                        BackendResponse::ok(&object! { "model" => model_string }.to_string())
                     } else {
-                        return BackendResponse::err(&"No results available.".to_string());
+                        return BackendResponse::err(&"Specified class has no witness.".to_string());
                     }
                 } else {
-                    return BackendResponse::err(&"Specified class has no witness.".to_string());
+                    return BackendResponse::err(&"Classification in progress. Cannot extract witness right now.".to_string());
                 }
             } else {
                 return BackendResponse::err(&"No results available.".to_string());
