@@ -29,9 +29,11 @@ use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
 /// Computation keeps all information
 struct Computation {
+    timestamp: SystemTime,
     is_cancelled: Arc<AtomicBool>, // indicate to the server that the computation should be cancelled
     input_model: String,           // .aeon string representation of the model
     graph: Option<Arc<AsyncGraph>>, // Model graph - used to create witnesses
@@ -39,6 +41,14 @@ struct Computation {
     progress: Option<Arc<ProgressTracker>>, // Used to access progress of the computation
     thread: Option<JoinHandle<()>>, // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
     error: Option<String>,          // A string error from the computation
+}
+
+impl Computation {
+    pub fn start_timestamp(&self) -> u128 {
+        return self.timestamp.duration_since(UNIX_EPOCH)
+            .expect("Time error")
+            .as_millis();
+    }
 }
 
 lazy_static! {
@@ -78,20 +88,19 @@ fn check_update_function(data: Data) -> BackendResponse {
 fn ping() -> BackendResponse {
     println!("...ping...");
     let mut response = object! {
-        "has_computation" => false,
-        "is_cancelled" => false,
-        "running" => false,
-        "progress" => "unknown".to_string(),
-        "error" => json::Null,
+        "timestamp" => json::Null,          // if there is some computation (not necessarily running, this is the time when it started
+        "is_cancelled" => false,            // true if the computation has been canceled
+        "running" => false,                 // true if the computation thread is still alive
+        "progress" => "unknown".to_string(),// arbitrary progress string
+        "error" => json::Null,              // arbitrary error string - currently not really used
+        "num_classes" => json::Null         // number of discovered classes so far
     };
     {
         // Read data from current computation if available...
         let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-        // TODO: Computation contains classifier that can be locked for quite some time
-        // Maybe that one should have a separate lock so that it does not block ping.
         let cmp = cmp.read().unwrap();
         if let Some(computation) = &*cmp {
-            response["has_computation"] = true.into();
+            response["timestamp"] = (computation.start_timestamp() as u64).into();
             response["is_cancelled"] = computation.is_cancelled.load(Ordering::SeqCst).into();
             if let Some(progress) = &computation.progress {
                 response["progress"] = progress.get_percent_string().into();
@@ -99,6 +108,9 @@ fn ping() -> BackendResponse {
             response["is_running"] = computation.thread.is_some().into();
             if let Some(error) = &computation.error {
                 response["error"] = error.clone().into();
+            }
+            if let Some(classes) = computation.classifier.as_ref().map(|c| c.try_get_num_classes()) {
+                response["num_classes"] = classes.into();
             }
         }
     }
@@ -114,7 +126,20 @@ fn get_results() -> BackendResponse {
         if let Some(cmp) = &*cmp {
             is_partial = cmp.thread.is_some();
             if let Some(classes) = &cmp.classifier {
-                classes.export_result()
+                let mut result = None;
+                for _ in 0..5 {
+                    if let Some(data) = classes.try_export_result() {
+                        result = Some(data);
+                        break;
+                    }
+                    // wait a little - maybe the lock will become free
+                    std::thread::sleep(Duration::new(1, 0));
+                }
+                if let Some(result) = result {
+                    result
+                } else {
+                    return BackendResponse::err(&"Classification running. Cannot export components right now.".to_string());
+                }
             } else {
                 return BackendResponse::err(&"Results not available yet.".to_string());
             }
@@ -170,6 +195,13 @@ fn get_witness(class_str: String) -> BackendResponse {
                         for (var, (x, y)) in layout {
                             model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
                         }
+                        let (name, description) = read_metadata(cmp.input_model.as_str());
+                        if let Some(name) = name {
+                            model_string += format!("#name:{}\n", name).as_str();
+                        }
+                        if let Some(description) = description {
+                            model_string += format!("#description:{}\n", description).as_str();
+                        }
                         BackendResponse::ok(&object! { "model" => model_string }.to_string())
                     } else {
                         return BackendResponse::err(&"No results available.".to_string());
@@ -217,6 +249,7 @@ fn start_computation(data: Data) -> BackendResponse {
                             }
                         }
                         let mut new_cmp = Computation {
+                            timestamp: SystemTime::now(),
                             is_cancelled: Arc::new(AtomicBool::new(false)),
                             input_model: aeon_string.clone(),
                             graph: None,
@@ -279,10 +312,11 @@ fn start_computation(data: Data) -> BackendResponse {
                         });
                         new_cmp.thread = Some(cmp_thread);
 
+                        let start = new_cmp.start_timestamp();
                         // Now write the new computation to the global state...
                         *cmp = Some(new_cmp);
 
-                        BackendResponse::ok(&"\"Ok\"".to_string()) // status of the computation can be obtained via ping...
+                        BackendResponse::ok(&object!{ "timestamp" => start as u64 }.to_string()) // status of the computation can be obtained via ping...
                     }
                 }
                 Err(error) => BackendResponse::err(&error),
@@ -369,6 +403,22 @@ fn read_layout(aeon_string: &str) -> HashMap<String, (f64, f64)> {
         }
     }
     return layout;
+}
+
+fn read_metadata(aeon_string: &str) -> (Option<String>, Option<String>) {
+    let mut model_name = None;
+    let mut model_description = None;
+    let name_regex = Regex::new(r"^\s*#name:(?P<name>.+)$").unwrap();
+    let description_regex = Regex::new(r"^\s*#description:(?P<desc>.+)$").unwrap();
+    for line in aeon_string.lines() {
+        if let Some(captures) = name_regex.captures(line) {
+            model_name = Some(captures["name"].to_string());
+        }
+        if let Some(captures) = description_regex.captures(line) {
+            model_description = Some(captures["desc"].to_string());
+        }
+    }
+    return (model_name, model_description);
 }
 
 /// Accept an Aeon file, try to parse it into a `BooleanNetwork`

@@ -99,6 +99,7 @@ where
     }
 
     while !changed.is_empty() {
+        println!("Cancelled: {}", cancelled.load(Ordering::SeqCst));
         if cancelled.load(Ordering::SeqCst) {
             return result_set; // result is incorrect, but we are cancelled so we don't care...
         }
