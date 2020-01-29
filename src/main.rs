@@ -195,6 +195,13 @@ fn get_witness(class_str: String) -> BackendResponse {
                         for (var, (x, y)) in layout {
                             model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
                         }
+                        let (name, description) = read_metadata(cmp.input_model.as_str());
+                        if let Some(name) = name {
+                            model_string += format!("#name:{}\n", name).as_str();
+                        }
+                        if let Some(description) = description {
+                            model_string += format!("#description:{}\n", description).as_str();
+                        }
                         BackendResponse::ok(&object! { "model" => model_string }.to_string())
                     } else {
                         return BackendResponse::err(&"No results available.".to_string());
@@ -396,6 +403,22 @@ fn read_layout(aeon_string: &str) -> HashMap<String, (f64, f64)> {
         }
     }
     return layout;
+}
+
+fn read_metadata(aeon_string: &str) -> (Option<String>, Option<String>) {
+    let mut model_name = None;
+    let mut model_description = None;
+    let name_regex = Regex::new(r"^\s*#name:(?P<name>.+)$").unwrap();
+    let description_regex = Regex::new(r"^\s*#description:(?P<desc>.+)$").unwrap();
+    for line in aeon_string.lines() {
+        if let Some(captures) = name_regex.captures(line) {
+            model_name = Some(captures["name"].to_string());
+        }
+        if let Some(captures) = description_regex.captures(line) {
+            model_description = Some(captures["desc"].to_string());
+        }
+    }
+    return (model_name, model_description);
 }
 
 /// Accept an Aeon file, try to parse it into a `BooleanNetwork`
