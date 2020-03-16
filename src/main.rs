@@ -13,16 +13,15 @@ use rocket::http::{ContentType, Header};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
-use crate::scc::{Behaviour, Class, Classifier, ProgressTracker};
+use biodivine_aeon_server::scc::{Behaviour, Class, Classifier, ProgressTracker};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use regex::Regex;
 use std::convert::TryFrom;
 
-pub mod scc;
 mod test_main;
 
-use crate::scc::algo_components::components;
+use biodivine_aeon_server::scc::algo_components::components;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use rocket::config::Environment;
 use rocket::{Config, Data};

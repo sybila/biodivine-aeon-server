@@ -1,12 +1,4 @@
-use crate::scc::algo_components::components;
-use crate::scc::{Classifier, ProgressTracker};
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
-use biodivine_lib_param_bn::BooleanNetwork;
-use std::convert::TryFrom;
-use std::io::Read;
-use std::sync::atomic::AtomicBool;
-
-pub fn run() {
+/*pub fn run() {
     let mut buffer = String::new();
     std::io::stdin().read_to_string(&mut buffer).unwrap();
 
@@ -34,7 +26,7 @@ pub fn run() {
     });
 
     classifier.print();
-}
+}*/
 
 /*
 # Problematic model - according to the new implementation, it oscillates

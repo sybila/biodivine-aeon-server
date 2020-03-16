@@ -99,13 +99,13 @@ where
     }
 
     while !changed.is_empty() {
-        println!("Cancelled: {}", cancelled.load(Ordering::SeqCst));
+        //println!("Cancelled: {}", cancelled.load(Ordering::SeqCst));
         if cancelled.load(Ordering::SeqCst) {
             return result_set; // result is incorrect, but we are cancelled so we don't care...
         }
 
         progress.update_last_wave(changed.len());
-        println!("Wave size: {}", changed.len());
+        //println!("Wave size: {}", changed.len());
 
         // All successors of changed states
         let recompute: HashSet<IdState> = all_possible_successors(fwd, &changed);

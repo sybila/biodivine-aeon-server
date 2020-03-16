@@ -28,3 +28,9 @@ args = ["bench" , "--no-default-features"]
 [tasks.build-release-unsafe]
 command = "cargo"
 args = ["build", "--release", "--no-default-features"]
+
+# CAV 2020 benchmarks
+
+[tasks.experiment]
+command = "cargo"
+args = ["run", "--release", "--bin", "experiment"]
