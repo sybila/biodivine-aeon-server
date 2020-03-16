@@ -3,6 +3,7 @@ name = "biodivine-aeon-server"
 version = "0.1.2"
 authors = ["Samuel Pastva <daemontus@gmail.com>"]
 edition = "2018"
+default-run = "biodivine-aeon-server"
 
 # Enable rich docs for some online docs autogen services.
 [package.metadata.docs.rs]
