@@ -23,7 +23,10 @@ More information about the operation of Aeon can be found in the official manual
 http://biodivine.fi.muni.cz/aeon/manual.pdf
 
 ### Building from source
-To build the engine from source, you need a nightly Rust toolchain. Then you can simply run `cargo build --release`
+To build the engine from source, you need a nightly Rust toolchain. 
+Once you install Rust, you can use `rustup default nightly` to configure
+the default toolchain. 
+Then you can simply run `cargo build --release`
 in project root directory. The binary will be located in `target/release/biodivine-aeon-server`.
 
 ## Standalone experiments
@@ -37,6 +40,8 @@ cargo run --release --bin experiment < path/to/model.aeon
 As the model path, you can use one of the `.aeon` models provided 
 in the `benchmarks` directory (note that some might require non-trivial
 time and memory).
+
+Note that running the experiments from command line also requires Rust nightly toolchain.  
 
 If you have [cargo make](https://github.com/sagiegurari/cargo-make) installed, you can
 also run the same command more easily with:
