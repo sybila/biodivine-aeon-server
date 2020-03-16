@@ -23,15 +23,15 @@ pub mod scc;
 mod test_main;
 
 use crate::scc::algo_components::components;
-use rocket::{Data, Config};
+use biodivine_lib_param_bn::bdd_params::BddParams;
+use rocket::config::Environment;
+use rocket::{Config, Data};
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
-use biodivine_lib_param_bn::bdd_params::BddParams;
-use rocket::config::Environment;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Computation keeps all information
 struct Computation {
@@ -43,13 +43,24 @@ struct Computation {
     progress: Option<Arc<ProgressTracker>>, // Used to access progress of the computation
     thread: Option<JoinHandle<()>>, // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
     error: Option<String>,          // A string error from the computation
+    finished_timestamp: Option<SystemTime>, // A timestamp when the computation was completed (if done)
 }
 
 impl Computation {
     pub fn start_timestamp(&self) -> u128 {
-        return self.timestamp.duration_since(UNIX_EPOCH)
+        return self
+            .timestamp
+            .duration_since(UNIX_EPOCH)
             .expect("Time error")
             .as_millis();
+    }
+
+    pub fn end_timestamp(&self) -> Option<u128> {
+        return self.finished_timestamp.map(|t| {
+            t.duration_since(UNIX_EPOCH)
+                .expect("Time error")
+                .as_millis()
+        });
     }
 }
 
@@ -111,7 +122,11 @@ fn ping() -> BackendResponse {
             if let Some(error) = &computation.error {
                 response["error"] = error.clone().into();
             }
-            if let Some(classes) = computation.classifier.as_ref().map(|c| c.try_get_num_classes()) {
+            if let Some(classes) = computation
+                .classifier
+                .as_ref()
+                .map(|c| c.try_get_num_classes())
+            {
                 response["num_classes"] = classes.into();
             }
         }
@@ -145,16 +160,30 @@ fn try_get_class_params(classifier: &Classifier, class: &Class) -> Option<Option
 #[get("/get_results")]
 fn get_results() -> BackendResponse {
     let is_partial;
-    let data = {
+    let (data, elapsed) = {
         let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
         let cmp = cmp.read().unwrap();
         if let Some(cmp) = &*cmp {
             is_partial = cmp.thread.is_some();
             if let Some(classes) = &cmp.classifier {
-                if let Some(result) = try_get_result(classes) {
-                    result
+                let mut result = None;
+                for _ in 0..5 {
+                    if let Some(data) = classes.try_export_result() {
+                        result = Some(data);
+                        break;
+                    }
+                    // wait a little - maybe the lock will become free
+                    std::thread::sleep(Duration::new(1, 0));
+                }
+                if let Some(result) = result {
+                    (
+                        result,
+                        cmp.end_timestamp().map(|t| t - cmp.start_timestamp()),
+                    )
                 } else {
-                    return BackendResponse::err(&"Classification running. Cannot export components right now.".to_string());
+                    return BackendResponse::err(
+                        &"Classification running. Cannot export components right now.".to_string(),
+                    );
                 }
             } else {
                 return BackendResponse::err(&"Results not available yet.".to_string());
@@ -170,15 +199,18 @@ fn get_results() -> BackendResponse {
 
     println!("Result {:?}", lines);
 
+    let elapsed = if let Some(e) = elapsed { e } else { 0 };
+
     let mut json = String::new();
     for index in 0..lines.len() - 1 {
         json += &format!("{},", lines[index]);
     }
     json = format!(
-        "{{ \"isPartial\":{}, \"data\":[{}{}] }}",
+        "{{ \"isPartial\":{}, \"data\":[{}{}], \"elapsed\":{} }}",
         is_partial,
         json,
-        lines.last().unwrap()
+        lines.last().unwrap(),
+        elapsed,
     );
 
     return BackendResponse::ok(&json);
@@ -224,10 +256,15 @@ fn get_witness(class_str: String) -> BackendResponse {
                             return BackendResponse::err(&"No results available.".to_string());
                         }
                     } else {
-                        return BackendResponse::err(&"Specified class has no witness.".to_string());
+                        return BackendResponse::err(
+                            &"Specified class has no witness.".to_string(),
+                        );
                     }
                 } else {
-                    return BackendResponse::err(&"Classification in progress. Cannot extract witness right now.".to_string());
+                    return BackendResponse::err(
+                        &"Classification in progress. Cannot extract witness right now."
+                            .to_string(),
+                    );
                 }
             } else {
                 return BackendResponse::err(&"No results available.".to_string());
@@ -277,6 +314,7 @@ fn start_computation(data: Data) -> BackendResponse {
                             progress: None,
                             thread: None,
                             error: None,
+                            finished_timestamp: None,
                         };
                         let cancelled = new_cmp.is_cancelled.clone();
                         // Prepare thread - not that we have computation locked, so the thread
@@ -308,6 +346,16 @@ fn start_computation(data: Data) -> BackendResponse {
                                         classifier.add_component(component, &graph);
                                     });
 
+                                    {
+                                        if let Some(cmp) = cmp.write().unwrap().as_mut() {
+                                            cmp.finished_timestamp = Some(SystemTime::now());
+                                        } else {
+                                            panic!(
+                                                "Cannot finish computation. No computation found."
+                                            )
+                                        }
+                                    }
+
                                     println!("Component search done...");
                                 }
                                 Err(error) => {
@@ -336,7 +384,8 @@ fn start_computation(data: Data) -> BackendResponse {
                         // Now write the new computation to the global state...
                         *cmp = Some(new_cmp);
 
-                        BackendResponse::ok(&object!{ "timestamp" => start as u64 }.to_string()) // status of the computation can be obtained via ping...
+                        BackendResponse::ok(&object! { "timestamp" => start as u64 }.to_string())
+                        // status of the computation can be obtained via ping...
                     }
                 }
                 Err(error) => BackendResponse::err(&error),
@@ -489,7 +538,10 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
 fn main() {
     //test_main::run();
     let address = std::env::var("AEON_ADDR").unwrap_or("localhost".to_string());
-    let port: u16 = std::env::var("AEON_PORT").ok().and_then(|s| s.parse::<u16>().ok()).unwrap_or(8000);
+    let port: u16 = std::env::var("AEON_PORT")
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(8000);
     let config = Config::build(Environment::Production)
         .address(address)
         .port(port)

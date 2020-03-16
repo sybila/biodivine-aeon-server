@@ -1,5 +1,6 @@
 use super::{Behaviour, Class, Classifier, StateSet};
 use crate::scc::algo_components::find_pivots_basic;
+use crate::scc::algo_par_reach::next_step;
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
@@ -7,7 +8,6 @@ use biodivine_lib_std::IdState;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::scc::algo_par_reach::next_step;
 
 impl Classifier {
     pub fn new(graph: &AsyncGraph) -> Classifier {
@@ -39,7 +39,7 @@ impl Classifier {
         return match self.classes.try_lock() {
             Ok(data) => Some((*data).get(class).map(|p| p.clone())),
             _ => None,
-        }
+        };
     }
 
     pub fn get_params(&self, class: &Class) -> Option<BddParams> {
