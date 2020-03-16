@@ -32,7 +32,7 @@ impl Classifier {
         return match self.classes.try_lock() {
             Ok(data) => Some((*data).clone()),
             _ => None,
-        }
+        };
     }
 
     pub fn try_get_params(&self, class: &Class) -> Option<Option<BddParams>> {

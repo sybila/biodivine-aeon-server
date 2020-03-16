@@ -161,7 +161,8 @@ impl StateSet {
             panic!("Incompatible state sets!");
         }
         let mut result = vec![None; self.0.len()];
-        let value_pairs: Vec<(usize, BddParams)> = (0..self.0.len()).collect::<Vec<_>>()
+        let value_pairs: Vec<(usize, BddParams)> = (0..self.0.len())
+            .collect::<Vec<_>>()
             .par_iter()
             .filter_map(|i: &usize| {
                 op(&self.0[*i], &other.0[*i])
@@ -169,7 +170,7 @@ impl StateSet {
                     .map(|p| (*i, p))
             })
             .collect::<Vec<_>>();
-        for (i,p) in value_pairs {
+        for (i, p) in value_pairs {
             result[i] = Some(p);
         }
         return StateSet(result);

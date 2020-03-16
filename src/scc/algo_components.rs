@@ -64,8 +64,7 @@ pub fn components<F>(
             on_component(report); // notify about the sinks we have found
         });
 
-        let can_reach_sink =
-            guarded_reach(&bwd, &sinks, &initial, &cancelled, &progress);
+        let can_reach_sink = guarded_reach(&bwd, &sinks, &initial, &cancelled, &progress);
 
         if cancelled.load(Ordering::SeqCst) {
             return ();
