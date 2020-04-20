@@ -1,6 +1,4 @@
 use super::{Behaviour, Class, Classifier, StateSet};
-use crate::scc::algo_components::find_pivots_basic;
-use crate::scc::algo_par_reach::next_step;
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
@@ -8,6 +6,11 @@ use biodivine_lib_std::IdState;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+#[cfg(feature = "extended_oscillation")]
+use crate::scc::algo_components::find_pivots_basic;
+#[cfg(feature = "extended_oscillation")]
+use crate::scc::algo_par_reach::next_step;
 
 impl Classifier {
     pub fn new(graph: &AsyncGraph) -> Classifier {
@@ -52,6 +55,41 @@ impl Classifier {
         return (*data).clone();
     }
 
+    #[cfg(not(feature = "extended_oscillation"))]
+    pub fn add_component(&self, component: StateSet, graph: &AsyncGraph) {
+        let without_sinks = self.filter_sinks(component, graph);
+        if let Some(not_sink_params) = without_sinks.fold_union() {
+            let fwd = graph.fwd();
+            let mut not_cycle = graph.empty_params();
+            for (s, p) in without_sinks.iter() {
+                let mut to_be_seen = p.clone(); // sinks are removed, so there must be an edge for every parameter
+                let mut seen_more_than_once = graph.empty_params();
+                for (successor, edge_params) in fwd.step(s) {
+                    // Parameters for which this edge (s -> successor) is in the attractor.
+                    let successor_params = p.intersect(&edge_params).intersect(without_sinks.get(successor).unwrap_or(&graph.empty_params()));
+
+                    // Parameters which were already seen for some previous edge.
+                    let already_seen = successor_params.minus(&to_be_seen);
+                    seen_more_than_once = seen_more_than_once.union(&already_seen);
+
+                    // Mark all of this as seen.
+                    to_be_seen = to_be_seen.minus(&successor_params);
+                }
+                // Everything that was seen more than once is not in a cycle
+                not_cycle = not_cycle.union(&seen_more_than_once);
+            }
+            let cycle = not_sink_params.minus(&not_cycle);
+            if !not_cycle.is_empty() {
+                self.push(Behaviour::Disorder, not_cycle);
+            }
+            if !cycle.is_empty() {
+                self.push(Behaviour::Oscillation, cycle);
+            }
+        }
+    }
+
+    /* OLD VERSION OF OSCILLATION */
+    #[cfg(feature = "extended_oscillation")]
     pub fn add_component(&self, component: StateSet, graph: &AsyncGraph) {
         // first, remove all sink states
         let without_sinks = self.filter_sinks(component, graph);
@@ -295,8 +333,10 @@ impl Classifier {
 }
 
 /// Oscillator partitions the
+#[cfg(feature = "extended_oscillation")]
 struct Oscillator(Vec<StateSet>, BddParams);
 
+#[cfg(feature = "extended_oscillation")]
 impl Oscillator {
     pub fn new_with_pivots(pivots: StateSet, empty: BddParams) -> Oscillator {
         return Oscillator(vec![pivots], empty);
