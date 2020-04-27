@@ -17,6 +17,10 @@ impl Class {
         vec.sort();
         return Class(vec);
     }
+
+    pub fn get_vector(&self) -> Vec<Behaviour> {
+        self.0.clone()
+    }
 }
 
 impl Display for Class {
