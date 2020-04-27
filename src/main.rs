@@ -297,10 +297,11 @@ fn get_attractors(class_str: String) -> BackendResponse {
                     if let Some(class) = has_class {
                         if let Some(graph) = &cmp.graph {
                             let witness : BooleanNetwork = graph.make_witness(&class);
-                            let mut variable_names = vec![];
+                            let mut all_variables = vec![];
                             for id in witness.graph().variable_ids() {
-                                variable_names.push(format!("{:?}", witness.graph().get_variable(id)));
+                                all_variables.push(format!("{:?}", witness.graph().get_variable(id).to_string()));
                             }
+                            let var_count = all_variables.len();
                             let async_graph = AsyncGraph::new(witness);
                             match async_graph {
                                 Ok(async_graph) => {
@@ -321,7 +322,6 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                             for (to_state, under_param) in fwd.step(from_state) {
                                                 if under_param.cardinality() > 0.0 {
                                                     no_succ = false;
-                                                    println!("{:?} -> {:?}", from_state, to_state);
                                                     attractor_graph.push((from_state, to_state));
                                                 }
                                             }
@@ -342,24 +342,31 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                         if behavior.len() != 1 { // multiple stabilities
                                             for (j, edge) in graph.iter().enumerate() {
                                                 if j != 0 { json += ","; }
-                                                json += &format!("{{\"class\":\"Stability\", \"edges\":0, \"graph\": \"{} -> {};\"}}", edge.0, edge.0);
+                                                let from_index: usize = edge.0.into();
+                                                let from: String = format!("{:064b}", from_index).chars().rev().take(var_count).collect();
+                                                json += &format!("{{\"class\":\"Stability\", \"edges\":0, \"graph\": [\"{}\", \"{}\"]}}", from, from);
                                             }
                                         } else if behavior.len() == 1 { // everything else
-                                            json += &format!("{{ \"class\":\"{:?}\", \"graph\":\"", behavior.first().unwrap());
+                                            json += &format!("{{\"class\":\"{:?}\", \"graph\":[", behavior.first().unwrap());
                                             let mut edge_count = 0;
-                                            for edge in graph {
+                                            for (j, edge) in graph.iter().enumerate() {
+                                                let from_index: usize = edge.0.into();
+                                                let to_index: usize = edge.1.into();
+                                                let from: String = format!("{:064b}", from_index).chars().rev().take(var_count).collect();
+                                                let to: String = format!("{:064b}", to_index).chars().rev().take(var_count).collect();
+                                                if j != 0 { json += "," }
+                                                json += &format!("[\"{}\", \"{}\"]", from, to);
                                                 edge_count += 1;
-                                                json += &format!("{} -> {}; ", edge.0, edge.1); //to inner, to binary
                                             }
-                                            json += &format!("\", \"edges\":{}}}", edge_count);
+                                            json += &format!("], \"edges\":{}}}", edge_count);
                                         }
                                     }
-
-                                    json = "[".to_owned() + &json + "]";
-
-                                    println!("\"VARIABLES\" : {:?}", variable_names);
-
-                                    BackendResponse::ok(&format!("{}",json))// all_attractors.into_inner().unwrap().len()))
+                                    json = "{ \"attractors\":[".to_owned() + &json + "], \"variables\":[";
+                                    for (i, var) in all_variables.iter().enumerate() {
+                                        if i != 0 { json += ","; }
+                                        json += var; 
+                                    }
+                                    BackendResponse::ok(&(json + "]}"))
                                 },
                                 Err(error_msg) => BackendResponse::err(&error_msg)
                             }
