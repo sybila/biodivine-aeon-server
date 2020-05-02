@@ -344,7 +344,7 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                                 if j != 0 { json += ","; }
                                                 let from_index: usize = edge.0.into();
                                                 let from: String = format!("{:064b}", from_index).chars().rev().take(var_count).collect();
-                                                json += &format!("{{\"class\":\"Stability\", \"edges\":0, \"graph\": [\"{}\", \"{}\"]}}", from, from);
+                                                json += &format!("{{\"class\":\"Stability\", \"edges\":0, \"graph\": [[\"{}\", \"{}\"]]}}", from, from);
                                             }
                                         } else if behavior.len() == 1 { // everything else
                                             json += &format!("{{\"class\":\"{:?}\", \"graph\":[", behavior.first().unwrap());
