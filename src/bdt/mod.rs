@@ -1,0 +1,570 @@
+use crate::scc::Class;
+use biodivine_lib_bdd::bdd;
+use biodivine_lib_param_bn::bdd_params::{BddParameterEncoder, BddParams};
+use biodivine_lib_param_bn::{BooleanNetwork, VariableId};
+use biodivine_lib_std::param_graph::Params;
+use std::collections::HashMap;
+
+#[derive(Clone)]
+pub struct Attribute {
+    name: String,
+    positive: BddParams,
+    negative: BddParams,
+}
+
+pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, BddParams>) {
+    for v in network.graph().variable_ids() {
+        if network.get_update_function(v).is_some() {
+            panic!("Only fully parametrised networks are supported at the moment.")
+        }
+
+        for r in network.graph().regulators(v) {
+            let reg = network.graph().find_regulation(r, v).unwrap();
+            if reg.get_monotonicity().is_none() {
+                panic!("Regulation with unspecified monotonicity found.")
+            }
+            if !reg.is_observable() {
+                panic!("Non-observable regulation found.")
+            }
+        }
+    }
+
+    println!("digraph G {{");
+    println!("init__ [label=\"\", style=invis, height=0, width=0];");
+    println!("init__ -> 0;");
+    let mut node_id = 0;
+    let encoder = BddParameterEncoder::new(network);
+    let all = classes.iter().fold(BddParams::from(encoder.bdd_variables.mk_false()), |a, (_, b)| a.union(b));
+    let attributes = make_attributes(network, &encoder, &all);
+    let mut remaining = classes.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
+    let (a, b, c) = learn(network, &encoder, &mut node_id, &attributes, classes, &mut remaining);
+    println!("Classified: {}; Scrap: {}; Total: {}", a, b, c);
+    println!("}}");
+}
+
+const CUT_OFF: bool = false;
+
+fn learn(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    node_id: &mut usize,
+    attributes: &Vec<Attribute>,
+    classes: &HashMap<Class, BddParams>,
+    remaining: &mut f64,
+) -> (f64, f64, usize) {
+    if classes.len() == 0 {
+        panic!("This should not happen")
+    } else if classes.len() == 1 {
+        let (class, params) = classes.iter().next().unwrap();
+        let c = params.cardinality();
+        *remaining -= c;
+        println!("Remaining: {}; Classified: {}", remaining, c);
+        //println!("{}[label=\"{}({})\"];", node_id, format!("{}", class).replace("\"", ""), params.cardinality());
+        return (c, 0.0, 1);
+    }/* else if classes.len() == 2 {
+        let mut i = classes.iter();
+        let (c1, p2) = i.next().unwrap();
+        let (c2, p1) = i.next().unwrap();
+        let c = p1.cardinality() + p2.cardinality();
+        *remaining -= c;
+        //println!("Remaining: {}; Classified: {}", remaining, c);
+        println!("{}[label=\"{}({}) and {}({})\"];", node_id, format!("{}", c1).replace("\"", ""), p1.cardinality(), format!("{}", c2).replace("\"", ""), p2.cardinality());
+        return (c, 0.0, 1);
+    }*/
+    if CUT_OFF {
+        let cardinality: Vec<f64> = classes.iter().map(|(c, p)| p.cardinality()).collect();
+        let total = cardinality.iter().fold(0.0, |a, b| a + *b);
+        for c in cardinality {
+            if c > 0.8 * total {
+                *remaining -= total;
+                println!("Remaining: {}; Classified: {}", remaining, c);
+                return (total, 0.0, 1);
+            }
+        }
+    }
+    let original_entropy = entropy(classes);
+    let mut max_gain = f64::NEG_INFINITY;
+    let mut max_attribute: Option<Attribute> = None;
+    let retained_attributes: Vec<Attribute> = attributes.iter()
+        .cloned()
+        .filter(|attr| {
+            let positive_dataset = apply_attribute(classes, &attr.positive);
+            let negative_dataset = apply_attribute(classes, &attr.negative);
+            /*let gain = if positive_dataset.len() == 1 {
+                // prefer fully classified datasets
+                positive_dataset.iter().fold(0.0, |a, (_, p)| a + p.cardinality())
+            } else if negative_dataset.len() == 1 {
+                negative_dataset.iter().fold(0.0, |a, (_, p)| a + p.cardinality())
+            } else {
+                original_entropy
+                    - (0.5 * entropy(&positive_dataset) + 0.5 * entropy(&negative_dataset))
+            };*/
+            let gain = original_entropy
+                - (0.5 * entropy(&positive_dataset) + 0.5 * entropy(&negative_dataset));
+            if gain > max_gain {
+                max_gain = gain;
+                max_attribute = Some(attr.clone());
+            }
+            let all_c = classes.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
+            let p_c = positive_dataset.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
+            let n_c = negative_dataset.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
+            //println!("{} gain {} // {}({}%) | {}({}%)", attr.name, gain, positive_dataset.len(), ((p_c/all_c) * 100.0) as i32, negative_dataset.len(), ((n_c/all_c) * 100.0) as i32);
+            gain > f64::NEG_INFINITY
+        }).collect();
+
+    if let Some(attr) = max_attribute {
+        //println!("Selected {}", attr.name);
+        let my_node_id = *node_id;
+        //println!("{}[label=\"{}\"];", my_node_id, attr.name);
+        *node_id += 1;
+        //println!("{} -> {} [style=filled];", my_node_id, node_id);
+        let (a1, b1, c1) = learn(network, encoder, node_id, &retained_attributes, &apply_attribute(classes, &attr.positive), remaining);
+        *node_id += 1;
+       // println!("{} -> {} [style=dotted];", my_node_id, node_id);
+        let (a2, b2, c2) = learn(network, encoder, node_id, &retained_attributes, &apply_attribute(classes, &attr.negative), remaining);
+        return (a1 + a2, b1 + b2, c1 + c2 + 1);
+    } else {
+        /*println!("Cannot learn more! Problematic witness:");
+        let (_, params) = classes.iter().next().unwrap();
+        println!("{}", network.make_witness(params, encoder));
+        panic!("");*/
+        let scrap = classes.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
+        *remaining -= scrap;
+        println!("Remaining: {}; Scrap: {}", remaining, scrap);
+        return (0.0, scrap, 1);
+    }
+}
+
+/// Compute entropy of the behaviour class data set
+fn entropy(classes: &HashMap<Class, BddParams>) -> f64 {
+    if classes.is_empty() {
+        return f64::INFINITY;
+    }
+    let mut result = 0.0;
+    let cardinality: Vec<f64> = classes.values().map(|it| it.cardinality()).collect();
+    let total = cardinality.iter().fold(0.0, |a, b| a + *b);
+    for c in cardinality.iter() {
+        let proportion = *c / total;
+        result += -proportion * proportion.log2();
+    }
+    return result;
+}
+
+/// Restrict given classes using the specified attribute parameters
+fn apply_attribute(
+    classes: &HashMap<Class, BddParams>,
+    attribute: &BddParams,
+) -> HashMap<Class, BddParams> {
+    let mut result = HashMap::new();
+    for (c, p) in classes {
+        let new_p = attribute.intersect(p);
+        if !new_p.is_empty() {
+            result.insert(c.clone(), new_p);
+        }
+    }
+    return result;
+}
+
+fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all: &BddParams) -> Vec<Attribute> {
+    let mut result = Vec::new();
+    let graph = network.graph();
+    for target in network.graph().variable_ids() {
+        let regulators = network.graph().regulators(target);
+        for a in regulators.iter() {
+            for b in regulators.iter() {
+                if a == b {
+                    continue;
+                }
+                let r_a = graph.find_regulation(*a, target).unwrap();
+                let r_b = graph.find_regulation(*b, target).unwrap();
+                result.push(make_enables(network, &encoder, target, *a, *b));
+                result.push(make_disables(network, &encoder, target, *a, *b));
+                result.push(make_eq(network, encoder, target, *a, *b));
+                result.push(make_xor(network, encoder, target, *a, *b));
+                // if they also have equal monotonicity, we can consider cooperation
+                // a < b ensures we only build one attribute for each pair, since coop(a,b) = coop(b,a)
+                if r_a.get_monotonicity() == r_b.get_monotonicity() && a < b {
+                    result.push(make_cooperation(network, &encoder, target, *a, *b));
+                    result.push(make_anti_cooperation(network, &encoder, target, *a, *b));
+                }
+                if a < b {
+                    // these are also symmetric in a-b, so no need to create them twice
+                    for c in regulators.iter() {
+                        if c == a || c == b {
+                            continue;
+                        }
+                        result.push(make_enables2(network, encoder, target, (*a, *b), *c));
+                        result.push(make_disables2(network, encoder, target, (*a, *b), *c));
+                        if a < c && b < c {
+                            for d in regulators.iter() {
+                                if d == a || d == b || d == c {
+                                    continue;
+                                }
+                                result.push(make_enables3(network, encoder, target, (*a, *b, *c), *d));
+                                result.push(make_disables3(network, encoder, target, (*a, *b, *c), *d));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        /*for entry in encoder.implicit_function_table(target) {
+            let var = encoder.get_implicit_var_for_table(&entry);
+            result.push(Attribute {
+                name: format!("entry {:?} in {}", var, network.graph().get_variable(target)),
+                positive: BddParams::from(encoder.bdd_variables.mk_var(var)),
+                negative: BddParams::from(encoder.bdd_variables.mk_not_var(var))
+            })
+        }*/
+    }
+
+/*
+    let dna = network.graph().find_variable("DNA").unwrap();
+    let p53 = network.graph().find_variable("P53").unwrap();
+    let m2n = network.graph().find_variable("M2N").unwrap();
+    let dna_p53_in_dna = make_enables(network, encoder, dna, dna, p53);
+    let dna_p53_in_m2n = make_enables(network, encoder, m2n, dna, p53);
+    let positive = dna_p53_in_dna.positive.intersect(&dna_p53_in_m2n.positive);
+    result.push(Attribute {
+        name: format!("DNA enables P53"),
+        negative: BddParams::from(positive.clone().into_bdd().not()),
+        positive,
+    });
+
+    let dna_p53_in_dna = make_disables(network, encoder, dna, dna, p53);
+    let dna_p53_in_m2n = make_disables(network, encoder, m2n, dna, p53);
+    let positive = dna_p53_in_dna.positive.intersect(&dna_p53_in_m2n.positive);
+    result.push(Attribute {
+        name: format!("DNA disables P53"),
+        negative: BddParams::from(positive.clone().into_bdd().not()),
+        positive,
+    });
+*/
+/*
+    let a = make_disables(network, encoder, m2n, dna, p53);
+    let b = make_disables(network, encoder, m2n, p53, dna);
+    let when = a.positive.intersect(&b.positive).intersect(all);
+    println!("{}", network.make_witness(&when, encoder));*/
+
+    return result;
+}
+
+/// When in cooperation, variables have effect only when active together, meaning
+/// (A, B) ... f(0,0) <=> f(1,0) <=> f(0,1)
+fn make_cooperation(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    a: VariableId,
+    b: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a) == false && entry.get_value(b) == false {
+            let zero_zero = encoder.get_implicit_var_for_table(&entry);
+            let one_zero = encoder.get_implicit_var_for_table(&entry.flip_value(a));
+            let zero_one = encoder.get_implicit_var_for_table(&entry.flip_value(b));
+            let zero_zero = encoder.bdd_variables.mk_var(zero_zero);
+            let one_zero = encoder.bdd_variables.mk_var(one_zero);
+            let zero_one = encoder.bdd_variables.mk_var(zero_one);
+            params = bdd![params & ((zero_zero <=> one_zero) & (zero_zero <=> zero_one))];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "cooperation({}, {}) in {}",
+            network.graph().get_variable(a),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+fn make_anti_cooperation(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    a: VariableId,
+    b: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a) == true && entry.get_value(b) == true {
+            let one_one = encoder.get_implicit_var_for_table(&entry);
+            let zero_one = encoder.get_implicit_var_for_table(&entry.flip_value(a));
+            let one_zero = encoder.get_implicit_var_for_table(&entry.flip_value(b));
+            let one_one = encoder.bdd_variables.mk_var(one_one);
+            let one_zero = encoder.bdd_variables.mk_var(one_zero);
+            let zero_one = encoder.bdd_variables.mk_var(zero_one);
+            params = bdd![params & ((one_one <=> one_zero) & (one_one <=> zero_one))];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "anti-cooperation({}, {}) in {}",
+            network.graph().get_variable(a),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+/// When in A disables B, it means B can't have effect when A is active.
+/// (A, B) ... f(1,0) <=> f(1,1)
+fn make_disables(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    a: VariableId,
+    b: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a) == true && entry.get_value(b) == false {
+            let one_zero = encoder.get_implicit_var_for_table(&entry);
+            let one_one = encoder.get_implicit_var_for_table(&entry.flip_value(b));
+            let one_zero = encoder.bdd_variables.mk_var(one_zero);
+            let one_one = encoder.bdd_variables.mk_var(one_one);
+            params = bdd![params & (one_zero <=> one_one)];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "({} disables {}) in {}",
+            network.graph().get_variable(a),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+fn make_eq(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    a: VariableId,
+    b: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a) == false && entry.get_value(b) == false {
+            let zero_zero = encoder.get_implicit_var_for_table(&entry);
+            let one_one = encoder.get_implicit_var_for_table(&entry.flip_value(b).flip_value(a));
+            let zero_zero = encoder.bdd_variables.mk_var(zero_zero);
+            let one_one = encoder.bdd_variables.mk_var(one_one);
+            params = bdd![params & (zero_zero <=> one_one)];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "({} EQ {}) in {}",
+            network.graph().get_variable(a),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+
+fn make_xor(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    a: VariableId,
+    b: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a) == true && entry.get_value(b) == false {
+            let one_zero = encoder.get_implicit_var_for_table(&entry);
+            let zero_one = encoder.get_implicit_var_for_table(&entry.flip_value(b).flip_value(a));
+            let one_zero = encoder.bdd_variables.mk_var(one_zero);
+            let zero_one = encoder.bdd_variables.mk_var(zero_one);
+            params = bdd![params & (one_zero <=> zero_one)];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "({} XOR {}) in {}",
+            network.graph().get_variable(a),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+/// When A enables B, it means B can't have effect when A is not active.
+/// (A, B) ... f(0,0) <=> f(0,1)
+fn make_enables(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    a: VariableId,
+    b: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a) == false && entry.get_value(b) == false {
+            let zero_zero = encoder.get_implicit_var_for_table(&entry);
+            let zero_one = encoder.get_implicit_var_for_table(&entry.flip_value(b));
+            let zero_zero = encoder.bdd_variables.mk_var(zero_zero);
+            let zero_one = encoder.bdd_variables.mk_var(zero_one);
+            params = bdd![params & (zero_zero <=> zero_one)];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "({} enables {}) in {}",
+            network.graph().get_variable(a),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+/// When (A1,A2) enables B, it means B can't have effect unless A1 or A2 is active.
+fn make_enables2(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    (a1, a2): (VariableId, VariableId),
+    b: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a1) == false && entry.get_value(a2) == false && entry.get_value(b) == false {
+            let zero_zero = encoder.get_implicit_var_for_table(&entry);
+            let zero_one = encoder.get_implicit_var_for_table(&entry.flip_value(b));
+            let zero_zero = encoder.bdd_variables.mk_var(zero_zero);
+            let zero_one = encoder.bdd_variables.mk_var(zero_one);
+            params = bdd![params & (zero_zero <=> zero_one)];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "(({} or {}) enables {}) in {}",
+            network.graph().get_variable(a1),
+            network.graph().get_variable(a2),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+/// When in (A1, A2) disables B, it means B can't have effect when A1 and A2 is active.
+/// (A, B) ... f(1,0) <=> f(1,1)
+fn make_disables2(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    (a1, a2): (VariableId, VariableId),
+    b: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a1) == true && entry.get_value(a2) == true && entry.get_value(b) == false {
+            let one_zero = encoder.get_implicit_var_for_table(&entry);
+            let one_one = encoder.get_implicit_var_for_table(&entry.flip_value(b));
+            let one_zero = encoder.bdd_variables.mk_var(one_zero);
+            let one_one = encoder.bdd_variables.mk_var(one_one);
+            params = bdd![params & (one_zero <=> one_one)];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "(({} and {}) disables {}) in {}",
+            network.graph().get_variable(a1),
+            network.graph().get_variable(a2),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+fn make_disables3(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    (a1, a2, a3): (VariableId, VariableId, VariableId),
+    b: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a1) == true && entry.get_value(a2) == true && entry.get_value(a3) == true && entry.get_value(b) == false {
+            let one_zero = encoder.get_implicit_var_for_table(&entry);
+            let one_one = encoder.get_implicit_var_for_table(&entry.flip_value(b));
+            let one_zero = encoder.bdd_variables.mk_var(one_zero);
+            let one_one = encoder.bdd_variables.mk_var(one_one);
+            params = bdd![params & (one_zero <=> one_one)];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "(({} and {} and {}) disables {}) in {}",
+            network.graph().get_variable(a1),
+            network.graph().get_variable(a2),
+            network.graph().get_variable(a3),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+fn make_enables3(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    (a1, a2, a3): (VariableId, VariableId, VariableId),
+    b: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a1) == false && entry.get_value(a2) == false && entry.get_value(a3) == false && entry.get_value(b) == false {
+            let zero_zero = encoder.get_implicit_var_for_table(&entry);
+            let zero_one = encoder.get_implicit_var_for_table(&entry.flip_value(b));
+            let zero_zero = encoder.bdd_variables.mk_var(zero_zero);
+            let zero_one = encoder.bdd_variables.mk_var(zero_one);
+            params = bdd![params & (zero_zero <=> zero_one)];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "(({} or {} or {}) enables {}) in {}",
+            network.graph().get_variable(a1),
+            network.graph().get_variable(a2),
+            network.graph().get_variable(a3),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}

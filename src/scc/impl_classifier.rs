@@ -66,7 +66,11 @@ impl Classifier {
                 let mut seen_more_than_once = graph.empty_params();
                 for (successor, edge_params) in fwd.step(s) {
                     // Parameters for which this edge (s -> successor) is in the attractor.
-                    let successor_params = p.intersect(&edge_params).intersect(without_sinks.get(successor).unwrap_or(&graph.empty_params()));
+                    let successor_params = p.intersect(&edge_params).intersect(
+                        without_sinks
+                            .get(successor)
+                            .unwrap_or(&graph.empty_params()),
+                    );
 
                     // Parameters which were already seen for some previous edge.
                     let already_seen = successor_params.minus(&to_be_seen);
