@@ -257,14 +257,12 @@ fn get_witness(class_str: String) -> BackendResponse {
                         }
                     } else {
                         return BackendResponse::err(
-                            &"Specified class has no witness.".to_string(),
-                        );
+                            &"Specified class has no witness.".to_string());
                     }
                 } else {
                     return BackendResponse::err(
                         &"Classification in progress. Cannot extract witness right now."
-                            .to_string(),
-                    );
+                            .to_string());
                 }
             } else {
                 return BackendResponse::err(&"No results available.".to_string());
@@ -297,6 +295,7 @@ fn get_attractors(class_str: String) -> BackendResponse {
                     if let Some(class) = has_class {
                         if let Some(graph) = &cmp.graph {
                             let witness : BooleanNetwork = graph.make_witness(&class);
+                            let witness_str = format!("{}", witness);
                             let mut all_variables = vec![];
                             for id in witness.graph().variable_ids() {
                                 all_variables.push(format!("{:?}", witness.graph().get_variable(id).to_string()));
@@ -366,7 +365,9 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                         if i != 0 { json += ","; }
                                         json += var; 
                                     }
-                                    BackendResponse::ok(&(json + "]}"))
+                                    json += &format!("], \"model\":{}",
+                                                     &object! { "model" => witness_str }.to_string());
+                                    BackendResponse::ok(&(json + "}"))
                                 },
                                 Err(error_msg) => BackendResponse::err(&error_msg)
                             }
