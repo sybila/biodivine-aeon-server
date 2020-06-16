@@ -18,6 +18,7 @@ impl Classifier {
         map.insert(Class::new_empty(), graph.unit_params().clone());
         return Classifier {
             classes: Mutex::new(map),
+            attractors: Mutex::new(Vec::new())
         };
     }
 
@@ -55,9 +56,18 @@ impl Classifier {
         return (*data).clone();
     }
 
+    pub fn export_components(&self) -> Vec<(StateSet, HashMap<Behaviour, BddParams>)> {
+        let data = self.attractors.lock().unwrap();
+        return (*data).clone();
+    }
+
     #[cfg(not(feature = "extended_oscillation"))]
     pub fn add_component(&self, component: StateSet, graph: &AsyncGraph) {
+        let attractor = component.clone();
+        let mut result = HashMap::new();
+        let all_params = component.fold_union().unwrap_or(graph.empty_params());
         let without_sinks = self.filter_sinks(component, graph);
+        result.insert(Behaviour::Stability, all_params.minus(&without_sinks.fold_union().unwrap_or(graph.empty_params())));
         if let Some(not_sink_params) = without_sinks.fold_union() {
             let fwd = graph.fwd();
             let mut not_cycle = graph.empty_params();
@@ -84,12 +94,16 @@ impl Classifier {
             }
             let cycle = not_sink_params.minus(&not_cycle);
             if !not_cycle.is_empty() {
+                result.insert(Behaviour::Disorder, not_cycle.clone());
                 self.push(Behaviour::Disorder, not_cycle);
             }
             if !cycle.is_empty() {
+                result.insert(Behaviour::Oscillation, cycle.clone());
                 self.push(Behaviour::Oscillation, cycle);
             }
         }
+        let mut attractors = self.attractors.lock().unwrap();
+        (*attractors).push((attractor, result));
     }
 
     /* OLD VERSION OF OSCILLATION */

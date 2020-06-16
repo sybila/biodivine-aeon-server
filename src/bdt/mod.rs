@@ -1,7 +1,7 @@
 use crate::scc::Class;
 use biodivine_lib_bdd::bdd;
-use biodivine_lib_param_bn::bdd_params::{BddParameterEncoder, BddParams};
-use biodivine_lib_param_bn::{BooleanNetwork, VariableId};
+use biodivine_lib_param_bn::bdd_params::{BddParameterEncoder, BddParams, FunctionTableEntry};
+use biodivine_lib_param_bn::{BooleanNetwork, VariableId, Variable};
 use biodivine_lib_std::param_graph::Params;
 use std::collections::HashMap;
 
@@ -21,10 +21,10 @@ pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, Bdd
         for r in network.graph().regulators(v) {
             let reg = network.graph().find_regulation(r, v).unwrap();
             if reg.get_monotonicity().is_none() {
-                panic!("Regulation with unspecified monotonicity found.")
+                //panic!("Regulation with unspecified monotonicity found.")
             }
             if !reg.is_observable() {
-                panic!("Non-observable regulation found.")
+                //panic!("Non-observable regulation found.")
             }
         }
     }
@@ -36,8 +36,20 @@ pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, Bdd
     let encoder = BddParameterEncoder::new(network);
     let all = classes.iter().fold(BddParams::from(encoder.bdd_variables.mk_false()), |a, (_, b)| a.union(b));
     let attributes = make_attributes(network, &encoder, &all);
+
+    /*
+    // Set fixed A=1
+    let A = network.graph().find_variable("A").unwrap();
+    let a_table = encoder.implicit_function_table(A);
+    assert_eq!(a_table.len(), 1);
+    let a_p = encoder.get_implicit_for_table(&a_table[0]);
+    let mut classes = classes.clone();
+    for (_, v) in classes.iter_mut() {
+        *v = v.intersect(&a_p);
+    }*/
+
     let mut remaining = classes.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
-    let (a, b, c) = learn(network, &encoder, &mut node_id, &attributes, classes, &mut remaining);
+    let (a, b, c) = learn(network, &encoder, &mut node_id, &attributes, &classes, &mut remaining, None);
     println!("Classified: {}; Scrap: {}; Total: {}", a, b, c);
     println!("}}");
 }
@@ -51,6 +63,7 @@ fn learn(
     attributes: &Vec<Attribute>,
     classes: &HashMap<Class, BddParams>,
     remaining: &mut f64,
+    prefer_leaf: Option<Class>
 ) -> (f64, f64, usize) {
     if classes.len() == 0 {
         panic!("This should not happen")
@@ -58,8 +71,8 @@ fn learn(
         let (class, params) = classes.iter().next().unwrap();
         let c = params.cardinality();
         *remaining -= c;
-        println!("Remaining: {}; Classified: {}", remaining, c);
-        //println!("{}[label=\"{}({})\"];", node_id, format!("{}", class).replace("\"", ""), params.cardinality());
+        //println!("Remaining: {}; Classified: {}", remaining, c);
+        println!("{}[label=\"{}({})\"];", node_id, format!("{}", class).replace("\"", ""), params.cardinality());
         return (c, 0.0, 1);
     }/* else if classes.len() == 2 {
         let mut i = classes.iter();
@@ -90,17 +103,35 @@ fn learn(
         .filter(|attr| {
             let positive_dataset = apply_attribute(classes, &attr.positive);
             let negative_dataset = apply_attribute(classes, &attr.negative);
-            /*let gain = if positive_dataset.len() == 1 {
+            let gain = original_entropy
+                - (0.5 * entropy(&positive_dataset) + 0.5 * entropy(&negative_dataset));
+            let gain = if positive_dataset.len() == 1 {
                 // prefer fully classified datasets
-                positive_dataset.iter().fold(0.0, |a, (_, p)| a + p.cardinality())
+                let g = positive_dataset.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
+                if let Some(preferred) = &prefer_leaf {
+                    if positive_dataset.get(&preferred).is_some() {
+                        f64::INFINITY
+                    } else {
+                        g
+                    }
+                } else {
+                    g
+                }
             } else if negative_dataset.len() == 1 {
-                negative_dataset.iter().fold(0.0, |a, (_, p)| a + p.cardinality())
+                let g = negative_dataset.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
+                if let Some(preferred) = &prefer_leaf {
+                    if negative_dataset.get(&preferred).is_some() {
+                        f64::INFINITY
+                    } else {
+                        g
+                    }
+                } else {
+                    g
+                }
             } else {
                 original_entropy
                     - (0.5 * entropy(&positive_dataset) + 0.5 * entropy(&negative_dataset))
-            };*/
-            let gain = original_entropy
-                - (0.5 * entropy(&positive_dataset) + 0.5 * entropy(&negative_dataset));
+            };
             if gain > max_gain {
                 max_gain = gain;
                 max_attribute = Some(attr.clone());
@@ -115,13 +146,20 @@ fn learn(
     if let Some(attr) = max_attribute {
         //println!("Selected {}", attr.name);
         let my_node_id = *node_id;
-        //println!("{}[label=\"{}\"];", my_node_id, attr.name);
+        println!("{}[label=\"{}\"];", my_node_id, attr.name);
         *node_id += 1;
-        //println!("{} -> {} [style=filled];", my_node_id, node_id);
-        let (a1, b1, c1) = learn(network, encoder, node_id, &retained_attributes, &apply_attribute(classes, &attr.positive), remaining);
+        println!("{} -> {} [style=filled];", my_node_id, node_id);
+        let positive_dataset = apply_attribute(classes, &attr.positive);
+        let negative_dataset = apply_attribute(classes, &attr.negative);
+        let prefer = if positive_dataset.len() == 1 {
+            Some(positive_dataset.iter().next().unwrap().0.clone())
+        } else if negative_dataset.len() == 1 {
+            Some(negative_dataset.iter().next().unwrap().0.clone())
+        } else { None };
+        let (a1, b1, c1) = learn(network, encoder, node_id, &retained_attributes, &positive_dataset, remaining, None);
         *node_id += 1;
-       // println!("{} -> {} [style=dotted];", my_node_id, node_id);
-        let (a2, b2, c2) = learn(network, encoder, node_id, &retained_attributes, &apply_attribute(classes, &attr.negative), remaining);
+        println!("{} -> {} [style=dotted];", my_node_id, node_id);
+        let (a2, b2, c2) = learn(network, encoder, node_id, &retained_attributes, &negative_dataset, remaining, None);
         return (a1 + a2, b1 + b2, c1 + c2 + 1);
     } else {
         /*println!("Cannot learn more! Problematic witness:");
@@ -168,7 +206,7 @@ fn apply_attribute(
 fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all: &BddParams) -> Vec<Attribute> {
     let mut result = Vec::new();
     let graph = network.graph();
-    for target in network.graph().variable_ids() {
+    /*for target in network.graph().variable_ids() {
         let regulators = network.graph().regulators(target);
         for a in regulators.iter() {
             for b in regulators.iter() {
@@ -179,8 +217,8 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
                 let r_b = graph.find_regulation(*b, target).unwrap();
                 result.push(make_enables(network, &encoder, target, *a, *b));
                 result.push(make_disables(network, &encoder, target, *a, *b));
-                result.push(make_eq(network, encoder, target, *a, *b));
-                result.push(make_xor(network, encoder, target, *a, *b));
+                //result.push(make_eq(network, encoder, target, *a, *b));
+                //result.push(make_xor(network, encoder, target, *a, *b));
                 // if they also have equal monotonicity, we can consider cooperation
                 // a < b ensures we only build one attribute for each pair, since coop(a,b) = coop(b,a)
                 if r_a.get_monotonicity() == r_b.get_monotonicity() && a < b {
@@ -216,7 +254,7 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
                 negative: BddParams::from(encoder.bdd_variables.mk_not_var(var))
             })
         }*/
-    }
+    }*/
 
 /*
     let dna = network.graph().find_variable("DNA").unwrap();
@@ -241,12 +279,489 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
     });
 */
 /*
+    let A = network.graph().find_variable("A").unwrap();
+    let B = network.graph().find_variable("B").unwrap();
+    let C = network.graph().find_variable("C").unwrap();
+
+    result.push(make_conditional_observability(&network, &encoder, C, A, vec![(B, true)]));
+    result.push(make_conditional_observability(&network, &encoder, C, A, vec![(B, false)]));
+    result.push(make_conditional_observability(&network, &encoder, C, B, vec![(A, true)]));
+    result.push(make_conditional_observability(&network, &encoder, C, B, vec![(A, false)]));
+
+    result.push(make_conditional_observability(&network, &encoder, A, A, vec![(B, true)]));
+    result.push(make_conditional_observability(&network, &encoder, A, A, vec![(B, false)]));
+    result.push(make_conditional_observability(&network, &encoder, A, B, vec![(A, true)]));
+    result.push(make_conditional_observability(&network, &encoder, A, B, vec![(A, false)]));
+
+    result.push(make_conditional_non_observability(&network, &encoder, C, A, vec![(B, true)]));
+    result.push(make_conditional_non_observability(&network, &encoder, C, A, vec![(B, false)]));
+    result.push(make_conditional_non_observability(&network, &encoder, C, B, vec![(A, true)]));
+    result.push(make_conditional_non_observability(&network, &encoder, C, B, vec![(A, false)]));
+
+    result.push(make_conditional_non_observability(&network, &encoder, A, A, vec![(B, true)]));
+    result.push(make_conditional_non_observability(&network, &encoder, A, A, vec![(B, false)]));
+    result.push(make_conditional_non_observability(&network, &encoder, A, B, vec![(A, true)]));
+    result.push(make_conditional_non_observability(&network, &encoder, A, B, vec![(A, false)]));
+
+    result.push(make_activation(&network, &encoder, A, A));
+    result.push(make_inhibition(&network, &encoder, A, A));
+    result.push(make_activation(&network, &encoder, C, A));
+    result.push(make_inhibition(&network, &encoder, C, A));
+    result.push(make_activation(&network, &encoder, A, B));
+    result.push(make_inhibition(&network, &encoder, A, B));
+    result.push(make_inhibition(&network, &encoder, C, B));
+    result.push(make_activation(&network, &encoder, C, B));
+    result.push(make_activation(&network, &encoder, B, C));
+    result.push(make_inhibition(&network, &encoder, B, C));
+
+    result.push(iff(
+        "B=1 => (A ->! C) iff (A ->! A)",
+        make_conditional_observability(&network, &encoder, C, A, vec![(B, true)]),
+        make_conditional_observability(&network, &encoder, A, A, vec![(B, true)]),
+    ));
+
+    result.push(both(
+        "B=1 => A observable in {C and A}",
+        make_conditional_observability(&network, &encoder, C, A, vec![(B, true)]),
+        make_conditional_observability(&network, &encoder, A, A, vec![(B, true)]),
+    ));
+
+    result.push(both(
+        "B=1 => A non-observable in {C and A}",
+        make_conditional_non_observability(&network, &encoder, C, A, vec![(B, true)]),
+        make_conditional_non_observability(&network, &encoder, A, A, vec![(B, true)]),
+    ));
+
+ */
+
+/*
     let a = make_disables(network, encoder, m2n, dna, p53);
     let b = make_disables(network, encoder, m2n, p53, dna);
     let when = a.positive.intersect(&b.positive).intersect(all);
     println!("{}", network.make_witness(&when, encoder));*/
 
+    let dna = network.graph().find_variable("DNA").unwrap();
+    let p53 = network.graph().find_variable("P53").unwrap();
+    let m2n = network.graph().find_variable("M2N").unwrap();
+    let m2c = network.graph().find_variable("M2C").unwrap();
+
+/*
+    for v in network.graph().variable_ids() {
+        for (i, entry) in encoder.implicit_function_table(v).iter().enumerate() {
+            result.push(Attribute {
+                name: format!("{:?}: {:?}", v, i),
+                positive: encoder.get_implicit_for_table(&entry),
+                negative: all.minus(&encoder.get_implicit_for_table(&entry)),
+            })
+        }
+    }
+*/
+
+    result.push(make_conditional_observability(&network, &encoder,
+                                               dna, dna, Vec::new()
+    ));
+
+    // P53 enables/disables DNA in DNA
+    result.push(make_enables(&network, &encoder, dna, p53, dna));
+    result.push(make_disables(&network, &encoder, dna, p53, dna));
+    // DNA enables/disables P53 in DNA
+    result.push(make_enables(&network, &encoder, dna, dna, p53));
+    result.push(make_disables(&network, &encoder, dna, dna, p53));
+
+    // P53 enables/disables DNA/M2C in M2N
+    result.push(make_enables(&network, &encoder, m2n, p53, dna));
+    result.push(make_disables(&network, &encoder, m2n, p53, dna));
+    result.push(make_enables(&network, &encoder, m2n, p53, m2c));
+    result.push(make_disables(&network, &encoder, m2n, p53, m2c));
+    // DNA ...
+    result.push(make_enables(&network, &encoder, m2n, dna, p53));
+    result.push(make_disables(&network, &encoder, m2n, dna, p53));
+    result.push(make_enables(&network, &encoder, m2n, dna, m2c));
+    result.push(make_disables(&network, &encoder, m2n, dna, m2c));
+    // M2C ...
+    result.push(make_enables(&network, &encoder, m2n, m2c, dna));
+    result.push(make_disables(&network, &encoder, m2n, m2c, dna));
+    result.push(make_enables(&network, &encoder, m2n, m2c, p53));
+    result.push(make_disables(&network, &encoder, m2n, m2c, p53));
+
+    result.push(make_cooperation(&network, &encoder, dna, dna, p53));
+    result.push(make_cooperation(&network, &encoder, m2n, dna, p53));
+    result.push(make_cooperation(&network, &encoder, m2n, dna, m2c));
+    result.push(make_cooperation(&network, &encoder, m2n, m2c, p53));
+
+    result.push(both(
+        "DNA observable in M2N regardless of P53",
+        make_conditional_observability(
+            &network, &encoder, m2n, dna, vec![(p53, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, dna, vec![(p53, false)]
+        )
+    ));
+    result.push(both(
+        "DNA observable in M2N regardless of M2C",
+        make_conditional_observability(
+            &network, &encoder, m2n, dna, vec![(m2c, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, dna, vec![(m2c, false)]
+        )
+    ));
+    result.push(both(
+        "P53 observable in M2N regardless of M2C",
+        make_conditional_observability(
+            &network, &encoder, m2n, p53, vec![(m2c, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, p53, vec![(m2c, false)]
+        )
+    ));
+    result.push(both(
+        "P53 observable in M2N regardless of DNA",
+        make_conditional_observability(
+            &network, &encoder, m2n, p53, vec![(dna, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, p53, vec![(dna, false)]
+        )
+    ));
+    result.push(both(
+        "M2C observable in M2N regardless of P53",
+        make_conditional_observability(
+            &network, &encoder, m2n, m2c, vec![(p53, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, m2c, vec![(p53, false)]
+        )
+    ));
+    result.push(both(
+        "M2C observable in M2N regardless of DNA",
+        make_conditional_observability(
+            &network, &encoder, m2n, m2c, vec![(dna, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, m2c, vec![(dna, false)]
+        )
+    ));
+
+    result.push(both(
+        "P53 observable in DNA regardless of DNA",
+        make_conditional_observability(
+            &network, &encoder, dna, p53, vec![(dna, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, dna, p53, vec![(dna, false)]
+        )
+    ));
+    result.push(both(
+        "DNA observable in DNA regardless of P53",
+        make_conditional_observability(
+            &network, &encoder, dna, dna, vec![(p53, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, dna, dna, vec![(p53, false)]
+        )
+    ));
+
+
+    // Global observability of P53 when DNA
+    result.push(both(
+        "P53 observable when (DNA, 1)",
+        make_conditional_observability(
+            &network, &encoder, dna, p53, vec![(dna, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, p53, vec![(dna, true)]
+        )
+    ));
+    result.push(both(
+        "P53 observable when (DNA, 0)",
+        make_conditional_observability(
+            &network, &encoder, dna, p53, vec![(dna, false)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, p53, vec![(dna, false)]
+        )
+    ));
+    result.push(iff(
+        "DNA=1 => (P53->!DNA) & (P53->!M2N)",
+        make_conditional_observability(
+            &network, &encoder, dna, p53, vec![(dna, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, p53, vec![(dna, true)]
+        )
+    ));
+    result.push(iff(
+        "DNA=0 => (P53->!DNA) & (P53->!M2N)",
+        make_conditional_observability(
+            &network, &encoder, dna, p53, vec![(dna, false)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, p53, vec![(dna, false)]
+        )
+    ));
+
+    // Global observability of DNA when P53
+    result.push(both(
+        "DNA observable when (P53, 1)",
+        make_conditional_observability(
+            &network, &encoder, dna, dna, vec![(p53, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, dna, vec![(p53, true)]
+        )
+    ));
+    result.push(both(
+        "DNA observable when (P53, 0)",
+        make_conditional_observability(
+            &network, &encoder, dna, dna, vec![(p53, false)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, dna, vec![(p53, false)]
+        )
+    ));
+/*    // DNA Observable when regardless of P53
+    result.push(both("DNA observable regardless of P53", both(
+        "DNA observable when (P53, 1)",
+        make_conditional_observability(
+            &network, &encoder, dna, dna, vec![(p53, true)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, dna, vec![(p53, true)]
+        )
+    ),both(
+        "DNA observable when (P53, 0)",
+        make_conditional_observability(
+            &network, &encoder, dna, dna, vec![(p53, false)]
+        ),
+        make_conditional_observability(
+            &network, &encoder, m2n, dna, vec![(p53, false)]
+        )
+    )));*/
+
+
+
+    result.push(iff(
+        "P53=1 => (DNA ->! DNA) iff (DNA ->! M2N)",
+        make_conditional_observability(&network, &encoder, dna, dna, vec![(p53, true)]),
+        make_conditional_observability(&network, &encoder, m2n, dna, vec![(p53, true)]),
+    ));
+
+    result.push(iff(
+        "P53=0 => (DNA ->! DNA) iff (DNA ->! M2N)",
+        make_conditional_observability(&network, &encoder, dna, dna, vec![(p53, false)]),
+        make_conditional_observability(&network, &encoder, m2n, dna, vec![(p53, false)]),
+    ));
+
+    // DNA observability
+    result.push(make_conditional_observability(
+        &network, &encoder,dna, dna, vec![(p53, true)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, dna, dna, vec![(p53, false)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, dna, p53, vec![(dna, true)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, dna, p53, vec![(dna, false)]
+    ));
+
+    // M2N Observability
+    // DNA obs. conditional on one other
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, dna, vec![(p53, false)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, dna, vec![(p53, true)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, dna, vec![(m2c, false)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, dna, vec![(m2c, true)]
+    ));
+
+    // P53 obs. conditional on one other
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, p53, vec![(dna, false)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, p53, vec![(dna, true)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, p53, vec![(m2c, false)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, p53, vec![(m2c, true)]
+    ));
+
+    // M2C obs. conditional on one other
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, m2c, vec![(p53, false)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, m2c, vec![(p53, true)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, m2c, vec![(dna, false)]
+    ));
+    result.push(make_conditional_observability(
+        &network, &encoder, m2n, m2c, vec![(dna, true)]
+    ));
+
+    result.push(make_conditional_enables(&network, &encoder, m2n, m2c, p53, vec![(dna, true)]));
+    result.push(make_conditional_enables(&network, &encoder, m2n, m2c, p53, vec![(dna, false)]));
+
+    result.push(make_conditional_enables(&network, &encoder, m2n, m2c, dna, vec![(p53, true)]));
+    result.push(make_conditional_enables(&network, &encoder, m2n, m2c, dna, vec![(p53, false)]));
+
+    result.push(make_conditional_enables(&network, &encoder, m2n, p53, m2c, vec![(dna, true)]));
+    result.push(make_conditional_enables(&network, &encoder, m2n, p53, m2c, vec![(dna, false)]));
+
+    result.push(make_conditional_enables(&network, &encoder, m2n, p53, dna, vec![(m2c, true)]));
+    result.push(make_conditional_enables(&network, &encoder, m2n, p53, dna, vec![(m2c, false)]));
+
+    result.push(make_conditional_enables(&network, &encoder, m2n, dna, p53, vec![(m2c, true)]));
+    result.push(make_conditional_enables(&network, &encoder, m2n, dna, p53, vec![(m2c, false)]));
+    result.push(make_conditional_enables(&network, &encoder, m2n, dna, m2c, vec![(p53, true)]));
+    result.push(make_conditional_enables(&network, &encoder, m2n, dna, m2c, vec![(p53, false)]));
+
+/*
+    result.push(make_eq(&network, &encoder, m2n, dna, m2c));
+    result.push(make_eq(&network, &encoder, m2n, dna, p53));
+    result.push(make_eq(&network, &encoder, m2n, p53, m2c));
+    result.push(make_xor(&network, &encoder, m2n, dna, m2c));
+    result.push(make_xor(&network, &encoder, m2n, dna, p53));
+    result.push(make_xor(&network, &encoder, m2n, p53, m2c));
+ */
+
+    /*let dna_observable_in_dna = make_conditional_observability(
+        &network, &encoder, dna, dna, vec![]
+    );
+    let dna_observable_in_m2n = make_conditional_observability(
+        &network, &encoder, m2n, dna, vec![]
+    );
+    let neither = dna_observable_in_dna.negative.into_bdd().and(&dna_observable_in_m2n.negative.into_bdd());
+    result.push(Attribute {
+        name: "DNA not observable".to_string(),
+        negative: BddParams::from(neither.not()),
+        positive: BddParams::from(neither),
+    });*/
+
     return result;
+}
+
+fn both(name: &str, a: Attribute, b: Attribute) -> Attribute {
+    let valid = a.positive.into_bdd().and(&b.positive.into_bdd());
+    return Attribute {
+        name: name.to_string(),
+        negative: BddParams::from(valid.not()),
+        positive: BddParams::from(valid)
+    }
+}
+
+fn iff(name: &str, a: Attribute, b: Attribute) -> Attribute {
+    let valid = a.positive.into_bdd().iff(&b.positive.into_bdd());
+    return Attribute {
+        name: name.to_string(),
+        negative: BddParams::from(valid.not()),
+        positive: BddParams::from(valid)
+    }
+}
+
+fn make_conditional_enables(network: &BooleanNetwork, encoder: &BddParameterEncoder, target: VariableId, a: VariableId, b: VariableId, conditionals: Vec<(VariableId, bool)>) -> Attribute {
+    let table: Vec<FunctionTableEntry> = encoder.implicit_function_table(target)
+        .into_iter()
+        .filter(|e| {
+            let cond = conditionals.iter().all(|(c, v)| e.get_value(*c) == *v);
+            let a_zero = !e.get_value(a);
+            let b_zero = !e.get_value(b);
+            cond && a_zero && b_zero
+        })
+        .collect();
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        //if entry.get_value(a) == false && entry.get_value(b) == false {
+            let zero_zero = encoder.get_implicit_var_for_table(&entry);
+            let zero_one = encoder.get_implicit_var_for_table(&entry.flip_value(b));
+            let zero_zero = encoder.bdd_variables.mk_var(zero_zero);
+            let zero_one = encoder.bdd_variables.mk_var(zero_one);
+            params = bdd![params & (zero_zero <=> zero_one)];
+        //}
+    }
+    return Attribute {
+        name: format!(
+            "({} enables {}) in {} when {:?}",
+            network.graph().get_variable(a),
+            network.graph().get_variable(b),
+            network.graph().get_variable(target),
+            conditionals
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+fn make_conditional_observability(network: &BooleanNetwork, encoder: &BddParameterEncoder, target: VariableId, regulator: VariableId, conditionals: Vec<(VariableId, bool)>) -> Attribute {
+    let table: Vec<FunctionTableEntry> = encoder.implicit_function_table(target)
+        .into_iter()
+        .filter(|e| {
+            let cond = conditionals.iter().all(|(c, v)| e.get_value(*c) == *v);
+            let reg_zero = !e.get_value(regulator);
+            cond && reg_zero
+        })
+        .collect();
+    let mut params = encoder.bdd_variables.mk_false();
+    for entry in table {
+        // clause: (regulator: 0, conditionals: 1) != (regulator: 1, conditionals: 1)
+        let inactive = encoder.get_implicit_var_for_table(&entry);
+        let inactive = encoder.bdd_variables.mk_var(inactive);
+        let active = encoder.get_implicit_var_for_table(&entry.flip_value(regulator));
+        let active = encoder.bdd_variables.mk_var(active);
+        params = bdd!(params | (!(active <=> inactive)));
+    }
+    return Attribute {
+        name: format!(
+            "{} observable in {} when {:?}",
+            network.graph().get_variable(regulator),
+            network.graph().get_variable(target),
+            conditionals//.iter().map(|(i, v)| (format!("({}, {})", network.graph().get_variable(*i).get_name(), *v))).collect::<Vec<String>>()
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    }
+}
+
+fn make_conditional_non_observability(network: &BooleanNetwork, encoder: &BddParameterEncoder, target: VariableId, regulator: VariableId, conditionals: Vec<(VariableId, bool)>) -> Attribute {
+    let table: Vec<FunctionTableEntry> = encoder.implicit_function_table(target)
+        .into_iter()
+        .filter(|e| {
+            let cond = conditionals.iter().all(|(c, v)| e.get_value(*c) == *v);
+            let reg_zero = !e.get_value(regulator);
+            cond && reg_zero
+        })
+        .collect();
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        // clause: (regulator: 0, conditionals: 1) != (regulator: 1, conditionals: 1)
+        let inactive = encoder.get_implicit_var_for_table(&entry);
+        let inactive = encoder.bdd_variables.mk_var(inactive);
+        let active = encoder.get_implicit_var_for_table(&entry.flip_value(regulator));
+        let active = encoder.bdd_variables.mk_var(active);
+        params = bdd!(params & ((active <=> inactive)));
+    }
+    return Attribute {
+        name: format!(
+            "{} non-observable in {} when {:?}",
+            network.graph().get_variable(regulator),
+            network.graph().get_variable(target),
+            conditionals//.iter().map(|(i, v)| (format!("({}, {})", network.graph().get_variable(*i).get_name(), *v))).collect::<Vec<String>>()
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    }
 }
 
 /// When in cooperation, variables have effect only when active together, meaning
@@ -439,6 +954,63 @@ fn make_enables(
         positive: BddParams::from(params),
     };
 }
+
+fn make_inhibition(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    a: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a) == false {
+            let zero = encoder.get_implicit_var_for_table(&entry);
+            let one = encoder.get_implicit_var_for_table(&entry.flip_value(a));
+            let zero = encoder.bdd_variables.mk_var(zero);
+            let one = encoder.bdd_variables.mk_var(one);
+            params = bdd![params & (one => zero)];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "{} is inhibition in {}",
+            network.graph().get_variable(a),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
+fn make_activation(
+    network: &BooleanNetwork,
+    encoder: &BddParameterEncoder,
+    target: VariableId,
+    a: VariableId,
+) -> Attribute {
+    let table = encoder.implicit_function_table(target);
+    let mut params = encoder.bdd_variables.mk_true();
+    for entry in table {
+        if entry.get_value(a) == false {
+            let zero = encoder.get_implicit_var_for_table(&entry);
+            let one = encoder.get_implicit_var_for_table(&entry.flip_value(a));
+            let zero = encoder.bdd_variables.mk_var(zero);
+            let one = encoder.bdd_variables.mk_var(one);
+            params = bdd![params & (zero => one)];
+        }
+    }
+    return Attribute {
+        name: format!(
+            "{} is activation in {}",
+            network.graph().get_variable(a),
+            network.graph().get_variable(target)
+        ),
+        negative: BddParams::from(params.not()),
+        positive: BddParams::from(params),
+    };
+}
+
 
 /// When (A1,A2) enables B, it means B can't have effect unless A1 or A2 is active.
 fn make_enables2(

@@ -1,0 +1,10 @@
+P53 -| DNA
+P53 -> M2C
+P53 -| M2N
+
+DNA ->? DNA
+DNA -| M2N
+
+M2C -> M2N
+
+M2N -| P53

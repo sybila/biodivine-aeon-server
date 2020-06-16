@@ -55,6 +55,7 @@ impl PartialOrd for Class {
 pub struct Classifier {
     //graph: &'a AsyncGraph,
     classes: Mutex<HashMap<Class, BddParams>>,
+    attractors: Mutex<Vec<(StateSet, HashMap<Behaviour, BddParams>)>>,
 }
 
 pub struct ProgressTracker {
