@@ -105,7 +105,7 @@ fn learn(
             let negative_dataset = apply_attribute(classes, &attr.negative);
             let gain = original_entropy
                 - (0.5 * entropy(&positive_dataset) + 0.5 * entropy(&negative_dataset));
-            let gain = if positive_dataset.len() == 1 {
+            /*let gain = if positive_dataset.len() == 1 {
                 // prefer fully classified datasets
                 let g = positive_dataset.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
                 if let Some(preferred) = &prefer_leaf {
@@ -131,7 +131,7 @@ fn learn(
             } else {
                 original_entropy
                     - (0.5 * entropy(&positive_dataset) + 0.5 * entropy(&negative_dataset))
-            };
+            };*/
             if gain > max_gain {
                 max_gain = gain;
                 max_attribute = Some(attr.clone());
@@ -466,7 +466,7 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
 
     // Global observability of P53 when DNA
     result.push(both(
-        "P53 observable when (DNA, 1)",
+        "P53 observable when DNA=1",
         make_conditional_observability(
             &network, &encoder, dna, p53, vec![(dna, true)]
         ),
@@ -475,7 +475,7 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
         )
     ));
     result.push(both(
-        "P53 observable when (DNA, 0)",
+        "P53 observable when DNA=0",
         make_conditional_observability(
             &network, &encoder, dna, p53, vec![(dna, false)]
         ),
@@ -483,8 +483,10 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
             &network, &encoder, m2n, p53, vec![(dna, false)]
         )
     ));
+
+
     result.push(iff(
-        "DNA=1 => (P53->!DNA) & (P53->!M2N)",
+        "(P53 observable in DNA) iff (P53 observable in M2N) when DNA=1",
         make_conditional_observability(
             &network, &encoder, dna, p53, vec![(dna, true)]
         ),
@@ -493,7 +495,7 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
         )
     ));
     result.push(iff(
-        "DNA=0 => (P53->!DNA) & (P53->!M2N)",
+        "(P53 observable in DNA) iff (P53 observable in M2N) when DNA=0",
         make_conditional_observability(
             &network, &encoder, dna, p53, vec![(dna, false)]
         ),
@@ -503,7 +505,7 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
     ));
 
     // Global observability of DNA when P53
-    result.push(both(
+    /*result.push(both(
         "DNA observable when (P53, 1)",
         make_conditional_observability(
             &network, &encoder, dna, dna, vec![(p53, true)]
@@ -520,7 +522,8 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
         make_conditional_observability(
             &network, &encoder, m2n, dna, vec![(p53, false)]
         )
-    ));
+    ));*/
+
 /*    // DNA Observable when regardless of P53
     result.push(both("DNA observable regardless of P53", both(
         "DNA observable when (P53, 1)",
@@ -542,7 +545,7 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
 
 
 
-    result.push(iff(
+    /*result.push(iff(
         "P53=1 => (DNA ->! DNA) iff (DNA ->! M2N)",
         make_conditional_observability(&network, &encoder, dna, dna, vec![(p53, true)]),
         make_conditional_observability(&network, &encoder, m2n, dna, vec![(p53, true)]),
@@ -552,7 +555,7 @@ fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all:
         "P53=0 => (DNA ->! DNA) iff (DNA ->! M2N)",
         make_conditional_observability(&network, &encoder, dna, dna, vec![(p53, false)]),
         make_conditional_observability(&network, &encoder, m2n, dna, vec![(p53, false)]),
-    ));
+    ));*/
 
     // DNA observability
     result.push(make_conditional_observability(
