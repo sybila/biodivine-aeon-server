@@ -33,6 +33,7 @@ pub enum Behaviour {
     Disorder,
 }
 
+// TODO: This is super inefficient - we have three behaviours, just make this a (usize, usize, usize).
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq)]
 pub struct Class(Vec<Behaviour>);
 

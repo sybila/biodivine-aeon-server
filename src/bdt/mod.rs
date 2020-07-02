@@ -4,12 +4,242 @@ use biodivine_lib_param_bn::bdd_params::{BddParameterEncoder, BddParams, Functio
 use biodivine_lib_param_bn::{BooleanNetwork, VariableId, Variable};
 use biodivine_lib_std::param_graph::Params;
 use std::collections::HashMap;
+use std::cmp::max;
+
+/// Encodes one node of a bifurcation decision tree. A node can be either a leaf (fully classified
+/// set of parametrisations), a decision node with a fixed attribute, or an unprocessed node
+/// with a remaining bifurcation function.
+#[derive(Debug)]
+pub enum BDTNode {
+    Leaf { class: Class, params: BddParams },
+    Decision { attribute: AttributeId, left: BDTNodeId, right: BDTNodeId },
+    Unprocessed { classes: HashMap<Class, BddParams> }
+}
+
+/// An identifier of a BDT node. These are used to quickly refer to parts of a BDT, for example
+/// from GUI.
+///
+/// I might want to delete a node - to avoid specifying a full path from root to the deleted node,
+/// I can use the ID which will automatically "jump" to the correct position in the tree.
+#[derive(Debug, Clone, Copy)]
+pub struct BDTNodeId(usize);
+
+#[derive(Debug, Clone, Copy)]
+pub struct AttributeId(usize);
+
+/// A Bifurcation decision tree. It stores the BDT nodes, mapping IDs to actual structures.
+/// It is the owner of the tree memory, so every addition/deletion in the tree must happen here.
+pub struct BDT {
+    storage: HashMap<usize, BDTNode>,
+    attributes: Vec<Attribute>,
+    next_id: usize
+}
+
+impl BDT {
+
+    pub fn new(classes: HashMap<Class, BddParams>, attributes: Vec<Attribute>) -> BDT {
+        let mut tree = BDT { storage: HashMap::new(), attributes, next_id: 0 };
+        tree.insert_new_node(classes);
+        return tree;
+    }
+
+    pub fn root_id() -> BDTNodeId {
+        return BDTNodeId(0);
+    }
+
+    pub fn is_unprocessed(&self, id: BDTNodeId) -> bool {
+        return if let BDTNode::Unprocessed { .. } = self.storage.get(&id.0).unwrap() {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn learn_tree(&mut self, max_depth: usize) {
+        let attr: Vec<usize> =  (0..(self.attributes.len())).collect();
+        return self.learn_tree_recursive(0, &attr, 0, max_depth);
+    }
+
+    pub fn dump_dot(&self) {
+        println!("digraph G {{");
+        println!("init__ [label=\"\", style=invis, height=0, width=0];");
+        println!("init__ -> 0;");
+        self.dump_dot_recursive(0);
+        println!("}}");
+    }
+
+    fn dump_dot_recursive(&self, node: usize) {
+        match &self.storage[&node] {
+            BDTNode::Leaf { class, params} => {
+                println!("{}[label=\"{}({})\"];", node, format!("{}", class).replace("\"", ""), params.cardinality());
+            }
+            BDTNode::Unprocessed { classes } => {
+                let classes: Vec<String> = classes.iter().map(|(c, p)| {
+                    format!("({},{})", c, p.cardinality()).replace("\"", "")
+                }).collect();
+                let classes = format!("{:?}", classes).replace("\"", "");
+                println!("{}[label=\"Unprocessed({})\"]", node, classes);
+            }
+            BDTNode::Decision { attribute, left, right } => {
+                let (left, right) = (left.0, right.0);
+                let attribute = &self.attributes[attribute.0];
+                println!("{}[label=\"{}\"]", node, attribute.name);
+                println!("{} -> {} [style=dotted];", node, left);
+                println!("{} -> {} [style=filled];", node, right);
+                self.dump_dot_recursive(left);
+                self.dump_dot_recursive(right);
+            }
+        }
+    }
+
+    fn learn_tree_recursive(&mut self, node: usize, attr: &Vec<usize>, depth: usize, max_depth: usize) {
+        if depth >= max_depth { return; }
+        match &self.storage[&node] {
+            BDTNode::Leaf { .. } => return,     // already processed, skip
+            BDTNode::Decision { attribute, left, right } => {
+                // Processed, but maybe has unprocessed children!
+                let (left, right) = (left.0, right.0);  // hint for borrow checker to release reference to self
+                self.learn_tree_recursive(left, attr, depth + 1, max_depth);
+                self.learn_tree_recursive(right, attr, depth + 1, max_depth);
+            }
+            BDTNode::Unprocessed { classes } => {
+                // Find best attribute and continue.
+                let mut continue_with = Vec::new();
+                let mut max: Option<(usize, f64)> = None;
+                for a in attr.iter() {
+                    let attribute = &self.attributes[*a];
+                    let gain = attribute.information_gain(classes);
+                    //println!("Gain {} from {}.", gain, attribute.name);
+                    if gain > f64::NEG_INFINITY {
+                        continue_with.push(*a);
+                        if let Some((current, current_gain)) = max {
+                            if gain > current_gain {
+                                max = Some((*a, gain));
+                            }
+                        } else {
+                            max = Some((*a, gain));
+                        }
+                    }
+                }
+                if let Some((max, max_gain)) = max {
+                    println!("Select attr: {} with gain {}", self.attributes[max].name, max_gain);
+                    let (l, r) = self.make_decision(BDTNodeId(node), AttributeId(max));
+                    self.learn_tree_recursive(l.0, &continue_with, depth + 1, max_depth);
+                    self.learn_tree_recursive(r.0, &continue_with, depth + 1, max_depth);
+                } else {
+                    panic!("No suitable attribute found!")
+                }
+            }
+        }
+    }
+
+    fn insert_leaf(&mut self, class: Class, params: BddParams) -> BDTNodeId {
+        let leaf = BDTNode::Leaf { class, params };
+        let leaf_id = self.next_id();
+        self.insert_or_replace(leaf_id, leaf, false);
+        return BDTNodeId(leaf_id);
+    }
+
+    fn insert_unprocessed(&mut self, classes: HashMap<Class, BddParams>) -> BDTNodeId {
+        let node = BDTNode::Unprocessed { classes };
+        let id = self.next_id();
+        self.insert_or_replace(id, node, false);
+        return BDTNodeId(id);
+    }
+
+    fn insert_new_node(&mut self, classes: HashMap<Class, BddParams>) -> BDTNodeId {
+        assert!(!classes.is_empty(), "Inserting empty node.");
+        return if classes.len() == 1 {
+            let (class, params) = classes.into_iter().next().unwrap();
+            self.insert_leaf(class, params)
+        } else {
+            self.insert_unprocessed(classes)
+        }
+    }
+
+    fn make_decision(&mut self, node: BDTNodeId, attribute_id: AttributeId) -> (BDTNodeId, BDTNodeId) {
+        let id = node.0;
+        let node = self.storage.get(&id).expect("Invalid node id.");
+        let attribute = self.attributes.get(attribute_id.0).expect("Invalid attribute id.");
+        if let BDTNode::Unprocessed { classes } = node {
+            let (left_data, right_data) = attribute.restrict(classes);
+            assert!(!(left_data.is_empty() || right_data.is_empty()), "No decision based on attribute {}.", attribute.name);
+            let left = self.insert_new_node(left_data);
+            let right = self.insert_new_node(right_data);
+            let decision = BDTNode::Decision {
+                attribute: attribute_id, left, right
+            };
+            self.insert_or_replace(id, decision, true);
+            return (left, right);
+        } else {
+            panic!("Expected unprocessed node.");
+        }
+    }
+
+    fn insert_or_replace(&mut self, id: usize, node: BDTNode, replace: bool) {
+        let old = self.storage.insert(id, node);
+        assert_eq!(replace, old.is_some(), "Modifying {:?}, but {:?} already in the tree.", id, old);
+    }
+
+    fn next_id(&mut self) -> usize {
+        let id = self.next_id;
+        self.next_id += 1;
+        return id;
+    }
+
+}
+
+/// Restrict given classes using the specified attribute parameters
+fn apply_attribute(
+    classes: &HashMap<Class, BddParams>,
+    attribute: &BddParams,
+) -> HashMap<Class, BddParams> {
+    let mut result = HashMap::new();
+    for (c, p) in classes {
+        let new_p = attribute.intersect(p);
+        if !new_p.is_empty() {
+            result.insert(c.clone(), new_p);
+        }
+    }
+    return result;
+}
+
+/// Compute entropy of the behaviour class data set
+fn entropy(classes: &HashMap<Class, BddParams>) -> f64 {
+    if classes.is_empty() {
+        return f64::INFINITY;
+    }
+    let mut result = 0.0;
+    let cardinality: Vec<f64> = classes.values().map(|it| it.cardinality()).collect();
+    let total = cardinality.iter().fold(0.0, |a, b| a + *b);
+    for c in cardinality.iter() {
+        let proportion = *c / total;
+        result += -proportion * proportion.log2();
+    }
+    return result;
+}
+
 
 #[derive(Clone)]
 pub struct Attribute {
     name: String,
     positive: BddParams,
     negative: BddParams,
+}
+
+impl Attribute {
+
+    pub fn restrict(&self, classes: &HashMap<Class, BddParams>) -> (HashMap<Class, BddParams>, HashMap<Class, BddParams>) {
+        return (apply_attribute(classes, &self.negative), apply_attribute(classes, &self.positive));
+    }
+
+    pub fn information_gain(&self, classes: &HashMap<Class, BddParams>) -> f64 {
+        let original_entropy = entropy(classes);
+        let (left, right) = self.restrict(classes);
+        //println!("L: {}, R: {}", left.len(), right.len());
+        return original_entropy - (0.5 * entropy(&left) + 0.5 * entropy(&right));
+    }
+
 }
 
 pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, BddParams>) {
@@ -29,7 +259,15 @@ pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, Bdd
         }
     }
 
-    println!("digraph G {{");
+    let encoder = BddParameterEncoder::new(network);
+    let all = classes.iter().fold(BddParams::from(encoder.bdd_variables.mk_false()), |a, (_, b)| a.union(b));
+    let attributes = make_attributes(network, &encoder, &all);
+
+    let mut tree = BDT::new(classes.clone(), attributes);
+    tree.learn_tree(10);
+    tree.dump_dot();
+
+    /*println!("digraph G {{");
     println!("init__ [label=\"\", style=invis, height=0, width=0];");
     println!("init__ -> 0;");
     let mut node_id = 0;
@@ -51,7 +289,7 @@ pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, Bdd
     let mut remaining = classes.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
     let (a, b, c) = learn(network, &encoder, &mut node_id, &attributes, &classes, &mut remaining, None);
     println!("Classified: {}; Scrap: {}; Total: {}", a, b, c);
-    println!("}}");
+    println!("}}");*/
 }
 
 const CUT_OFF: bool = false;
@@ -171,36 +409,6 @@ fn learn(
         println!("Remaining: {}; Scrap: {}", remaining, scrap);
         return (0.0, scrap, 1);
     }
-}
-
-/// Compute entropy of the behaviour class data set
-fn entropy(classes: &HashMap<Class, BddParams>) -> f64 {
-    if classes.is_empty() {
-        return f64::INFINITY;
-    }
-    let mut result = 0.0;
-    let cardinality: Vec<f64> = classes.values().map(|it| it.cardinality()).collect();
-    let total = cardinality.iter().fold(0.0, |a, b| a + *b);
-    for c in cardinality.iter() {
-        let proportion = *c / total;
-        result += -proportion * proportion.log2();
-    }
-    return result;
-}
-
-/// Restrict given classes using the specified attribute parameters
-fn apply_attribute(
-    classes: &HashMap<Class, BddParams>,
-    attribute: &BddParams,
-) -> HashMap<Class, BddParams> {
-    let mut result = HashMap::new();
-    for (c, p) in classes {
-        let new_p = attribute.intersect(p);
-        if !new_p.is_empty() {
-            result.insert(c.clone(), new_p);
-        }
-    }
-    return result;
 }
 
 fn make_attributes(network: &BooleanNetwork, encoder: &BddParameterEncoder, all: &BddParams) -> Vec<Attribute> {
