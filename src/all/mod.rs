@@ -1,9 +1,9 @@
-use biodivine_lib_param_bn::{BinaryOp, VariableId};
-use biodivine_lib_std::IdState;
 use crate::scc::{Behaviour, StateSet};
-use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
+use biodivine_lib_param_bn::bdd_params::BddParams;
+use biodivine_lib_param_bn::{BinaryOp, VariableId};
 use biodivine_lib_std::param_graph::Params;
+use biodivine_lib_std::IdState;
 use std::collections::HashMap;
 
 pub mod parser;
@@ -11,24 +11,32 @@ pub mod parser;
 // TODO: Something like this should go into standard library
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BooleanFormula<P> {
-    Binary { op: BinaryOp, left: Box<BooleanFormula<P>>, right: Box<BooleanFormula<P>> },
+    Binary {
+        op: BinaryOp,
+        left: Box<BooleanFormula<P>>,
+        right: Box<BooleanFormula<P>>,
+    },
     Not(Box<BooleanFormula<P>>),
-    Atom(P)
+    Atom(P),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StateAtom {
-    IsSet(VariableId), IsNotSet(VariableId)
+    IsSet(VariableId),
+    IsNotSet(VariableId),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AttractorAtom {
-    IsClass(Behaviour), AllStates(StateFormula), SomeState(StateFormula)
+    IsClass(Behaviour),
+    AllStates(StateFormula),
+    SomeState(StateFormula),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ALLAtom {
-    AllAttractors(AttractorFormula), SomeAttractor(AttractorFormula)
+    AllAttractors(AttractorFormula),
+    SomeAttractor(AttractorFormula),
 }
 
 pub type StateFormula = BooleanFormula<StateAtom>;
@@ -38,12 +46,13 @@ pub type AttractorFormula = BooleanFormula<AttractorAtom>;
 pub type ALLFormula = BooleanFormula<ALLAtom>;
 
 impl ALLFormula {
-
-    pub fn eval(&self, attractors: &Vec<(StateSet, HashMap<Behaviour, BddParams>)>, graph: &AsyncGraph) -> BddParams {
+    pub fn eval(
+        &self,
+        attractors: &Vec<(StateSet, HashMap<Behaviour, BddParams>)>,
+        graph: &AsyncGraph,
+    ) -> BddParams {
         return match self {
-            BooleanFormula::Not(inner) => {
-                graph.unit_params().minus(&inner.eval(attractors, graph))
-            }
+            BooleanFormula::Not(inner) => graph.unit_params().minus(&inner.eval(attractors, graph)),
             BooleanFormula::Binary { op, left, right } => {
                 let left = left.eval(attractors, graph).into_bdd();
                 let right = right.eval(attractors, graph).into_bdd();
@@ -58,7 +67,9 @@ impl ALLFormula {
             BooleanFormula::Atom(ALLAtom::AllAttractors(af)) => {
                 let mut result = graph.unit_params().clone();
                 for (attractor, classification) in attractors {
-                    if result.is_empty() { return result; } // end early
+                    if result.is_empty() {
+                        return result;
+                    } // end early
                     result = result.intersect(&af.eval(attractor, graph, classification));
                 }
                 result
@@ -70,21 +81,15 @@ impl ALLFormula {
                 }
                 result
             }
-        }
+        };
     }
-
 }
 
 impl StateFormula {
-
     pub fn eval(&self, state: IdState) -> bool {
         return match self {
-            BooleanFormula::Atom(StateAtom::IsSet(id)) => {
-                state.get_bit((*id).into())
-            }
-            BooleanFormula::Atom(StateAtom::IsNotSet(id)) => {
-                !state.get_bit((*id).into())
-            }
+            BooleanFormula::Atom(StateAtom::IsSet(id)) => state.get_bit((*id).into()),
+            BooleanFormula::Atom(StateAtom::IsNotSet(id)) => !state.get_bit((*id).into()),
             BooleanFormula::Not(inner) => !inner.eval(state),
             BooleanFormula::Binary { op, left, right } => {
                 let left = left.eval(state);
@@ -97,14 +102,17 @@ impl StateFormula {
                     BinaryOp::Xor => left != right,
                 }
             }
-        }
+        };
     }
-
 }
 
 impl AttractorFormula {
-
-    pub fn eval(&self, attractor: &StateSet, graph: &AsyncGraph, classification: &HashMap<Behaviour, BddParams>) -> BddParams {
+    pub fn eval(
+        &self,
+        attractor: &StateSet,
+        graph: &AsyncGraph,
+        classification: &HashMap<Behaviour, BddParams>,
+    ) -> BddParams {
         return match self {
             BooleanFormula::Binary { op, left, right } => {
                 let left = left.eval(attractor, graph, classification).into_bdd();
@@ -118,12 +126,17 @@ impl AttractorFormula {
                 })
             }
             BooleanFormula::Not(inner) => {
-                return attractor.fold_union().unwrap_or(graph.empty_params()).minus(&inner.eval(attractor, graph, classification))
+                return attractor
+                    .fold_union()
+                    .unwrap_or(graph.empty_params())
+                    .minus(&inner.eval(attractor, graph, classification))
             }
             BooleanFormula::Atom(AttractorAtom::AllStates(sf)) => {
-                let mut  result = attractor.fold_union().unwrap_or(graph.empty_params());
+                let mut result = attractor.fold_union().unwrap_or(graph.empty_params());
                 for (s, p) in attractor.iter() {
-                    if result.is_empty() { return result; } // end early
+                    if result.is_empty() {
+                        return result;
+                    } // end early
                     if !sf.eval(s) {
                         result = result.minus(p)
                     }
@@ -139,10 +152,10 @@ impl AttractorFormula {
                 }
                 result
             }
-            BooleanFormula::Atom(AttractorAtom::IsClass(cls)) => {
-                classification.get(cls).unwrap_or(&graph.empty_params()).clone()
-            }
-        }
+            BooleanFormula::Atom(AttractorAtom::IsClass(cls)) => classification
+                .get(cls)
+                .unwrap_or(&graph.empty_params())
+                .clone(),
+        };
     }
-
 }

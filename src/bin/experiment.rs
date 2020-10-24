@@ -1,16 +1,18 @@
+use biodivine_aeon_server::all::parser::parse_filter;
+use biodivine_aeon_server::all::{ALLAtom, ALLFormula, AttractorAtom, BooleanFormula, StateAtom};
+use biodivine_aeon_server::bdt::make_decision_tree;
 use biodivine_aeon_server::scc::algo_components::components;
 use biodivine_aeon_server::scc::{Classifier, ProgressTracker};
+use biodivine_lib_bdd::{
+    CACHE_MISS, CACHE_READ, CACHE_READ_NEXT_VAR, CACHE_READ_SAME_VAR, CACHE_READ_TRIVIAL,
+};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
-use biodivine_lib_param_bn::{BooleanNetwork, BinaryOp};
+use biodivine_lib_param_bn::{BinaryOp, BooleanNetwork};
+use biodivine_lib_std::param_graph::Params;
 use std::convert::TryFrom;
 use std::io::Read;
 use std::sync::atomic::AtomicBool;
 use std::time::{SystemTime, UNIX_EPOCH};
-use biodivine_aeon_server::bdt::make_decision_tree;
-use biodivine_aeon_server::all::{BooleanFormula, ALLFormula, ALLAtom, AttractorAtom, StateAtom};
-use biodivine_lib_std::param_graph::Params;
-use biodivine_aeon_server::all::parser::parse_filter;
-use biodivine_lib_bdd::{CACHE_READ, CACHE_READ_TRIVIAL, CACHE_READ_SAME_VAR, CACHE_MISS, CACHE_READ_NEXT_VAR};
 
 fn main() {
     let mut buffer = String::new();
@@ -70,16 +72,16 @@ fn main() {
     //let ctra = model.graph().find_variable("CtrA").unwrap();
     //let dnaa = model.graph().find_variable("DnaA").unwrap();
 
-/*    let filter: ALLFormula = BooleanFormula::Atom(ALLAtom::SomeAttractor(
-        BooleanFormula::Atom(AttractorAtom::AllStates(
-            BooleanFormula::Binary { op: BinaryOp::And,
-                left: Box::new(BooleanFormula::Atom(StateAtom::IsSet(ctra))),
-                right: Box::new(BooleanFormula::Atom(StateAtom::IsNotSet(dnaa)))
-            }
-        ))
-    ));
+    /*    let filter: ALLFormula = BooleanFormula::Atom(ALLAtom::SomeAttractor(
+           BooleanFormula::Atom(AttractorAtom::AllStates(
+               BooleanFormula::Binary { op: BinaryOp::And,
+                   left: Box::new(BooleanFormula::Atom(StateAtom::IsSet(ctra))),
+                   right: Box::new(BooleanFormula::Atom(StateAtom::IsNotSet(dnaa)))
+               }
+           ))
+       ));
 
- */
+    */
 
     /*let filter = parse_filter(&model, "SomeAttractor(AllStates(CtrA & !DnaA))").unwrap();
 

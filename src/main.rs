@@ -21,6 +21,7 @@ use std::convert::TryFrom;
 
 mod test_main;
 
+use biodivine_aeon_server::bdt::{make_network_attributes, BDT};
 use biodivine_aeon_server::scc::algo_components::components;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use rocket::config::Environment;
@@ -65,6 +66,92 @@ impl Computation {
 
 lazy_static! {
     static ref COMPUTATION: Arc<RwLock<Option<Computation>>> = Arc::new(RwLock::new(None));
+    static ref TREE: Arc<RwLock<Option<BDT>>> = Arc::new(RwLock::new(None));
+}
+
+/// Decision tree API design:
+///    - /get_bifurcation_tree: Obtain the full tree currently managed by the server.
+///    Initially, this is just the root node, however, it can also be a full tree, because
+///    the client can be refreshed and then it loads the correct data again. Returns array of Tree
+///    node objects.
+///    - /get_attributes/<node_id>: Obtain a list of attributes that can be applied to an unprocessed
+///    node. (This can take a while for large models) Returns an array of attribute objects.
+///    - /apply_attribute/<node_id>/<attribute_id>: Apply an attribute to an unprocessed node,
+///    replacing it with a decision and adding two new child nodes. Returns an array of tree nodes
+///    that have changed (i.e. the unprocessed node is now a decision node and it has two children
+///    now)
+///    - /revert_decision/<node_id>: Turn a decision node back into unprocessed node. This is done
+///    recursively, so any children are deleted as well. Returns a
+///    { node: UnprocessedNode, removed: array(usize) } - unprocessed node is the new node that
+///    replaces the decision node, removed is an array of node ids that are deleted from the tree.
+/// Models:
+///    - Tree node (three types):
+///      - Leaf node: { type: "leaf", id: usize, class: ClassString, cardinality: f64 }
+///      - Decision node: { type: "decision", id: usize, attribute_name: String, left: usize, right: usize }
+///      - Unprocessed node: { type: "unprocessed", id: usize, classes: ClassList }
+///    - Attribute { id: usize, name: String, gain: f64, left: ClassList, right: ClassList }
+///    - Class list: array({ class: ClassString, cardinality: f64 })
+///
+
+/// Obtain the graph structure of the decision tree as a list of nodes.
+#[get("/get_bifurcation_tree")]
+fn get_bifurcation_tree() -> BackendResponse {
+    let tree = TREE.clone();
+    let tree = tree.read().unwrap();
+    return if let Some(tree) = &*tree {
+        BackendResponse::ok(&tree.json_tree())
+    } else {
+        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+    };
+}
+
+#[get("/get_attributes/<node_id>")]
+fn get_attributes(node_id: String) -> BackendResponse {
+    let node_id = node_id.parse::<usize>().unwrap(); // TODO: error handling
+    let tree = TREE.clone();
+    let tree = tree.read().unwrap();
+    return if let Some(tree) = &*tree {
+        if let Some(gains) = tree.attribute_gain_list(node_id) {
+            BackendResponse::ok(&gains)
+        } else {
+            BackendResponse::err(&"Given node is not an unprocessed node.".to_string())
+        }
+    } else {
+        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+    };
+}
+
+#[post("/apply_attribute/<node_id>/<attribute_id>")]
+fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
+    let node_id = node_id.parse::<usize>().unwrap();
+    let attribute_id = attribute_id.parse::<usize>().unwrap();
+    let tree = TREE.clone();
+    let mut tree = tree.write().unwrap();
+    return if let Some(tree) = tree.as_mut() {
+        if let Some(changes) = tree.make_decision_json(node_id, attribute_id) {
+            BackendResponse::ok(&changes)
+        } else {
+            BackendResponse::err(&"Invalid node or attribute id.".to_string())
+        }
+    } else {
+        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+    };
+}
+
+#[post("/revert_decision/<node_id>")]
+fn revert_decision(node_id: String) -> BackendResponse {
+    let node_id = node_id.parse::<usize>().unwrap();
+    let tree = TREE.clone();
+    let mut tree = tree.write().unwrap();
+    return if let Some(tree) = tree.as_mut() {
+        if let Some(response) = tree.revert_decision(node_id) {
+            BackendResponse::ok(&response)
+        } else {
+            BackendResponse::err(&"Invalid node id.".to_string())
+        }
+    } else {
+        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+    };
 }
 
 /// Accept a partial model containing only the necessary regulations and one update function.
@@ -321,7 +408,7 @@ fn start_computation(data: Data) -> BackendResponse {
                         // stuff.
                         let cmp_thread = std::thread::spawn(move || {
                             let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-                            match AsyncGraph::new(network) {
+                            match AsyncGraph::new(network.clone()) {
                                 Ok(graph) => {
                                     // Now that we have graph, we can create classifier and progress
                                     // and save them into the computation.
@@ -353,6 +440,17 @@ fn start_computation(data: Data) -> BackendResponse {
                                                 "Cannot finish computation. No computation found."
                                             )
                                         }
+                                    }
+
+                                    {
+                                        let result = classifier.export_result();
+                                        let tree = TREE.clone();
+                                        let mut tree = tree.write().unwrap();
+                                        *tree = Some(BDT::new(
+                                            result,
+                                            make_network_attributes(&network),
+                                        ));
+                                        println!("Saved decision tree");
                                     }
 
                                     println!("Component search done...");
@@ -414,20 +512,20 @@ fn cancel_computation() -> BackendResponse {
         }
     }
     let cmp = cmp.write().unwrap();
-    if let Some(cmp) = &*cmp {
+    return if let Some(cmp) = &*cmp {
         if cmp.thread.is_none() {
             return BackendResponse::err(
                 &"Nothing to cancel. Computation already done.".to_string(),
             );
         }
         if cmp.is_cancelled.swap(true, Ordering::SeqCst) == false {
-            return BackendResponse::ok(&"\"ok\"".to_string());
+            BackendResponse::ok(&"\"ok\"".to_string())
         } else {
-            return BackendResponse::err(&"Computation already cancelled.".to_string());
+            BackendResponse::err(&"Computation already cancelled.".to_string())
         }
     } else {
-        return BackendResponse::err(&"No computation to cancel.".to_string());
-    }
+        BackendResponse::err(&"No computation to cancel.".to_string())
+    };
 }
 
 /// Accept an SBML (XML) file and try to parse it into a `BooleanNetwork`.
@@ -558,7 +656,11 @@ fn main() {
                 check_update_function,
                 sbml_to_aeon,
                 aeon_to_sbml,
-                aeon_to_sbml_instantiated
+                aeon_to_sbml_instantiated,
+                get_bifurcation_tree,
+                get_attributes,
+                apply_attribute,
+                revert_decision
             ],
         )
         .launch();
