@@ -3,9 +3,6 @@ use biodivine_aeon_server::all::{ALLAtom, ALLFormula, AttractorAtom, BooleanForm
 use biodivine_aeon_server::bdt::make_decision_tree;
 use biodivine_aeon_server::scc::algo_components::components;
 use biodivine_aeon_server::scc::{Classifier, ProgressTracker};
-use biodivine_lib_bdd::{
-    CACHE_MISS, CACHE_READ, CACHE_READ_NEXT_VAR, CACHE_READ_SAME_VAR, CACHE_READ_TRIVIAL,
-};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::{BinaryOp, BooleanNetwork};
 use biodivine_lib_std::param_graph::Params;
@@ -62,12 +59,6 @@ fn main() {
         classifier.export_result().len()
     );
     println!("Elapsed time: {}s", (elapsed as f64) / 1000.0);
-
-    println!("Cache read: {}", unsafe { CACHE_READ });
-    println!("Cache read trivial: {}", unsafe { CACHE_READ_TRIVIAL });
-    println!("Cache read next var: {}", unsafe { CACHE_READ_NEXT_VAR });
-    println!("Cache read same var: {}", unsafe { CACHE_READ_SAME_VAR });
-    println!("Cache miss: {}", unsafe { CACHE_MISS });
 
     //let ctra = model.graph().find_variable("CtrA").unwrap();
     //let dnaa = model.graph().find_variable("DnaA").unwrap();

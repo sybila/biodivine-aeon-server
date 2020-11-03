@@ -16,6 +16,7 @@ use rocket::response::{self, Responder, Response};
 use biodivine_aeon_server::scc::{Behaviour, Class, Classifier, ProgressTracker};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
+use biodivine_lib_std::param_graph::{EvolutionOperator, Graph};
 use regex::Regex;
 use std::convert::TryFrom;
 
@@ -29,7 +30,7 @@ use rocket::{Config, Data};
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -361,6 +362,173 @@ fn get_witness(class_str: String) -> BackendResponse {
     }
 }
 
+#[get("/get_attractors/<class_str>")]
+fn get_attractors(class_str: String) -> BackendResponse {
+    let mut class = Class::new_empty();
+    for char in class_str.chars() {
+        match char {
+            'D' => class.extend(Behaviour::Disorder),
+            'O' => class.extend(Behaviour::Oscillation),
+            'S' => class.extend(Behaviour::Stability),
+            _ => {
+                return BackendResponse::err(&"Invalid class.".to_string());
+            }
+        }
+    }
+    {
+        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+        let cmp = cmp.read().unwrap();
+        if let Some(cmp) = &*cmp {
+            if let Some(classifier) = &cmp.classifier {
+                if let Some(has_class) = try_get_class_params(classifier, &class) {
+                    if let Some(class) = has_class {
+                        if let Some(graph) = &cmp.graph {
+                            let witness: BooleanNetwork = graph.make_witness(&class);
+                            let witness_str = format!("{}", witness);
+                            let mut all_variables = vec![];
+                            for id in witness.graph().variable_ids() {
+                                all_variables.push(format!(
+                                    "{:?}",
+                                    witness.graph().get_variable(id).to_string()
+                                ));
+                            }
+                            let var_count = all_variables.len();
+                            let async_graph = AsyncGraph::new(witness);
+                            match async_graph {
+                                Ok(async_graph) => {
+                                    let _false = AtomicBool::new(false);
+                                    let _progress = Arc::new(ProgressTracker::new(&async_graph));
+                                    let fwd = (&async_graph).fwd();
+                                    let all_attractors = Mutex::new(vec![]);
+
+                                    components(&async_graph, &_progress, &_false, |component| {
+                                        let mut attractor_graph = vec![];
+                                        let size = component.iter().count();
+
+                                        if size == 0 {
+                                            return;
+                                        }
+
+                                        let classifier = Classifier::new(&async_graph);
+                                        for (from_state, _) in component.iter() {
+                                            let mut no_succ = true;
+                                            for (to_state, under_param) in fwd.step(from_state) {
+                                                if under_param.cardinality() > 0.0 {
+                                                    no_succ = false;
+                                                    attractor_graph.push((from_state, to_state));
+                                                }
+                                            }
+                                            if no_succ {
+                                                // it's a stability, so it has no successors
+                                                attractor_graph.push((from_state, from_state));
+                                            }
+                                        }
+                                        classifier.add_component(component, &async_graph);
+                                        let behavior = classifier
+                                            .try_export_result()
+                                            .unwrap()
+                                            .keys()
+                                            .collect::<Vec<_>>()
+                                            .first()
+                                            .unwrap()
+                                            .get_vector();
+                                        all_attractors
+                                            .lock()
+                                            .unwrap()
+                                            .push((behavior, attractor_graph));
+                                    });
+                                    // now the data is stored in `all_attractors`, just convert it to json:
+                                    let mut json = String::new();
+
+                                    for (i, (behavior, graph)) in
+                                        all_attractors.into_inner().unwrap().iter().enumerate()
+                                    {
+                                        if i != 0 {
+                                            json += ",";
+                                        } // json? no trailing commas for you
+                                        if behavior.len() != 1 {
+                                            // multiple stabilities
+                                            for (j, edge) in graph.iter().enumerate() {
+                                                if j != 0 {
+                                                    json += ",";
+                                                }
+                                                let from_index: usize = edge.0.into();
+                                                let from: String = format!("{:064b}", from_index)
+                                                    .chars()
+                                                    .rev()
+                                                    .take(var_count)
+                                                    .collect();
+                                                json += &format!("{{\"class\":\"Stability\", \"edges\":0, \"graph\": [[\"{}\", \"{}\"]]}}", from, from);
+                                            }
+                                        } else if behavior.len() == 1 {
+                                            // everything else
+                                            json += &format!(
+                                                "{{\"class\":\"{:?}\", \"graph\":[",
+                                                behavior.first().unwrap()
+                                            );
+                                            let mut edge_count = 0;
+                                            for (j, edge) in graph.iter().enumerate() {
+                                                let from_index: usize = edge.0.into();
+                                                let to_index: usize = edge.1.into();
+                                                let from: String = format!("{:064b}", from_index)
+                                                    .chars()
+                                                    .rev()
+                                                    .take(var_count)
+                                                    .collect();
+                                                let to: String = format!("{:064b}", to_index)
+                                                    .chars()
+                                                    .rev()
+                                                    .take(var_count)
+                                                    .collect();
+                                                if j != 0 {
+                                                    json += ","
+                                                }
+                                                json += &format!("[\"{}\", \"{}\"]", from, to);
+                                                edge_count += 1;
+                                            }
+                                            json += &format!("], \"edges\":{}}}", edge_count);
+                                        }
+                                    }
+                                    json = "{ \"attractors\":[".to_owned()
+                                        + &json
+                                        + "], \"variables\":[";
+                                    for (i, var) in all_variables.iter().enumerate() {
+                                        if i != 0 {
+                                            json += ",";
+                                        }
+                                        json += var;
+                                    }
+                                    json += &format!(
+                                        "], \"model\":{}",
+                                        &object! { "model" => witness_str }.to_string()
+                                    );
+                                    BackendResponse::ok(&(json + "}"))
+                                }
+                                Err(error_msg) => BackendResponse::err(&error_msg),
+                            }
+                        } else {
+                            return BackendResponse::err(&"No results available.".to_string());
+                        }
+                    } else {
+                        return BackendResponse::err(
+                            &"Specified class has no witness.".to_string(),
+                        );
+                    }
+                } else {
+                    return BackendResponse::err(
+                        &"Classification still in progress. Cannot explore attractors now."
+                            .to_string(),
+                    );
+                }
+            } else {
+                return BackendResponse::err(&"No results available.".to_string());
+            }
+        } else {
+            return BackendResponse::err(&"No results available.".to_string());
+        }
+    }
+}
+
 /// Accept an Aeon model, parse it and start a new computation (if there is no computation running).
 #[post("/start_computation", format = "plain", data = "<data>")]
 fn start_computation(data: Data) -> BackendResponse {
@@ -653,6 +821,7 @@ fn main() {
                 cancel_computation,
                 get_results,
                 get_witness,
+                get_attractors,
                 check_update_function,
                 sbml_to_aeon,
                 aeon_to_sbml,
