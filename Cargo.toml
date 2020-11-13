@@ -35,8 +35,6 @@ regex = "1.4.2"
 # performance penalty. Avoid introducing dead code when shields_up is enabled - this will mess with test coverage.
 shields_up = []
 
-extended_oscillation = []
-
 default = ["shields_up"]
 
 [dev-dependencies]

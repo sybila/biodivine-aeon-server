@@ -55,15 +55,14 @@ impl Classifier {
         return (*data).clone();
     }
 
-    #[cfg(not(feature = "extended_oscillation"))]
-    pub fn add_component(&self, component: StateSet, graph: &AsyncGraph) {
+    pub fn add_component(&self, component: StateSet, graph: &AsyncGraph<DefaultEdgeParams>) {
         let without_sinks = self.filter_sinks(component, graph);
         if let Some(not_sink_params) = without_sinks.fold_union() {
             let fwd = graph.fwd();
-            let mut not_cycle = graph.empty_params();
+            let mut not_cycle = graph.empty_params().clone();
             for (s, p) in without_sinks.iter() {
                 let mut to_be_seen = p.clone(); // sinks are removed, so there must be an edge for every parameter
-                let mut seen_more_than_once = graph.empty_params();
+                let mut seen_more_than_once = graph.empty_params().clone();
                 for (successor, edge_params) in fwd.step(s) {
                     // Parameters for which this edge (s -> successor) is in the attractor.
                     let successor_params = p.intersect(&edge_params).intersect(
@@ -89,68 +88,6 @@ impl Classifier {
             if !cycle.is_empty() {
                 self.push(Behaviour::Oscillation, cycle);
             }
-        }
-    }
-
-    /* OLD VERSION OF OSCILLATION */
-    #[cfg(feature = "extended_oscillation")]
-    pub fn add_component(&self, component: StateSet, graph: &AsyncGraph<DefaultEdgeParams>) {
-        // first, remove all sink states
-        let without_sinks = self.filter_sinks(component, graph);
-        //let (real_oscillation, real_disorder) = self.decide_oscillation_vs_disorder(without_sinks.clone());
-
-        let not_sink_params = without_sinks.fold_union();
-        if let Some(not_sink_params) = not_sink_params {
-            let pivots = find_pivots_basic(&without_sinks);
-            let mut oscillator =
-                Oscillator::new_with_pivots(pivots.clone(), graph.empty_params().clone());
-
-            let mut disorder = graph.empty_params().clone();
-            let mut params_to_match = not_sink_params.clone();
-            let mut current_level = pivots;
-
-            while !params_to_match.is_empty() {
-                //println!("Simulation step size: {:?} cardinality: {}, history: {}", current_level.iter().count(), current_level.fold_union().unwrap().cardinality(), oscillator.0.len());
-                let fwd = graph.fwd();
-                let reachable = next_step(&fwd, &current_level, &params_to_match);
-                /*let mut reachable = StateSet::new(capacity);
-                //println!("Current: {:?}", current_level.cardinalities());
-                for (s, current_s) in current_level.iter() {
-                    for (t, edge) in fwd.step(s) {
-                        let target = current_s.intersect(&edge).intersect(&params_to_match);
-                        if !target.is_empty() {
-                            reachable.union_key(t, &target);
-                        }
-                    }
-                }*/
-                //println!("Reachable: {:?}", reachable.cardinalities());
-
-                let (not_oscillating, continue_with) = oscillator.push_wave(&reachable);
-                disorder = disorder.union(&not_oscillating);
-                params_to_match = params_to_match.intersect(&continue_with);
-                current_level = reachable;
-            }
-
-            let oscillates = not_sink_params.minus(&disorder);
-
-            if !disorder.is_empty() {
-                self.push(Behaviour::Disorder, disorder);
-            }
-
-            if !oscillates.is_empty() {
-                self.push(Behaviour::Oscillation, oscillates);
-            }
-
-            /*if !real_disorder.is_subset(&disorder) {
-                panic!("Found disorder which old marked as oscialltion.")
-            }
-
-            if !real_oscillation.is_subset(&oscillates) {
-                let new_oscillation = real_oscillation.minus(&oscillates);
-                let witness = graph.make_witness(&new_oscillation);
-                println!("{}", witness);
-                panic!("Found oscillation which old marked as disorder");
-            }*/
         }
     }
 
@@ -225,176 +162,4 @@ impl Classifier {
         return result;
     }
 
-    /*
-    /// Split the parameters in the component between oscillating and disordered
-    /// (and push them into the classifier).
-    ///
-    /// The algorithm works as follows: We are going to pick a pivot for each parametrisation
-    /// and start a symbolic "simulation" step by step from this pivot. Each step of the
-    /// simulation is pushed into a history vector (as long as its not repeating).
-    ///
-    /// If the component is oscillating, the component can be exactly partitioned into finitely
-    /// many simulation steps such that there are always edges only from one step to the next
-    /// (and from last to first). If the component is disordered, this is going to break
-    /// at some point and we will have a simulation step that intersects more than one
-    /// history step.
-    ///
-    fn decide_oscillation_vs_disorder(&mut self, component: StateSet) -> (BddParams, BddParams) {
-        if let Some(to_decide) = component.fold_union() {
-            let fwd = self.graph.fwd();
-            let mut history: Vec<StateSet> = Vec::new();
-            let mut simulation_step = find_pivots_basic(&component);
-            history.push(simulation_step.clone());
-
-            // Initially, we assume everything oscillates and we iteratively move
-            // disordered parameters into the correct set.
-            let mut oscillation = to_decide.clone();
-            let mut disorder = self.graph.empty_params();
-
-            while simulation_step.iter().next() != None {
-                println!("Remaining: {} History: {}, size: {}", simulation_step.fold_union().unwrap().cardinality(), history.len(), simulation_step.iter().count());
-                println!("Before: {:?}", simulation_step.cardinalities());
-                simulation_step = next_step(&fwd, &simulation_step);
-                println!("After: {:?}", simulation_step.cardinalities());
-
-                // Here, we keep the parameters that were already found in some history
-                // step, so that we can detect if they appeared again.
-                let mut found_in_history = self.graph.empty_params();
-                // Here, we will keep the part of the simulation step that actually needs to
-                // have a new history step created (some things can remain in simulation
-                // but be assigned to existing steps if they already have some parameters there).
-                let mut new_history_step = simulation_step.clone();
-                for history_step in history.iter_mut() {
-                    // Set of parameters in the simulation step that intersect with this history
-                    // step. The intersection must occur in the same states!
-                    // This is basically optimized version of:
-                    // history_step.intersect(simulation_step).fold_union()
-                    let history_step_intersection = history_step.iter()
-                        .fold(self.graph.empty_params(), |result, (s, params_in_history)| {
-                            if let Some(params_in_simulation) = simulation_step.get(s) {
-                                result.union(&params_in_simulation.intersect(params_in_history))
-                            } else {
-                                result
-                            }
-                        });
-
-                    if history_step_intersection.is_empty() {
-                        continue;
-                    }
-
-                    // Detect inconsistencies in history, i.e. disorder.
-                    let duplicate_history = found_in_history.intersect(&history_step_intersection);
-                    if !duplicate_history.is_empty() {
-                        //println!("Found disorder: {}", duplicate_history.cardinality());
-                        // These are the disordered parameters that cannot oscillate.
-                        oscillation = oscillation.minus(&duplicate_history);
-                        disorder = disorder.union(&duplicate_history);
-                    }
-                    found_in_history = found_in_history.union(&history_step_intersection);
-
-                    // Now remove the things that we already have in history from our simulation.
-                    // These we do not have to concern ourselves with any more.
-                    simulation_step.minus_in_place(&history_step);
-
-                    // And add things that we still have in our simulation and we just classified
-                    // they belong into this history step:
-                    for (s, in_simulation) in simulation_step.iter() {
-                        let should_be_in_this_step = in_simulation.intersect(&history_step_intersection);
-                        if !should_be_in_this_step.is_empty() {
-                            history_step.union_key(s, &should_be_in_this_step);
-                        }
-                    }
-
-                    // Subtract this AFTER so that we ensure even items newly added to the history
-                    // will be removed (since they don't need a new step, they already belong here).
-                    new_history_step.minus_in_place(&history_step);
-                }
-
-                println!("After sorting: {:?}", simulation_step.cardinalities());
-
-                if new_history_step.iter().next() != None {
-                    history.push(new_history_step)
-                }
-            }
-
-            println!("{:?}", history.iter().map(|step| {
-                step.cardinalities()
-            }).collect::<Vec<_>>());
-
-            // At this point the oscillation and disorder sets should be correctly partitioned
-            if !oscillation.is_empty() {
-                self.push(Behaviour::Oscillation, oscillation.clone());
-            }
-            if !disorder.is_empty() {
-                self.push(Behaviour::Disorder, disorder.clone());
-            }
-
-            return (oscillation, disorder)
-        }   // component is empty, nothing to do here...
-         else {
-             return (self.graph.empty_params(), self.graph.empty_params())
-         }
-    }*/
-}
-
-/// Oscillator partitions the
-#[cfg(feature = "extended_oscillation")]
-struct Oscillator(Vec<StateSet>, BddParams);
-
-#[cfg(feature = "extended_oscillation")]
-impl Oscillator {
-    pub fn new_with_pivots(pivots: StateSet, empty: BddParams) -> Oscillator {
-        return Oscillator(vec![pivots], empty);
-    }
-
-    pub fn push_wave(&mut self, wave: &StateSet) -> (BddParams, BddParams) {
-        let wave_params = wave.fold_union().unwrap();
-        /*
-         * First, compute sets of parameters for which the wave intersects each class.
-         *
-         * If some parameters intersect two classes, these do not oscillate. If some parameters intersect no
-         * class, these need to be pushed to a new class.
-         */
-        let mut already_found = self.1.clone();
-        let mut not_oscillating = self.1.clone();
-        let mut new_class = wave_params;
-        let mut intersections: Vec<BddParams> = Vec::new();
-        for class in &self.0 {
-            let mut class_wave_intersection = self.1.clone();
-            for (s, class_p) in class.iter() {
-                if let Some(wave_p) = wave.get(s) {
-                    class_wave_intersection =
-                        class_wave_intersection.union(&class_p.intersect(wave_p));
-                }
-            }
-            let no_oscillation = already_found.intersect(&class_wave_intersection); // parameters which already have intersection
-            not_oscillating = not_oscillating.union(&no_oscillation);
-            already_found = already_found.union(&class_wave_intersection);
-            new_class = new_class.minus(&class_wave_intersection); // remove discovered parameters
-            intersections.push(class_wave_intersection);
-        }
-
-        if !new_class.is_empty() {
-            let class = StateSet::new_with_fun(wave.capacity(), |s| {
-                wave.get(s).map(|p| p.intersect(&new_class))
-            });
-            self.0.push(class);
-        }
-
-        let mut continue_params = new_class;
-        // now union wave based on intersections
-        for c_i in 0..intersections.len() {
-            let class_intersection = &intersections[c_i];
-            for (s, wave_p) in wave.iter() {
-                let state_params = wave_p.minus(&not_oscillating).intersect(class_intersection);
-                if !state_params.is_empty() {
-                    if self.0[c_i].union_key(s, &state_params) {
-                        continue_params = continue_params.union(&state_params)
-                    }
-                }
-            }
-        }
-
-        return (not_oscillating, continue_params);
-    }
 }
