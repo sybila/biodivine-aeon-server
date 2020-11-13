@@ -1,5 +1,5 @@
 use super::{Behaviour, Class, Classifier, StateSet};
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
+use biodivine_lib_param_bn::async_graph::{AsyncGraph, DefaultEdgeParams};
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
 use biodivine_lib_std::IdState;
@@ -13,7 +13,7 @@ use crate::scc::algo_components::find_pivots_basic;
 use crate::scc::algo_par_reach::next_step;
 
 impl Classifier {
-    pub fn new(graph: &AsyncGraph) -> Classifier {
+    pub fn new(graph: &AsyncGraph<DefaultEdgeParams>) -> Classifier {
         let mut map: HashMap<Class, BddParams> = HashMap::new();
         map.insert(Class::new_empty(), graph.unit_params().clone());
         return Classifier {
@@ -94,7 +94,7 @@ impl Classifier {
 
     /* OLD VERSION OF OSCILLATION */
     #[cfg(feature = "extended_oscillation")]
-    pub fn add_component(&self, component: StateSet, graph: &AsyncGraph) {
+    pub fn add_component(&self, component: StateSet, graph: &AsyncGraph<DefaultEdgeParams>) {
         // first, remove all sink states
         let without_sinks = self.filter_sinks(component, graph);
         //let (real_oscillation, real_disorder) = self.decide_oscillation_vs_disorder(without_sinks.clone());
@@ -102,9 +102,10 @@ impl Classifier {
         let not_sink_params = without_sinks.fold_union();
         if let Some(not_sink_params) = not_sink_params {
             let pivots = find_pivots_basic(&without_sinks);
-            let mut oscillator = Oscillator::new_with_pivots(pivots.clone(), graph.empty_params());
+            let mut oscillator =
+                Oscillator::new_with_pivots(pivots.clone(), graph.empty_params().clone());
 
-            let mut disorder = graph.empty_params();
+            let mut disorder = graph.empty_params().clone();
             let mut params_to_match = not_sink_params.clone();
             let mut current_level = pivots;
 
@@ -192,7 +193,7 @@ impl Classifier {
     }
 
     /// Remove all sink states from the given component (and push them into the classifier).
-    fn filter_sinks(&self, component: StateSet, graph: &AsyncGraph) -> StateSet {
+    fn filter_sinks(&self, component: StateSet, graph: &AsyncGraph<DefaultEdgeParams>) -> StateSet {
         let fwd = graph.fwd();
         let mut result = component.clone();
         let data: Vec<(IdState, BddParams)> = component.into_iter().collect();
@@ -201,7 +202,7 @@ impl Classifier {
             .filter_map(|(s, p): &(IdState, BddParams)| {
                 let has_successor = fwd
                     .step(*s)
-                    .fold(graph.empty_params(), |a, (_, b)| a.union(&b));
+                    .fold(graph.empty_params().clone(), |a, (_, b)| a.union(&b));
                 let is_sink = p.minus(&has_successor);
                 if is_sink.is_empty() {
                     None

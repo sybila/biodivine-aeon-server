@@ -14,7 +14,7 @@ use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
 use biodivine_aeon_server::scc::{Behaviour, Class, Classifier, ProgressTracker};
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
+use biodivine_lib_param_bn::async_graph::{AsyncGraph, DefaultEdgeParams};
 use biodivine_lib_param_bn::BooleanNetwork;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph};
 use regex::Regex;
@@ -38,7 +38,7 @@ struct Computation {
     timestamp: SystemTime,
     is_cancelled: Arc<AtomicBool>, // indicate to the server that the computation should be cancelled
     input_model: String,           // .aeon string representation of the model
-    graph: Option<Arc<AsyncGraph>>, // Model graph - used to create witnesses
+    graph: Option<Arc<AsyncGraph<DefaultEdgeParams>>>, // Model graph - used to create witnesses
     classifier: Option<Arc<Classifier>>, // Classifier used to store the results of the computation
     progress: Option<Arc<ProgressTracker>>, // Used to access progress of the computation
     thread: Option<JoinHandle<()>>, // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
@@ -135,7 +135,7 @@ fn ping() -> BackendResponse {
 }
 
 // Try to obtain current class data or none if classifier is busy
-fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> {
+/*fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> {
     for _ in 0..5 {
         if let Some(data) = classifier.try_export_result() {
             return Some(data);
@@ -144,7 +144,7 @@ fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> 
         std::thread::sleep(Duration::new(1, 0));
     }
     return None;
-}
+}*/
 
 fn try_get_class_params(classifier: &Classifier, class: &Class) -> Option<Option<BddParams>> {
     for _ in 0..5 {
