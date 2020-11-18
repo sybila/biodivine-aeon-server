@@ -25,21 +25,21 @@ pub fn guarded_reach_fwd(
 
         progress.update_last_wave(frontier.cardinality());
 
-        println!("{}/{} ({:+e}%)", result.cardinality(), guard.cardinality(), (result.cardinality()/guard.cardinality()) * 100.0);
+        println!("{}/{} ({:+e}%, nodes {})", result.cardinality(), guard.cardinality(), (result.cardinality()/guard.cardinality()) * 100.0, result.clone().into_bdd().size());
         print!("{} || ", frontier.cardinality());
-        let mut new_frontier = graph.empty_vertices().clone();
+        let mut successors = graph.empty_vertices().clone();
         for variable in graph.network().graph().variable_ids() {
             print!("{:?}...", variable);
             io::stdout().flush().unwrap();
             if cancelled.load(Ordering::SeqCst) {
                 return result; // result is incorrect, but we are cancelled so we don't care...
             }
-            let successors = graph.post(variable, &frontier, guard);
-            new_frontier = new_frontier.union(&successors.minus(&result));
-            result = result.union(&successors);
+            successors = successors.union(&graph.post(variable, &frontier, guard));
         }
+        successors = successors.minus(&result);
+        result = result.union(&successors);
         println!();
-        frontier = new_frontier;
+        frontier = successors;
     }
 
     progress.update_last_wave(0.0);
@@ -64,7 +64,7 @@ pub fn guarded_reach_bwd(
 
         progress.update_last_wave(frontier.cardinality());
 
-        println!("{}/{} ({:+e}%)", result.cardinality(), guard.cardinality(), (result.cardinality()/guard.cardinality()) * 100.0);
+        println!("{}/{} ({:+e}%, nodes {})", result.cardinality(), guard.cardinality(), (result.cardinality()/guard.cardinality()) * 100.0, result.clone().into_bdd().size());
         print!("{} || ", frontier.cardinality());
         /*let var_predecessors: Vec<GraphColoredVertices> = graph.network().graph().variable_ids().collect::<Vec<VariableId>>()
             .into_par_iter()
@@ -82,24 +82,19 @@ pub fn guarded_reach_bwd(
         let predecessors = par_fold(var_predecessors, |a, b| a.union(b));
         frontier = predecessors.minus(&result);
         result = result.union(&predecessors);*/
-        let mut new_frontier = graph.empty_vertices().clone();
+        let mut predecessors = graph.empty_vertices().clone();
         for variable in graph.network().graph().variable_ids() {
             print!("{:?}...", variable);
             io::stdout().flush().unwrap();
             if cancelled.load(Ordering::SeqCst) {
                 return result; // result is incorrect, but we are cancelled so we don't care...
             }
-            let mut predecessors = graph.pre(variable, &frontier, guard).minus(&result);
-            result = result.union(&predecessors);
-            new_frontier = new_frontier.union(&predecessors);
-            while !predecessors.is_empty() {   // Saturate variable!
-                predecessors = graph.pre(variable, &predecessors, guard).minus(&result);
-                result = result.union(&predecessors);
-                new_frontier = new_frontier.union(&predecessors);
-            }
+            predecessors = predecessors.union(&graph.pre(variable, &frontier, guard));
         }
+        predecessors = predecessors.minus(&result);
+        result = result.union(&predecessors);
         println!();
-        frontier = new_frontier;
+        frontier = predecessors;
     }
 
     progress.update_last_wave(0.0);
