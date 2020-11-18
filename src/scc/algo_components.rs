@@ -1,20 +1,14 @@
 use super::StateSet;
 use crate::scc::algo_par_reach::guarded_reach;
-use crate::scc::ProgressTracker;
 use biodivine_lib_param_bn::async_graph::{AsyncGraph, DefaultEdgeParams, FwdIterator};
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
 use biodivine_lib_std::IdState;
 use rayon::prelude::*;
 use std::option::Option::Some;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-pub fn components<F>(
-    graph: &AsyncGraph<DefaultEdgeParams>,
-    progress: &ProgressTracker,
-    cancelled: &AtomicBool,
-    on_component: F,
-) where
+pub fn components<F>(graph: &AsyncGraph<DefaultEdgeParams>, on_component: F)
+where
     F: Fn(StateSet) -> () + Send + Sync,
 {
     crossbeam::thread::scope(|scope| {
@@ -45,10 +39,6 @@ pub fn components<F>(
             })
             .collect();
 
-        if cancelled.load(Ordering::SeqCst) {
-            return ();
-        }
-
         println!("Sinks detected");
 
         let mut sinks = StateSet::new(num_states);
@@ -64,11 +54,7 @@ pub fn components<F>(
             on_component(report); // notify about the sinks we have found
         });
 
-        let can_reach_sink = guarded_reach(&bwd, &sinks, &initial, &cancelled, &progress);
-
-        if cancelled.load(Ordering::SeqCst) {
-            return ();
-        }
+        let can_reach_sink = guarded_reach(&bwd, &sinks, &initial);
 
         let initial = StateSet::new_with_fun(num_states, |i| {
             if let Some(sink) = can_reach_sink.get(i) {
@@ -85,33 +71,18 @@ pub fn components<F>(
         let mut queue: Vec<(StateSet, f64)> = Vec::new();
         queue.push(with_cardinality(initial));
 
-        while let Some((universe, universe_cardinality)) = queue.pop() {
-            if cancelled.load(Ordering::SeqCst) {
-                return ();
-            }
-
+        while let Some((universe, _)) = queue.pop() {
             println!(
                 "Universe state count: {} Remaining work queue: {}",
                 universe.iter().count(),
                 queue.len()
             );
-            let remaining: f64 = queue.iter().map(|(_, b)| *b).sum::<f64>() + universe_cardinality;
-            progress.update_remaining(remaining);
             println!("Look for pivots...");
             let pivots = find_pivots(graph, &universe);
             println!("Pivots state count: {}", pivots.iter().count());
-            let forward = guarded_reach(&fwd, &pivots, &universe, cancelled, &progress);
+            let forward = guarded_reach(&fwd, &pivots, &universe);
 
-            if cancelled.load(Ordering::SeqCst) {
-                return ();
-            }
-
-            let component_with_pivots =
-                guarded_reach(&bwd, &pivots, &forward, cancelled, &progress);
-
-            if cancelled.load(Ordering::SeqCst) {
-                return ();
-            }
+            let component_with_pivots = guarded_reach(&bwd, &pivots, &forward);
 
             let reachable_terminals = forward.minus(&component_with_pivots);
 
@@ -131,12 +102,7 @@ pub fn components<F>(
                 });
             }
 
-            let basins_of_reachable_terminals =
-                guarded_reach(&bwd, &forward, &universe, cancelled, &progress);
-
-            if cancelled.load(Ordering::SeqCst) {
-                return ();
-            }
+            let basins_of_reachable_terminals = guarded_reach(&bwd, &forward, &universe);
 
             let empty = graph.empty_params();
             let unreachable_terminals = StateSet::new_with_fun(num_states, |s| {

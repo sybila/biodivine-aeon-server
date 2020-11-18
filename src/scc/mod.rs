@@ -1,4 +1,5 @@
 use biodivine_lib_param_bn::bdd_params::BddParams;
+use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -7,8 +8,11 @@ use std::vec::IntoIter;
 pub mod algo_components;
 pub mod algo_par_reach;
 pub mod algo_reach;
+pub mod algo_symbolic_components;
+pub mod algo_symbolic_reach;
 mod impl_class;
 mod impl_classifier;
+mod impl_old_classifier;
 mod impl_progress_tracker;
 mod impl_state_set;
 mod impl_state_set_iterator;
@@ -54,11 +58,15 @@ impl PartialOrd for Class {
 
 pub struct Classifier {
     //graph: &'a AsyncGraph,
+    classes: Mutex<HashMap<Class, GraphColors>>,
+}
+
+pub struct OldClassifier {
     classes: Mutex<HashMap<Class, BddParams>>,
 }
 
 pub struct ProgressTracker {
     total: f64,
     remaining: Mutex<f64>,
-    last_wave: Mutex<usize>,
+    last_wave: Mutex<f64>,
 }

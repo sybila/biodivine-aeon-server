@@ -1,6 +1,6 @@
-use biodivine_aeon_server::scc::algo_components::components;
+use biodivine_aeon_server::scc::algo_symbolic_components::components;
 use biodivine_aeon_server::scc::{Classifier, ProgressTracker};
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
+use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use std::convert::TryFrom;
 use std::io::Read;
@@ -25,12 +25,12 @@ fn main() {
     println!("Model loaded...");
     println!("{} variables: {:?}", model.graph().num_vars(), names);
 
-    let graph = AsyncGraph::new(model).unwrap();
+    let graph = SymbolicAsyncGraph::new(model);
 
     println!("Asynchronous graph ready...");
     println!(
         "Admissible parametrisations: {}",
-        graph.unit_params().cardinality()
+        graph.unit_colors().cardinality()
     );
 
     let classifier = Classifier::new(&graph);

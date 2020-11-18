@@ -1,10 +1,9 @@
-use crate::scc::{ProgressTracker, StateSet};
+use crate::scc::StateSet;
 use biodivine_lib_param_bn::bdd_params::BddParams;
 use biodivine_lib_std::param_graph::{EvolutionOperator, InvertibleEvolutionOperator, Params};
 use biodivine_lib_std::IdState;
 use rayon::prelude::*;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 fn all_possible_successors<F>(fwd: &F, set: &HashSet<IdState>) -> HashSet<IdState>
 where
@@ -76,13 +75,7 @@ where
     return result;
 }
 
-pub fn guarded_reach<F, B>(
-    fwd: &F,
-    initial: &StateSet,
-    guard: &StateSet,
-    cancelled: &AtomicBool,
-    progress: &ProgressTracker,
-) -> StateSet
+pub fn guarded_reach<F, B>(fwd: &F, initial: &StateSet, guard: &StateSet) -> StateSet
 where
     F: InvertibleEvolutionOperator<State = IdState, Params = BddParams, InvertedOperator = B>
         + Send
@@ -99,14 +92,6 @@ where
     }
 
     while !changed.is_empty() {
-        //println!("Cancelled: {}", cancelled.load(Ordering::SeqCst));
-        if cancelled.load(Ordering::SeqCst) {
-            return result_set; // result is incorrect, but we are cancelled so we don't care...
-        }
-
-        progress.update_last_wave(changed.len());
-        //println!("Wave size: {}", changed.len());
-
         // All successors of changed states
         let recompute: HashSet<IdState> = all_possible_successors(fwd, &changed);
 
@@ -161,8 +146,6 @@ where
             result_set.put(s, p);
         }
     }
-
-    progress.update_last_wave(0);
 
     return result_set;
 }

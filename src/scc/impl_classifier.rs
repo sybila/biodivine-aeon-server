@@ -1,21 +1,15 @@
-use super::{Behaviour, Class, Classifier, StateSet};
-use biodivine_lib_param_bn::async_graph::{AsyncGraph, DefaultEdgeParams};
-use biodivine_lib_param_bn::bdd_params::BddParams;
-use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
-use biodivine_lib_std::IdState;
-use rayon::prelude::*;
+use super::{Behaviour, Class, Classifier};
+use biodivine_lib_param_bn::symbolic_async_graph::{
+    GraphColoredVertices, GraphColors, SymbolicAsyncGraph,
+};
+use biodivine_lib_std::param_graph::Params;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-#[cfg(feature = "extended_oscillation")]
-use crate::scc::algo_components::find_pivots_basic;
-#[cfg(feature = "extended_oscillation")]
-use crate::scc::algo_par_reach::next_step;
-
 impl Classifier {
-    pub fn new(graph: &AsyncGraph<DefaultEdgeParams>) -> Classifier {
-        let mut map: HashMap<Class, BddParams> = HashMap::new();
-        map.insert(Class::new_empty(), graph.unit_params().clone());
+    pub fn new(graph: &SymbolicAsyncGraph) -> Classifier {
+        let mut map: HashMap<Class, GraphColors> = HashMap::new();
+        map.insert(Class::new_empty(), graph.unit_colors().clone());
         return Classifier {
             classes: Mutex::new(map),
         };
@@ -31,67 +25,61 @@ impl Classifier {
 
     // Try to obtain a copy of data in a non-blocking manner (useful if we want to check
     // results but the computation is still running).
-    pub fn try_export_result(&self) -> Option<HashMap<Class, BddParams>> {
+    pub fn try_export_result(&self) -> Option<HashMap<Class, GraphColors>> {
         return match self.classes.try_lock() {
             Ok(data) => Some((*data).clone()),
             _ => None,
         };
     }
 
-    pub fn try_get_params(&self, class: &Class) -> Option<Option<BddParams>> {
+    pub fn try_get_params(&self, class: &Class) -> Option<Option<GraphColors>> {
         return match self.classes.try_lock() {
             Ok(data) => Some((*data).get(class).map(|p| p.clone())),
             _ => None,
         };
     }
 
-    pub fn get_params(&self, class: &Class) -> Option<BddParams> {
+    pub fn get_params(&self, class: &Class) -> Option<GraphColors> {
         let data = self.classes.lock().unwrap();
         return (*data).get(class).map(|p| p.clone());
     }
 
-    pub fn export_result(&self) -> HashMap<Class, BddParams> {
+    pub fn export_result(&self) -> HashMap<Class, GraphColors> {
         let data = self.classes.lock().unwrap();
         return (*data).clone();
     }
 
-    pub fn add_component(&self, component: StateSet, graph: &AsyncGraph<DefaultEdgeParams>) {
+    // TODO: Parallelism
+    pub fn add_component(&self, component: GraphColoredVertices, graph: &SymbolicAsyncGraph) {
         let without_sinks = self.filter_sinks(component, graph);
-        if let Some(not_sink_params) = without_sinks.fold_union() {
-            let fwd = graph.fwd();
-            let mut not_cycle = graph.empty_params().clone();
-            for (s, p) in without_sinks.iter() {
-                let mut to_be_seen = p.clone(); // sinks are removed, so there must be an edge for every parameter
-                let mut seen_more_than_once = graph.empty_params().clone();
-                for (successor, edge_params) in fwd.step(s) {
-                    // Parameters for which this edge (s -> successor) is in the attractor.
-                    let successor_params = p.intersect(&edge_params).intersect(
-                        without_sinks
-                            .get(successor)
-                            .unwrap_or(&graph.empty_params()),
-                    );
-
-                    // Parameters which were already seen for some previous edge.
-                    let already_seen = successor_params.minus(&to_be_seen);
-                    seen_more_than_once = seen_more_than_once.union(&already_seen);
-
-                    // Mark all of this as seen.
-                    to_be_seen = to_be_seen.minus(&successor_params);
+        let not_sink_params = without_sinks.color_projection();
+        if not_sink_params.is_empty() {
+            return;
+        }
+        let mut disorder = graph.empty_colors().clone();
+        for variable in graph.network().graph().variable_ids() {
+            let found_first_successor = &graph.has_any_post(variable, &without_sinks);
+            for next_variable in graph.network().graph().variable_ids() {
+                if next_variable == variable {
+                    continue;
                 }
-                // Everything that was seen more than once is not in a cycle
-                not_cycle = not_cycle.union(&seen_more_than_once);
+                let found_second_successor =
+                    &graph.has_any_post(next_variable, &found_first_successor);
+                disorder = disorder.union(&found_second_successor.color_projection());
             }
-            let cycle = not_sink_params.minus(&not_cycle);
-            if !not_cycle.is_empty() {
-                self.push(Behaviour::Disorder, not_cycle);
-            }
-            if !cycle.is_empty() {
-                self.push(Behaviour::Oscillation, cycle);
-            }
+        }
+        let cycle = without_sinks.color_projection().minus(&disorder);
+        if !cycle.is_empty() {
+            println!("Found cycle: {}", cycle.cardinality());
+            self.push(Behaviour::Oscillation, cycle);
+        }
+        if !disorder.is_empty() {
+            println!("Found disorder: {}", disorder.cardinality());
+            self.push(Behaviour::Disorder, disorder);
         }
     }
 
-    fn push(&self, behaviour: Behaviour, params: BddParams) {
+    fn push(&self, behaviour: Behaviour, params: GraphColors) {
         let mut classes = self.classes.lock().unwrap();
         let mut original_classes: Vec<Class> = (*classes).keys().map(|c| c.clone()).collect();
         original_classes.sort();
@@ -129,37 +117,26 @@ impl Classifier {
         }
     }
 
+    // TODO: Parallelism
     /// Remove all sink states from the given component (and push them into the classifier).
-    fn filter_sinks(&self, component: StateSet, graph: &AsyncGraph<DefaultEdgeParams>) -> StateSet {
-        let fwd = graph.fwd();
-        let mut result = component.clone();
-        let data: Vec<(IdState, BddParams)> = component.into_iter().collect();
-        let processed: Vec<(IdState, BddParams, BddParams)> = data
-            .par_iter()
-            .filter_map(|(s, p): &(IdState, BddParams)| {
-                let has_successor = fwd
-                    .step(*s)
-                    .fold(graph.empty_params().clone(), |a, (_, b)| a.union(&b));
-                let is_sink = p.minus(&has_successor);
-                if is_sink.is_empty() {
-                    None
-                } else {
-                    let remaining = p.intersect(&has_successor);
-                    Some((*s, is_sink, remaining))
-                }
-            })
-            .collect();
-
-        for (state, is_sink, remaining) in processed {
-            self.push(Behaviour::Stability, is_sink);
-            if remaining.is_empty() {
-                result.clear_key(state);
-            } else {
-                result.put(state, remaining);
+    fn filter_sinks(
+        &self,
+        component: GraphColoredVertices,
+        graph: &SymbolicAsyncGraph,
+    ) -> GraphColoredVertices {
+        let mut is_not_sink = graph.empty_vertices().clone();
+        for variable in graph.network().graph().variable_ids() {
+            let has_successor = &graph.has_any_post(variable, &component);
+            if !has_successor.is_empty() {
+                is_not_sink = is_not_sink.union(has_successor);
             }
         }
-
-        return result;
+        let is_sink = component
+            .color_projection()
+            .minus(&is_not_sink.color_projection());
+        if !is_sink.is_empty() {
+            self.push(Behaviour::Stability, is_sink);
+        }
+        return is_not_sink;
     }
-
 }
