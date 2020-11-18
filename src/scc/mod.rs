@@ -10,6 +10,7 @@ pub mod algo_par_reach;
 pub mod algo_reach;
 pub mod algo_symbolic_components;
 pub mod algo_symbolic_reach;
+pub mod algo_par_utils;
 mod impl_class;
 mod impl_classifier;
 mod impl_old_classifier;

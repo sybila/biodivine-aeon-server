@@ -4,6 +4,11 @@ use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, Symboli
 use biodivine_lib_std::param_graph::Params;
 use std::option::Option::Some;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::io;
+use std::io::Write;
+use rayon::prelude::*;
+use biodivine_lib_param_bn::VariableId;
+use crate::scc::algo_par_utils::par_fold;
 
 pub fn components<F>(
     graph: &SymbolicAsyncGraph,
@@ -14,16 +19,51 @@ pub fn components<F>(
     F: Fn(GraphColoredVertices) -> () + Send + Sync,
 {
     crossbeam::thread::scope(|scope| {
-        println!("Start detecting sinks");
-        let mut is_not_sink = graph.empty_vertices().clone();
+        println!("Detect eventually stable...");
+        // TODO: This is not correct, because for parametrisations can_move will never be empty...
+        /*let mut without_fixed = graph.unit_vertices().clone();
         for variable in graph.network().graph().variable_ids() {
+            let true_states = graph.state_variable_true(variable).intersect(&without_fixed);
+            let false_states = graph.state_variable_false(variable).intersect(&without_fixed);
+            let can_move_true = graph.has_any_post(variable, &true_states);
+            let can_move_false = graph.has_any_post(variable, &false_states);
+            if can_move_true.is_empty() {
+                // Every transition for this variable is 0 -> 1, hence states that have this
+                // transition enabled cannot be in attractor because it would never reverse...
+                without_fixed = without_fixed.minus(&can_move_false)
+
+                // At this point, we also know that the two sets (true states and false states)
+                // are independent and can be processed in parallel! We should use that! TODO...
+            }
+            if can_move_false.is_empty() {
+                without_fixed = without_fixed.minus(&can_move_true)
+            }
+        }
+        println!("Fixed {}/{}", without_fixed.cardinality(), graph.unit_vertices().cardinality());*/
+
+        println!("Start detecting sinks");
+        /*let has_successors: Vec<GraphColoredVertices> = graph.network().graph().variable_ids()
+            .collect::<Vec<VariableId>>()
+            .into_par_iter()
+            .map(|variable: VariableId| {
+                graph.has_any_post(variable, graph.unit_vertices())
+            })
+            .collect();
+        let has_successors = par_fold(has_successors, |a, b| a.union(b));*/
+
+        let mut can_be_sink = graph.unit_vertices().clone();
+        for variable in graph.network().graph().variable_ids() {
+            print!("{:?}...", variable);
+            io::stdout().flush().unwrap();
             if cancelled.load(Ordering::SeqCst) {
                 return ();
             }
             let has_successor = &graph.has_any_post(variable, graph.unit_vertices());
-            is_not_sink = is_not_sink.union(has_successor);
+            can_be_sink = can_be_sink.minus(has_successor);
         }
-        let mut is_sink = graph.unit_vertices().minus(&is_not_sink);
+        println!();
+
+        let mut is_sink = can_be_sink.clone();
         let sinks = is_sink.clone();
         // Now we have to report sinks, but we have to satisfy that every reported set has only one component:
         while !is_sink.is_empty() {
@@ -32,7 +72,7 @@ pub fn components<F>(
             on_component(to_report);
         }
 
-        println!("Sinks detected");
+        println!("Sinks detected: {}", sinks.cardinality());
 
         if cancelled.load(Ordering::SeqCst) {
             return ();
@@ -46,6 +86,8 @@ pub fn components<F>(
         }
 
         let initial = graph.unit_vertices().minus(&can_reach_sink);
+
+        println!("Initial: {}", initial.cardinality());
 
         if initial.is_empty() {
             return ();

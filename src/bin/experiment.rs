@@ -6,6 +6,7 @@ use std::convert::TryFrom;
 use std::io::Read;
 use std::sync::atomic::AtomicBool;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::ops::Shl;
 
 fn main() {
     let mut buffer = String::new();
@@ -30,7 +31,11 @@ fn main() {
     println!("Asynchronous graph ready...");
     println!(
         "Admissible parametrisations: {}",
-        graph.unit_colors().cardinality()
+        graph.unit_colors().clone().into_bdd().cardinality() / ((1 as u64).shl(names.len()) as f64)
+    );
+    println!(
+        "State space: {}",
+        graph.unit_vertices().clone().into_bdd().cardinality()
     );
 
     let classifier = Classifier::new(&graph);
