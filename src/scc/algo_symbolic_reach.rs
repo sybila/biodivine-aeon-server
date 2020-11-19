@@ -14,7 +14,7 @@ pub fn guarded_reach_fwd(
     cancelled: &AtomicBool,
     progress: &ProgressTracker,
 ) -> GraphColoredVertices {
-    let mut result = initial.clone();
+    /*let mut result = initial.clone();
     let mut frontier = initial.clone();
 
     println!("Reach fwd...");
@@ -25,7 +25,13 @@ pub fn guarded_reach_fwd(
 
         progress.update_last_wave(frontier.cardinality());
 
-        println!("{}/{} ({:+e}%, nodes {})", result.cardinality(), guard.cardinality(), (result.cardinality()/guard.cardinality()) * 100.0, result.clone().into_bdd().size());
+        println!("{}/{} ({:+e}%, nodes result({}), frontier({}))",
+                 result.cardinality(),
+                 guard.cardinality(),
+                 (result.cardinality()/guard.cardinality()) * 100.0,
+                 result.clone().into_bdd().size(),
+                 frontier.clone().into_bdd().size()
+        );
         print!("{} || ", frontier.cardinality());
         let mut successors = graph.empty_vertices().clone();
         for variable in graph.network().graph().variable_ids() {
@@ -43,6 +49,43 @@ pub fn guarded_reach_fwd(
     }
 
     progress.update_last_wave(0.0);
+    return result;*/
+    let mut result = initial.clone();
+
+    println!("Reach fwd...");
+    loop {
+        if cancelled.load(Ordering::SeqCst) {
+            return result; // result is incorrect, but we are cancelled so we don't care...
+        }
+
+        progress.update_last_wave(result.cardinality());
+
+        println!("{}/{} ({:+e}%, nodes result({}))",
+                 result.cardinality(),
+                 guard.cardinality(),
+                 (result.cardinality()/guard.cardinality()) * 100.0,
+                 result.clone().into_bdd().size()
+        );
+        let mut successors = graph.empty_vertices().clone();
+        for variable in graph.network().graph().variable_ids() {
+            io::stdout().flush().unwrap();
+            if cancelled.load(Ordering::SeqCst) {
+                return result; // result is incorrect, but we are cancelled so we don't care...
+            }
+            let s = graph.post(variable, &result, guard);
+            successors = successors.union(&s);
+            println!("{:?} -> {}", variable, s.into_bdd().size());
+        }
+        print!(" || {}", successors.clone().into_bdd().size());
+        println!();
+        successors = successors.minus(&result);
+        if successors.is_empty() {
+            break;
+        }
+        result = result.union(&successors);
+    }
+
+    progress.update_last_wave(0.0);
     return result;
 }
 
@@ -53,7 +96,7 @@ pub fn guarded_reach_bwd(
     cancelled: &AtomicBool,
     progress: &ProgressTracker,
 ) -> GraphColoredVertices {
-    let mut result = initial.clone();
+    /*let mut result = initial.clone();
     let mut frontier = initial.clone();
 
     println!("Reach bwd...");
@@ -64,7 +107,13 @@ pub fn guarded_reach_bwd(
 
         progress.update_last_wave(frontier.cardinality());
 
-        println!("{}/{} ({:+e}%, nodes {})", result.cardinality(), guard.cardinality(), (result.cardinality()/guard.cardinality()) * 100.0, result.clone().into_bdd().size());
+        println!("{}/{} ({:+e}%, nodes result({}), frontier({}))",
+                 result.cardinality(),
+                 guard.cardinality(),
+                 (result.cardinality()/guard.cardinality()) * 100.0,
+                 result.clone().into_bdd().size(),
+                 frontier.clone().into_bdd().size()
+        );
         print!("{} || ", frontier.cardinality());
         /*let var_predecessors: Vec<GraphColoredVertices> = graph.network().graph().variable_ids().collect::<Vec<VariableId>>()
             .into_par_iter()
@@ -95,6 +144,42 @@ pub fn guarded_reach_bwd(
         result = result.union(&predecessors);
         println!();
         frontier = predecessors;
+    }
+
+    progress.update_last_wave(0.0);*/
+    let mut result = initial.clone();
+
+    println!("Reach bwd...");
+    loop {
+        if cancelled.load(Ordering::SeqCst) {
+            return result; // result is incorrect, but we are cancelled so we don't care...
+        }
+
+        progress.update_last_wave(result.cardinality());
+
+        println!("{}/{} ({:+e}%, nodes result({}))",
+                 result.cardinality(),
+                 guard.cardinality(),
+                 (result.cardinality()/guard.cardinality()) * 100.0,
+                 result.clone().into_bdd().size()
+        );
+        let mut predecessors = graph.empty_vertices().clone();
+        for variable in graph.network().graph().variable_ids() {
+            io::stdout().flush().unwrap();
+            if cancelled.load(Ordering::SeqCst) {
+                return result; // result is incorrect, but we are cancelled so we don't care...
+            }
+            let s = graph.pre(variable, &result, guard);
+            predecessors = predecessors.union(&s);
+            println!("{:?} -> {}", variable, s.into_bdd().size());
+        }
+        print!(" || {}", predecessors.clone().into_bdd().size());
+        println!();
+        predecessors = predecessors.minus(&result);
+        if predecessors.is_empty() {
+            break;
+        }
+        result = result.union(&predecessors);
     }
 
     progress.update_last_wave(0.0);
