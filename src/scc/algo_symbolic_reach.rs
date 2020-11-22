@@ -74,7 +74,9 @@ pub fn guarded_reach_fwd(
             }
             let s = graph.post(variable, &result, guard);
             successors = successors.union(&s);
-            println!("{:?} -> {}", variable, s.into_bdd().size());
+            if !s.is_empty() {
+                println!("{:?} -> {}", variable, s.into_bdd().size());
+            }
         }
         print!(" || {}", successors.clone().into_bdd().size());
         println!();
@@ -171,7 +173,9 @@ pub fn guarded_reach_bwd(
             }
             let s = graph.pre(variable, &result, guard);
             predecessors = predecessors.union(&s);
-            println!("{:?} -> {}", variable, s.into_bdd().size());
+            if !s.is_empty() {
+                println!("{:?} -> {}", variable, s.into_bdd().size());
+            }
         }
         print!(" || {}", predecessors.clone().into_bdd().size());
         println!();

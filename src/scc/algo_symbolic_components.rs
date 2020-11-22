@@ -9,6 +9,48 @@ use std::io::Write;
 use rayon::prelude::*;
 use biodivine_lib_param_bn::VariableId;
 use crate::scc::algo_par_utils::par_fold;
+use crate::scc::algo_effectively_constant::remove_effectively_constant_states;
+
+pub fn prune_sources(graph: &SymbolicAsyncGraph, set: GraphColoredVertices) -> GraphColoredVertices {
+    let start = set.cardinality();
+    let mut result = set;
+    println!("Pruning sources...");
+    loop {
+        let mut found_something = false;
+        for v in graph.network().graph().variable_ids() {
+            let v_true = graph.state_variable_true(v);
+            let v_false = graph.state_variable_false(v);
+            let jumps_false_to_true = graph.has_any_post(v, &result.intersect(&v_false));
+            let jumps_true_to_false = graph.has_any_post(v, &result.intersect(&v_true));
+            /*
+                Now we are looking for colors that only jump one way: for these, we can fix the value
+                because they will never flip back...
+             */
+            let colors_false_to_true = jumps_false_to_true.color_projection();
+            let colors_true_to_false = jumps_true_to_false.color_projection();
+            let colors_that_jump_both_ways = colors_true_to_false.intersect(&colors_true_to_false);
+            let colors_that_jump_only_one_way = (colors_false_to_true.union(&colors_true_to_false)).minus(&colors_that_jump_both_ways);
+
+            if !colors_that_jump_only_one_way.is_empty() {
+                found_something = true;
+                let one_way_colors_false_to_true = colors_false_to_true.intersect(&colors_that_jump_only_one_way);
+                let one_way_colors_true_to_false = colors_true_to_false.intersect(&colors_that_jump_only_one_way);
+                result = result.minus(&v_true.intersect_colors(&one_way_colors_true_to_false));
+                result = result.minus(&v_false.intersect_colors(&one_way_colors_false_to_true));
+            }
+            println!("{:?} -> {}", v, colors_that_jump_only_one_way.cardinality());
+        }
+        println!("Keeping {}/{} ({:+e}%, nodes result({}))",
+                 result.cardinality(),
+                 start,
+                 (result.cardinality()/start) * 100.0,
+                 result.clone().into_bdd().size()
+        );
+        if !found_something {
+            return result;
+        }
+    }
+}
 
 pub fn components<F>(
     graph: &SymbolicAsyncGraph,
@@ -51,7 +93,9 @@ pub fn components<F>(
             .collect();
         let has_successors = par_fold(has_successors, |a, b| a.union(b));*/
 
-        let mut can_be_sink = graph.unit_vertices().clone();
+        let not_constant = remove_effectively_constant_states(graph, graph.unit_vertices().clone());
+        let mut can_be_sink = graph.unit_vertices().clone();    // intentionally use all vertices
+        //panic!("");
         for variable in graph.network().graph().variable_ids() {
             print!("{:?}...", variable);
             io::stdout().flush().unwrap();
@@ -79,13 +123,13 @@ pub fn components<F>(
         }
 
         let can_reach_sink =
-            guarded_reach_bwd(&graph, &sinks, &graph.unit_vertices(), cancelled, progress);
+            guarded_reach_bwd(&graph, &sinks, &not_constant, cancelled, progress);
 
         if cancelled.load(Ordering::SeqCst) {
             return ();
         }
 
-        let initial = graph.unit_vertices().minus(&can_reach_sink);
+        let initial = not_constant.minus(&can_reach_sink);
 
         println!("Initial: {}", initial.cardinality());
 
@@ -111,6 +155,30 @@ pub fn components<F>(
             println!("Look for pivots...");
             let pivots = universe.pivots();
             println!("Pivots cardinality: {}", pivots.cardinality());
+            let backward = guarded_reach_bwd(&graph, &pivots, &universe, cancelled, progress);
+            let component_with_pivots = guarded_reach_fwd(&graph, &pivots, &backward, cancelled, progress);
+
+            let mut is_terminal = component_with_pivots.color_projection();
+            for v in graph.network().graph().variable_ids() {
+                let successors = graph.any_post(v, &component_with_pivots).minus(&component_with_pivots).color_projection();
+                if !successors.is_empty() {
+                    is_terminal = is_terminal.minus(&successors);
+                }
+            }
+
+            if !is_terminal.is_empty() {
+                let terminal = component_with_pivots.intersect_colors(&is_terminal);
+                scope.spawn(|_| {
+                    on_component(terminal);
+                });
+            }
+
+            let remaining = universe.minus(&backward);
+            if !remaining.is_empty() {
+                queue.push((remaining.cardinality(), remaining));
+            }
+
+            /*
             let forward = guarded_reach_fwd(&graph, &pivots, &universe, cancelled, progress);
 
             if cancelled.load(Ordering::SeqCst) {
@@ -150,7 +218,7 @@ pub fn components<F>(
             }
             if !unreachable_terminals.is_empty() {
                 queue.push((unreachable_terminals.cardinality(), unreachable_terminals));
-            }
+            }*/
         }
 
         println!("Main component loop done...");
