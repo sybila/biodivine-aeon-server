@@ -112,10 +112,13 @@ pub fn components<F>(
                 valuations.push((name.clone(), sink.get_bit(i_v)));
             }
             let sink_id: usize = sink.into();
-            println!("========================= Sink state [{}] =========================", sink_id);
+            let sink_colors = is_sink.intersect(&graph.vertex(sink)).color_projection();
+            let sink_remaining = is_sink.minus(&graph.vertex(sink)).intersect_colors(&sink_colors);
+            let sink_rank = if sink_remaining.is_empty() { 1 } else { 2 };
+
+            println!("========================= Sink state (Rank {}) [{}] =========================", sink_rank, sink_id);
             println!("{:?}", valuations);
             println!("========================= Witness network =========================");
-            let sink_colors = is_sink.intersect(&graph.vertex(sink)).color_projection();
             let witness = graph.make_witness(&sink_colors);
             println!("{}", witness.to_string());
         }
