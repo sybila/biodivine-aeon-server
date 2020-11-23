@@ -60,7 +60,7 @@ pub fn reach_fwd_excluding(graph: &SymbolicAsyncGraph, initial: &GraphColoredVer
             let mut s = graph.post(variable, &result, guard);
             while !s.is_empty() {
                 successors = successors.union(&s);
-                s = graph.post(variable, &s, guard);
+                s = graph.post(variable, &s, guard).minus(&successors);
             }
             //print!("...{:?} -> {}...", variable, s.into_bdd().size());
             //io::stdout().flush().unwrap();
@@ -95,7 +95,7 @@ pub fn reach_bwd_excluding(graph: &SymbolicAsyncGraph, initial: &GraphColoredVer
             let mut s = graph.pre(variable, &result, guard);
             while !s.is_empty() {
                 predecessors = predecessors.union(&s);
-                s = graph.pre(variable, &s, guard);
+                s = graph.pre(variable, &s, guard).minus(&predecessors);
             }
             //print!("...{:?} -> {}...", variable, s.into_bdd().size());
             //io::stdout().flush().unwrap();
