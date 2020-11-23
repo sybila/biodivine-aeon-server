@@ -49,6 +49,23 @@ impl Classifier {
         return (*data).clone();
     }
 
+    /// Static function to classify just one component and immediately obtain results.
+    pub fn classify_component(component: &GraphColoredVertices, graph: &SymbolicAsyncGraph) -> HashMap<Behaviour, GraphColors> {
+        let classifier = Classifier::new(graph);
+        classifier.add_component(component.clone(), graph);
+        let mut result: HashMap<Behaviour, GraphColors> = HashMap::new();
+        for (class, colors) in classifier.export_result() {
+            if class.0.is_empty() {
+                continue    // This is an empty class - those colors were not in the attractor.
+            } else if class.0.len() > 1 {
+                unreachable!("Multiple behaviours in one component.");
+            } else {
+                result.insert(class.0[0], colors);
+            }
+        }
+        return result;
+    }
+
     // TODO: Parallelism
     pub fn add_component(&self, component: GraphColoredVertices, graph: &SymbolicAsyncGraph) {
         let without_sinks = self.filter_sinks(component, graph);
