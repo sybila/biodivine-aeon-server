@@ -111,7 +111,13 @@ pub fn components<F>(
                 let name = graph.network().graph().get_variable(v).get_name();
                 valuations.push((name.clone(), sink.get_bit(i_v)));
             }
-            println!("Sink: {:?}", valuations);
+            let sink_id: usize = sink.into();
+            println!("========================= Sink state [{}] =========================", sink_id);
+            println!("{:?}", valuations);
+            println!("========================= Witness network =========================");
+            let sink_colors = is_sink.intersect(&graph.vertex(sink)).color_projection();
+            let witness = graph.make_witness(&sink_colors);
+            println!("{}", witness.to_string());
         }
         let sinks = is_sink.clone();
         // Now we have to report sinks, but we have to satisfy that every reported set has only one component:
