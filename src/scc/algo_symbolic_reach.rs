@@ -3,9 +3,6 @@ use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, Symboli
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::io;
 use std::io::Write;
-use rayon::prelude::*;
-use biodivine_lib_param_bn::VariableId;
-use crate::scc::algo_par_utils::par_fold;
 
 pub fn guarded_reach_fwd(
     graph: &SymbolicAsyncGraph,

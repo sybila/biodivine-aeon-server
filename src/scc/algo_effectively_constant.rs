@@ -1,9 +1,5 @@
 use biodivine_lib_param_bn::symbolic_async_graph::{SymbolicAsyncGraph, GraphColoredVertices};
-use biodivine_lib_std::param_graph::Params;
-use crate::scc::algo_symbolic_reach::{guarded_reach_fwd};
 use biodivine_lib_param_bn::VariableId;
-use std::io;
-use std::io::Write;
 
 /// This routine removes vertices which can never appear in an attractor by detecting parameter values
 /// for which the variable jumps only in one direction.
@@ -27,7 +23,9 @@ pub fn remove_effectively_constant_states(graph: &SymbolicAsyncGraph, set: Graph
             let reachable_after_jump = reach_fwd_excluding(graph, &vertices_where_var_jumped, &universe, variable);
             let can_jump_again = reachable_after_jump.intersect(&vertices_where_var_can_jump);
             let will_never_jump_again = vertices_where_var_can_jump.minus(&can_jump_again);
-            println!("{:?} will never jump again: {}", variable, will_never_jump_again.cardinality());
+            if !will_never_jump_again.is_empty() {
+                println!("{:?} will never jump again: {}", variable, will_never_jump_again.cardinality());
+            }
             if !will_never_jump_again.is_empty() {
                 stop = false;
                 let to_remove_for_var = reach_bwd_excluding(graph, &will_never_jump_again, &universe, variable);
@@ -54,12 +52,16 @@ pub fn reach_fwd_excluding(graph: &SymbolicAsyncGraph, initial: &GraphColoredVer
                  result.clone().into_bdd().size()
         );*/
         let mut successors = graph.empty_vertices().clone();
-        for variable in graph.network().graph().variable_ids() {
+        // iter over variables from the back
+        for variable in graph.network().graph().variable_ids().rev() {
             if variable == exclude {
                 continue;
             }
-            let s = graph.post(variable, &result, guard);
-            successors = successors.union(&s);
+            let mut s = graph.post(variable, &result, guard);
+            while !s.is_empty() {
+                successors = successors.union(&s);
+                s = graph.post(variable, &s, guard);
+            }
             //print!("...{:?} -> {}...", variable, s.into_bdd().size());
             //io::stdout().flush().unwrap();
         }
@@ -86,12 +88,15 @@ pub fn reach_bwd_excluding(graph: &SymbolicAsyncGraph, initial: &GraphColoredVer
                  result.clone().into_bdd().size()
         );*/
         let mut predecessors = graph.empty_vertices().clone();
-        for variable in graph.network().graph().variable_ids() {
+        for variable in graph.network().graph().variable_ids().rev() {
             if variable == exclude {
                 continue;
             }
-            let s = graph.pre(variable, &result, guard);
-            predecessors = predecessors.union(&s);
+            let mut s = graph.pre(variable, &result, guard);
+            while !s.is_empty() {
+                predecessors = predecessors.union(&s);
+                s = graph.pre(variable, &s, guard);
+            }
             //print!("...{:?} -> {}...", variable, s.into_bdd().size());
             //io::stdout().flush().unwrap();
         }

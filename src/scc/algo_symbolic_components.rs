@@ -6,9 +6,6 @@ use std::option::Option::Some;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::io;
 use std::io::Write;
-use rayon::prelude::*;
-use biodivine_lib_param_bn::VariableId;
-use crate::scc::algo_par_utils::par_fold;
 use crate::scc::algo_effectively_constant::remove_effectively_constant_states;
 
 pub fn prune_sources(graph: &SymbolicAsyncGraph, set: GraphColoredVertices) -> GraphColoredVertices {
@@ -108,6 +105,14 @@ pub fn components<F>(
         println!();
 
         let mut is_sink = can_be_sink.clone();
+        for sink in is_sink.state_projection(graph).states(graph) {
+            let mut valuations = Vec::new();
+            for (i_v, v) in graph.network().graph().variable_ids().enumerate() {
+                let name = graph.network().graph().get_variable(v).get_name();
+                valuations.push((name.clone(), sink.get_bit(i_v)));
+            }
+            println!("Sink: {:?}", valuations);
+        }
         let sinks = is_sink.clone();
         // Now we have to report sinks, but we have to satisfy that every reported set has only one component:
         while !is_sink.is_empty() {
