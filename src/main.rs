@@ -13,16 +13,14 @@ use rocket::http::{ContentType, Header};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
-use biodivine_aeon_server::scc::{Behaviour, Class, Classifier, OldClassifier, ProgressTracker};
+use biodivine_aeon_server::scc::{Behaviour, Class, Classifier, ProgressTracker};
 use biodivine_lib_param_bn::BooleanNetwork;
 use regex::Regex;
 use std::convert::TryFrom;
 
 mod test_main;
 
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
-use biodivine_lib_std::param_graph::{EvolutionOperator, Graph};
 use biodivine_lib_std::IdState;
 use rocket::config::Environment;
 use rocket::{Config, Data};
@@ -306,56 +304,46 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                 ));
                             }
                             let var_count = all_variables.len();
-                            let async_graph = AsyncGraph::new(witness);
-                            match async_graph {
-                                Ok(async_graph) => {
-                                    let fwd = (&async_graph).fwd();
-                                    let all_attractors: Mutex<
-                                        Vec<(Vec<Behaviour>, Vec<(IdState, IdState)>)>,
-                                    > = Mutex::new(vec![]);
+                            let witness_graph = Ok(SymbolicAsyncGraph::new(witness));
+                            match witness_graph {
+                                Ok(witness_graph) => {
+                                    let all_attractors: Mutex<Vec<(Behaviour, Vec<(IdState, IdState)>)>> = Mutex::new(vec![]);
 
                                     // This is a witness network, so there is exactly ONE parametrisation...
-                                    // For now, we use the old implementation for this because we
-                                    // don't have a state iterator for the symbolic sets.
-                                    biodivine_aeon_server::scc::algo_components::components(
-                                        &async_graph,
+                                    biodivine_aeon_server::scc::algo_symbolic_components::components(
+                                        &witness_graph,
+                                        &ProgressTracker::new(&witness_graph),
+                                        &AtomicBool::new(false),
                                         |component| {
-                                            let mut attractor_graph = vec![];
-                                            let size = component.iter().count();
+                                            let mut attractor_graph: Vec<(IdState, IdState)> = vec![];
 
-                                            if size == 0 {
-                                                return;
+                                            let behaviour = Classifier::classify_component(&component, &witness_graph);
+                                            assert_eq!(behaviour.len(), 1);
+                                            let behaviour = behaviour.into_iter().next().unwrap().0;
+
+                                            for source in component.state_projection(&witness_graph).states(&witness_graph) {
+                                                let source_set = witness_graph.vertex(source);
+                                                let mut target_set = witness_graph.empty_vertices().clone();
+                                                for v in witness_graph.network().graph().variable_ids() {
+                                                    let post = witness_graph.any_post(v, &source_set);
+                                                    target_set = target_set.union(&post);
+                                                }
+
+                                                let mut is_sink = true;
+                                                for target in target_set.state_projection(&witness_graph).states(&witness_graph) {
+                                                    is_sink = false;
+                                                    attractor_graph.push((source, target));
+                                                }
+
+                                                if is_sink {
+                                                    attractor_graph.push((source, source));
+                                                }
                                             }
 
-                                            let classifier = OldClassifier::new(&async_graph);
-                                            for (from_state, _) in component.iter() {
-                                                let mut no_succ = true;
-                                                for (to_state, under_param) in fwd.step(from_state)
-                                                {
-                                                    if under_param.cardinality() > 0.0 {
-                                                        no_succ = false;
-                                                        attractor_graph
-                                                            .push((from_state, to_state));
-                                                    }
-                                                }
-                                                if no_succ {
-                                                    // it's a stability, so it has no successors
-                                                    attractor_graph.push((from_state, from_state));
-                                                }
-                                            }
-                                            classifier.add_component(component, &async_graph);
-                                            let behavior = classifier
-                                                .try_export_result()
-                                                .unwrap()
-                                                .keys()
-                                                .collect::<Vec<_>>()
-                                                .first()
-                                                .unwrap()
-                                                .get_vector();
                                             all_attractors
                                                 .lock()
                                                 .unwrap()
-                                                .push((behavior, attractor_graph));
+                                                .push((behaviour, attractor_graph));
                                         },
                                     );
                                     // now the data is stored in `all_attractors`, just convert it to json:
@@ -367,48 +355,31 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                         if i != 0 {
                                             json += ",";
                                         } // json? no trailing commas for you
-                                        if behavior.len() != 1 {
-                                            // multiple stabilities
-                                            for (j, edge) in graph.iter().enumerate() {
-                                                if j != 0 {
-                                                    json += ",";
-                                                }
-                                                let from_index: usize = edge.0.into();
-                                                let from: String = format!("{:064b}", from_index)
-                                                    .chars()
-                                                    .rev()
-                                                    .take(var_count)
-                                                    .collect();
-                                                json += &format!("{{\"class\":\"Stability\", \"edges\":0, \"graph\": [[\"{}\", \"{}\"]]}}", from, from);
+                                        json += &format!(
+                                            "{{\"class\":\"{:?}\", \"graph\":[",
+                                            behavior
+                                        );
+                                        let mut edge_count = 0;
+                                        for (j, edge) in graph.iter().enumerate() {
+                                            let from_index: usize = edge.0.into();
+                                            let to_index: usize = edge.1.into();
+                                            let from: String = format!("{:064b}", from_index)
+                                                .chars()
+                                                .rev()
+                                                .take(var_count)
+                                                .collect();
+                                            let to: String = format!("{:064b}", to_index)
+                                                .chars()
+                                                .rev()
+                                                .take(var_count)
+                                                .collect();
+                                            if j != 0 {
+                                                json += ","
                                             }
-                                        } else if behavior.len() == 1 {
-                                            // everything else
-                                            json += &format!(
-                                                "{{\"class\":\"{:?}\", \"graph\":[",
-                                                behavior.first().unwrap()
-                                            );
-                                            let mut edge_count = 0;
-                                            for (j, edge) in graph.iter().enumerate() {
-                                                let from_index: usize = edge.0.into();
-                                                let to_index: usize = edge.1.into();
-                                                let from: String = format!("{:064b}", from_index)
-                                                    .chars()
-                                                    .rev()
-                                                    .take(var_count)
-                                                    .collect();
-                                                let to: String = format!("{:064b}", to_index)
-                                                    .chars()
-                                                    .rev()
-                                                    .take(var_count)
-                                                    .collect();
-                                                if j != 0 {
-                                                    json += ","
-                                                }
-                                                json += &format!("[\"{}\", \"{}\"]", from, to);
-                                                edge_count += 1;
-                                            }
-                                            json += &format!("], \"edges\":{}}}", edge_count);
+                                            json += &format!("[\"{}\", \"{}\"]", from, to);
+                                            edge_count += 1;
                                         }
+                                        json += &format!("], \"edges\":{}}}", edge_count);
                                     }
                                     json = "{ \"attractors\":[".to_owned()
                                         + &json
