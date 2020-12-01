@@ -26,7 +26,7 @@ fn main() {
     println!("Model loaded...");
     println!("{} variables: {:?}", model.graph().num_vars(), names);
 
-    let graph = SymbolicAsyncGraph::new(model);
+    let graph = SymbolicAsyncGraph::new(model).unwrap();
 
     println!("Asynchronous graph ready...");
     println!(

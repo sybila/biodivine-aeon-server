@@ -17,7 +17,7 @@ debug = true
 
 [dependencies]
 biodivine-lib-std = { git = "https://github.com/sybila/biodivine-lib-std.git" }
-biodivine-lib-param-bn = { git = "https://github.com/sybila/biodivine-lib-param-bn.git", rev = "dceb638278014bf5f80f2720977e99a3a1c489f2" }
+biodivine-lib-param-bn = { git = "https://github.com/sybila/biodivine-lib-param-bn.git", rev = "c7627ed3989efb7629f4c8ec56f6d77a508d9ded" }
 biodivine-lib-bdd = "0.1.0"
 rocket = "0.4.6"
 rayon = "1.5.0"

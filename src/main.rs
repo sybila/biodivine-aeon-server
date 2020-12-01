@@ -21,7 +21,6 @@ use std::convert::TryFrom;
 mod test_main;
 
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
-use biodivine_lib_std::IdState;
 use rocket::config::Environment;
 use rocket::{Config, Data};
 use std::collections::HashMap;
@@ -30,6 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use biodivine_lib_std::collections::bitvectors::{ArrayBitVector, BitVector};
 
 /// Computation keeps all information
 struct Computation {
@@ -78,7 +78,7 @@ fn check_update_function(data: Data) -> BackendResponse {
         Ok(_) => {
             let graph = BooleanNetwork::try_from(model_string.as_str()).and_then(|model| {
                 if model.graph().num_vars() <= 5 {
-                    Ok(SymbolicAsyncGraph::new(model))
+                    SymbolicAsyncGraph::new(model)
                 } else {
                     Err("Function too large for on-the-fly analysis.".to_string())
                 }
@@ -303,11 +303,10 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                     witness.graph().get_variable(id).to_string()
                                 ));
                             }
-                            let var_count = all_variables.len();
-                            let witness_graph = Ok(SymbolicAsyncGraph::new(witness));
+                            let witness_graph = SymbolicAsyncGraph::new(witness);
                             match witness_graph {
                                 Ok(witness_graph) => {
-                                    let all_attractors: Mutex<Vec<(Behaviour, Vec<(IdState, IdState)>)>> = Mutex::new(vec![]);
+                                    let all_attractors: Mutex<Vec<(Behaviour, Vec<(ArrayBitVector, ArrayBitVector)>)>> = Mutex::new(vec![]);
 
                                     // This is a witness network, so there is exactly ONE parametrisation...
                                     biodivine_aeon_server::scc::algo_symbolic_components::components(
@@ -315,14 +314,14 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                         &ProgressTracker::new(&witness_graph),
                                         &AtomicBool::new(false),
                                         |component| {
-                                            let mut attractor_graph: Vec<(IdState, IdState)> = vec![];
+                                            let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> = vec![];
 
                                             let behaviour = Classifier::classify_component(&component, &witness_graph);
                                             assert_eq!(behaviour.len(), 1);
                                             let behaviour = behaviour.into_iter().next().unwrap().0;
 
                                             for source in component.state_projection(&witness_graph).states(&witness_graph) {
-                                                let source_set = witness_graph.vertex(source);
+                                                let source_set = witness_graph.vertex(source.clone());
                                                 let mut target_set = witness_graph.empty_vertices().clone();
                                                 for v in witness_graph.network().graph().variable_ids() {
                                                     let post = witness_graph.any_post(v, &source_set);
@@ -332,11 +331,11 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                                 let mut is_sink = true;
                                                 for target in target_set.state_projection(&witness_graph).states(&witness_graph) {
                                                     is_sink = false;
-                                                    attractor_graph.push((source, target));
+                                                    attractor_graph.push((source.clone(), target));
                                                 }
 
                                                 if is_sink {
-                                                    attractor_graph.push((source, source));
+                                                    attractor_graph.push((source.clone(), source.clone()));
                                                 }
                                             }
 
@@ -361,18 +360,8 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                         );
                                         let mut edge_count = 0;
                                         for (j, edge) in graph.iter().enumerate() {
-                                            let from_index: usize = edge.0.into();
-                                            let to_index: usize = edge.1.into();
-                                            let from: String = format!("{:064b}", from_index)
-                                                .chars()
-                                                .rev()
-                                                .take(var_count)
-                                                .collect();
-                                            let to: String = format!("{:064b}", to_index)
-                                                .chars()
-                                                .rev()
-                                                .take(var_count)
-                                                .collect();
+                                            let from: String = format!("{:?}", edge.0.values());
+                                            let to: String = format!("{:?}", edge.1.values());
                                             if j != 0 {
                                                 json += ","
                                             }
@@ -468,7 +457,7 @@ fn start_computation(data: Data) -> BackendResponse {
                         // stuff.
                         let cmp_thread = std::thread::spawn(move || {
                             let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-                            match Ok(SymbolicAsyncGraph::new(network)) {
+                            match SymbolicAsyncGraph::new(network) {
                                 Ok(graph) => {
                                     // Now that we have graph, we can create classifier and progress
                                     // and save them into the computation.
@@ -665,7 +654,7 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
     return match stream.read_to_string(&mut aeon_string) {
         Ok(_) => {
             match BooleanNetwork::try_from(aeon_string.as_str())
-                .and_then(|bn| Ok(SymbolicAsyncGraph::new(bn)))
+                .and_then(|bn| SymbolicAsyncGraph::new(bn))
             {
                 Ok(graph) => {
                     let witness = graph.make_witness(graph.unit_colors());

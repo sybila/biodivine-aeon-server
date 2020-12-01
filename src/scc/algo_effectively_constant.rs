@@ -1,6 +1,52 @@
 use biodivine_lib_param_bn::symbolic_async_graph::{SymbolicAsyncGraph, GraphColoredVertices};
 use biodivine_lib_param_bn::VariableId;
 
+pub fn remove_effectively_constant_states_2(graph: &SymbolicAsyncGraph, set: GraphColoredVertices) -> GraphColoredVertices {
+    println!("Remove effectively constant states.");
+    let mut universe = set;
+    for variable in graph.network().graph().variable_ids() {
+        universe = cut_variable(graph, variable, universe);
+    }
+    return universe;
+}
+
+fn cut_variable(graph: &SymbolicAsyncGraph, variable: VariableId, universe: GraphColoredVertices) -> GraphColoredVertices {
+    let mut scc_candidate = universe.clone();
+    let mut not_attractor = graph.empty_vertices().clone();
+
+    // First, find all states from which the variable cannot jump again and mark them as not attractor.
+    // Meanwhile, compute a candidate for the SCCs of all variable jumps.
+    loop {
+        let vertices_where_var_can_jump = graph.has_any_post(variable, &scc_candidate);
+        let vertices_where_var_jumped = graph.any_post(variable, &scc_candidate);
+        let reachable_after_jump = reach_fwd_excluding(graph, &vertices_where_var_jumped, &scc_candidate, variable);
+        let can_jump_again = reachable_after_jump.intersect(&vertices_where_var_can_jump);
+        let will_never_jump_again = vertices_where_var_can_jump.minus(&can_jump_again);
+        scc_candidate = reachable_after_jump;
+        if will_never_jump_again.is_empty() {
+            break;
+        }
+        not_attractor = not_attractor.union(&will_never_jump_again);
+        println!("{:?} will never jump again: {}", variable, will_never_jump_again.cardinality());
+    }
+
+    // Now finish the SCCs
+    let vertices_where_var_can_jump = graph.has_any_post(variable, &scc_candidate);
+    let scc = reach_bwd_excluding(graph, &vertices_where_var_can_jump, &scc_candidate, variable);
+    let not_scc = graph.unit_vertices().minus(&scc);
+    for other_variable in graph.network().graph().variable_ids() {
+        let can_jump_out = graph.any_pre(other_variable, &not_scc).intersect(&scc);
+        if !can_jump_out.is_empty() {
+            println!("Can jump out: {}", can_jump_out.cardinality());
+            not_attractor = not_attractor.union(&can_jump_out);
+        }
+    }
+
+    let to_remove = reach_bwd_excluding(graph, &not_attractor, &universe, variable);
+    println!("Eliminated: {}/{}", to_remove.cardinality(), universe.cardinality());
+    return universe.minus(&to_remove);
+}
+
 /// This routine removes vertices which can never appear in an attractor by detecting parameter values
 /// for which the variable jumps only in one direction.
 ///

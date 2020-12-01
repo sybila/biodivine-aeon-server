@@ -6,7 +6,8 @@ use std::option::Option::Some;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::io;
 use std::io::Write;
-use crate::scc::algo_effectively_constant::remove_effectively_constant_states;
+use crate::scc::algo_effectively_constant::{remove_effectively_constant_states};
+use biodivine_lib_std::collections::bitvectors::BitVector;
 
 pub fn prune_sources(graph: &SymbolicAsyncGraph, set: GraphColoredVertices) -> GraphColoredVertices {
     let start = set.cardinality();
@@ -91,6 +92,8 @@ pub fn components<F>(
         let has_successors = par_fold(has_successors, |a, b| a.union(b));*/
 
         let not_constant = remove_effectively_constant_states(graph, graph.unit_vertices().clone());
+        println!("Not constant: {}/{}", not_constant.cardinality(), graph.unit_vertices().cardinality());
+
         let mut can_be_sink = graph.unit_vertices().clone();    // intentionally use all vertices
         //panic!("");
         for variable in graph.network().graph().variable_ids() {
@@ -109,14 +112,13 @@ pub fn components<F>(
             let mut valuations = Vec::new();
             for (i_v, v) in graph.network().graph().variable_ids().enumerate() {
                 let name = graph.network().graph().get_variable(v).get_name();
-                valuations.push((name.clone(), sink.get_bit(i_v)));
+                valuations.push((name.clone(), sink.get(i_v)));
             }
-            let sink_id: usize = sink.into();
-            let sink_colors = is_sink.intersect(&graph.vertex(sink)).color_projection();
-            let sink_remaining = is_sink.minus(&graph.vertex(sink)).intersect_colors(&sink_colors);
+            let sink_colors = is_sink.intersect(&graph.vertex(sink.clone())).color_projection();
+            let sink_remaining = is_sink.minus(&graph.vertex(sink.clone())).intersect_colors(&sink_colors);
             let sink_rank = if sink_remaining.is_empty() { 1 } else { 2 };
 
-            println!("========================= Sink state (Rank {}) [{}] =========================", sink_rank, sink_id);
+            println!("========================= Sink state (Rank {}) {:?} =========================", sink_rank, sink.values());
             println!("{:?}", valuations);
             println!("========================= Witness network =========================");
             let witness = graph.make_witness(&sink_colors);
