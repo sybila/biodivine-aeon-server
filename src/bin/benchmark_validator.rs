@@ -87,10 +87,18 @@ fn main() {
                         }
                     } else {
                         let graph = SymbolicAsyncGraph::new(model);
-                        if let Some(err) = graph.err() {
-                            errors += 1;
-                            eprintln!("ERROR: Cannot build graph from model in {}.", bench_dir.path().display());
-                            eprintln!("{}", err);
+                        match graph {
+                            Ok(graph) => {
+                                if graph.unit_colors().cardinality() != 1.0 {
+                                    errors += 1;
+                                    eprintln!("ERROR: Default model has {} colors in {}.", graph.unit_colors().cardinality(), bench_dir.path().display());
+                                }
+                            }
+                            Err(err) => {
+                                errors += 1;
+                                eprintln!("ERROR: Cannot build graph from model in {}.", bench_dir.path().display());
+                                eprintln!("{}", err);
+                            }
                         }
                     }
                 }
