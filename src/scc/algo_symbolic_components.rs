@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::io;
 use std::io::Write;
 use crate::scc::algo_effectively_constant::{remove_effectively_constant_states};
-use biodivine_lib_std::collections::bitvectors::BitVector;
 
 pub fn prune_sources(graph: &SymbolicAsyncGraph, set: GraphColoredVertices) -> GraphColoredVertices {
     let start = set.cardinality();
@@ -82,17 +81,7 @@ pub fn components<F>(
         println!("Fixed {}/{}", without_fixed.cardinality(), graph.unit_vertices().cardinality());*/
 
         println!("Start detecting sinks");
-        /*let has_successors: Vec<GraphColoredVertices> = graph.network().graph().variable_ids()
-            .collect::<Vec<VariableId>>()
-            .into_par_iter()
-            .map(|variable: VariableId| {
-                graph.has_any_post(variable, graph.unit_vertices())
-            })
-            .collect();
-        let has_successors = par_fold(has_successors, |a, b| a.union(b));*/
 
-        let not_constant = remove_effectively_constant_states(graph, graph.unit_vertices().clone());
-        println!("Not constant: {}/{}", not_constant.cardinality(), graph.unit_vertices().cardinality());
 
         let mut can_be_sink = graph.unit_vertices().clone();    // intentionally use all vertices
         //panic!("");
@@ -108,7 +97,7 @@ pub fn components<F>(
         println!();
 
         let mut is_sink = can_be_sink.clone();
-        for sink in is_sink.state_projection(graph).states(graph) {
+        /*for sink in is_sink.state_projection(graph).states(graph) {
             let mut valuations = Vec::new();
             for (i_v, v) in graph.network().graph().variable_ids().enumerate() {
                 let name = graph.network().graph().get_variable(v).get_name();
@@ -123,7 +112,7 @@ pub fn components<F>(
             println!("========================= Witness network =========================");
             let witness = graph.make_witness(&sink_colors);
             println!("{}", witness.to_string());
-        }
+        }*/
         let sinks = is_sink.clone();
         // Now we have to report sinks, but we have to satisfy that every reported set has only one component:
         while !is_sink.is_empty() {
@@ -133,6 +122,18 @@ pub fn components<F>(
         }
 
         println!("Sinks detected: {}", sinks.cardinality());
+
+        /*let has_successors: Vec<GraphColoredVertices> = graph.network().graph().variable_ids()
+            .collect::<Vec<VariableId>>()
+            .into_par_iter()
+            .map(|variable: VariableId| {
+                graph.has_any_post(variable, graph.unit_vertices())
+            })
+            .collect();
+        let has_successors = par_fold(has_successors, |a, b| a.union(b));*/
+
+        let not_constant = remove_effectively_constant_states(graph, graph.unit_vertices().clone());
+        println!("Not constant: {}/{}", not_constant.cardinality(), graph.unit_vertices().cardinality());
 
         if cancelled.load(Ordering::SeqCst) {
             return ();

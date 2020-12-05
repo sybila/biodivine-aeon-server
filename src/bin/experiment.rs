@@ -31,11 +31,11 @@ fn main() {
     println!("Asynchronous graph ready...");
     println!(
         "Admissible parametrisations: {}",
-        graph.unit_colors().clone().into_bdd().cardinality() / ((1 as u64).shl(names.len()) as f64)
+        graph.unit_colors().cardinality()
     );
     println!(
         "State space: {}",
-        graph.unit_vertices().clone().into_bdd().cardinality()
+        graph.unit_vertices().cardinality()
     );
 
     let classifier = Classifier::new(&graph);
