@@ -20,6 +20,9 @@ benchmarks = sorted(benchmarks, key=bench_cmp)
 out_dir = "bench_run_" + str(int(time.time()))
 os.mkdir(out_dir)
 
+csv = open(out_dir + "/stats.csv", "w")
+csv.write("Benchmark, Time[s]\n")
+
 elapsed_times = {}
 i = 1
 for benchmark in benchmarks:
@@ -38,17 +41,15 @@ for benchmark in benchmarks:
 			print(class_line + " " + time_line)
 			time = re_elapsed.match(time_line).group(1)
 			elapsed_times[bench_name] = time
+			csv.write(bench_name + ", " + str(time) + "\n")
 		else:
 			elapsed_times[bench_name] = status
+			csv.write(bench_name + ", " + status + "\n")
+		csv.flush()
 
 print "FINISHED"
 print "Benchmark, Time[s]"
 for bench, time in  elapsed_times.items():
 	print bench + ", " + str(time)
 
-# Write the same results to a file:
-f = open(out_dir + "/stats.csv", "w")
-f.write("Benchmark, Time[s]\n")
-for bench, time in  elapsed_times.items():
-        f.write(bench + ", " + str(time) + "\n")
-f.close()
+csv.close()
