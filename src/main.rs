@@ -122,6 +122,8 @@ fn check_update_function(data: Data) -> BackendResponse {
     };
 }
 
+const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
 #[get("/ping")]
 fn ping() -> BackendResponse {
     println!("...ping...");
@@ -131,7 +133,8 @@ fn ping() -> BackendResponse {
         "running" => false,                 // true if the computation thread is still alive
         "progress" => "unknown".to_string(),// arbitrary progress string
         "error" => json::Null,              // arbitrary error string - currently not really used
-        "num_classes" => json::Null         // number of discovered classes so far
+        "num_classes" => json::Null,        // number of discovered classes so far
+        "version" => VERSION.to_string(),   // current compute engine version for compatibility validation
     };
     {
         // Read data from current computation if available...
