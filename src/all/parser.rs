@@ -1,9 +1,9 @@
+/*
 use crate::all::{
-    ALLAtom, ALLFormula, AttractorAtom, AttractorFormula, BooleanFormula, StateAtom, StateFormula,
+    ALLAtom, ALLFormula, AttractorAtom, BooleanFormula, StateAtom,
 };
 use crate::scc::Behaviour;
 use biodivine_lib_param_bn::{BinaryOp, BooleanNetwork};
-use regex::internal::Input;
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -410,3 +410,4 @@ mod tests {
         println!("Parsed: {:?}", parse_filter(&bn, input))
     }
 }
+*/

@@ -1,24 +1,21 @@
 use crate::scc::Class;
-use biodivine_lib_bdd::{bdd, BddVariable};
-use biodivine_lib_param_bn::bdd_params::{BddParameterEncoder, BddParams, FunctionTableEntry};
-use biodivine_lib_param_bn::{BooleanNetwork, Variable, VariableId};
+use biodivine_lib_param_bn::symbolic_async_graph::{
+    GraphColors, SymbolicAsyncGraph, SymbolicFunctionContext,
+};
+use biodivine_lib_param_bn::BooleanNetwork;
 use biodivine_lib_std::param_graph::Params;
 use json::JsonValue;
-use rocket::response::content::Json;
-use std::cmp::max;
-use std::cmp::Ord;
 use std::cmp::PartialOrd;
 use std::collections::HashMap;
-use std::ops::Deref;
 
 /// Encodes one node of a bifurcation decision tree. A node can be either a leaf (fully classified
 /// set of parametrisations), a decision node with a fixed attribute, or an unprocessed node
 /// with a remaining bifurcation function.
-#[derive(Debug)]
+//#[derive(Debug)]
 pub enum BDTNode {
     Leaf {
         class: Class,
-        params: BddParams,
+        params: GraphColors,
     },
     Decision {
         attribute: AttributeId,
@@ -26,7 +23,7 @@ pub enum BDTNode {
         right: BDTNodeId,
     },
     Unprocessed {
-        classes: HashMap<Class, BddParams>,
+        classes: HashMap<Class, GraphColors>,
     },
 }
 
@@ -47,12 +44,12 @@ pub struct BDT {
     storage: HashMap<usize, BDTNode>,
     attributes: Vec<Attribute>,
     next_id: usize,
-    remaining: BddParams,
+    _remaining: GraphColors,
 }
 
 impl BDT {
-    pub fn new(classes: HashMap<Class, BddParams>, attributes: Vec<Attribute>) -> BDT {
-        let mut remaining = classes
+    pub fn new(classes: HashMap<Class, GraphColors>, attributes: Vec<Attribute>) -> BDT {
+        let remaining = classes
             .iter()
             .fold(None, |a, (_, b)| {
                 return if let Some(a) = a {
@@ -66,7 +63,7 @@ impl BDT {
             storage: HashMap::new(),
             attributes,
             next_id: 0,
-            remaining,
+            _remaining: remaining,
         };
         tree.insert_new_node(classes);
         return tree;
@@ -75,7 +72,7 @@ impl BDT {
     pub fn json_tree(&self) -> String {
         let mut result = array![];
         for (id, node) in &self.storage {
-            result.push(self.node_to_json(*id, node));
+            result.push(self.node_to_json(*id, node)).unwrap();
         }
         return result.to_string();
     }
@@ -97,13 +94,15 @@ impl BDT {
             // Add them to result array
             for (i_attr, attr, information_gain) in gains {
                 let (left, right) = attr.restrict(classes);
-                result.push(object! {
-                    "id" => i_attr,
-                    "name" => attr.name.clone(),
-                    "left" => self.class_list_to_json(&left),
-                    "right" => self.class_list_to_json(&right),
-                    "gain" => information_gain
-                });
+                result
+                    .push(object! {
+                        "id" => i_attr,
+                        "name" => attr.name.clone(),
+                        "left" => self.class_list_to_json(&left),
+                        "right" => self.class_list_to_json(&right),
+                        "gain" => information_gain
+                    })
+                    .unwrap();
             }
             Some(result.to_string())
         } else {
@@ -142,7 +141,7 @@ impl BDT {
         return if matches!(current, Some(BDTNode::Decision { .. })) {
             let mut delete_nodes = Vec::new();
             let mut stack = vec![node];
-            let mut new_classes: HashMap<Class, BddParams> = HashMap::new();
+            let mut new_classes: HashMap<Class, GraphColors> = HashMap::new();
             while let Some(expand) = stack.pop() {
                 let to_expand = self.storage.remove(&expand).unwrap();
                 match to_expand {
@@ -212,13 +211,15 @@ impl BDT {
         };
     }
 
-    fn class_list_to_json(&self, classes: &HashMap<Class, BddParams>) -> JsonValue {
+    fn class_list_to_json(&self, classes: &HashMap<Class, GraphColors>) -> JsonValue {
         let mut class_list = array![];
         for (c, p) in classes {
-            class_list.push(object! {
-                "class" => format!("{}", c),
-                "cardinality" => p.cardinality(),
-            });
+            class_list
+                .push(object! {
+                    "class" => format!("{}", c),
+                    "cardinality" => p.cardinality(),
+                })
+                .unwrap();
         }
         return class_list;
     }
@@ -304,7 +305,7 @@ impl BDT {
                     println!("{}: Gain {} from {}.", a, gain, attribute.name);
                     if gain > f64::NEG_INFINITY {
                         continue_with.push(*a);
-                        if let Some((current, current_gain)) = max {
+                        if let Some((_, current_gain)) = max {
                             if gain > current_gain {
                                 max = Some((*a, gain));
                             }
@@ -339,11 +340,7 @@ impl BDT {
                     panic!("No suitable attribute found!")
                 }
             }
-            BDTNode::Decision {
-                attribute,
-                left,
-                right,
-            } => {
+            BDTNode::Decision { left, right, .. } => {
                 // Processed, but maybe has unprocessed children!
                 let (left, right) = (left.0, right.0); // hint for borrow checker to release reference to self
                 self.learn_tree_recursive(left, attr, depth + 1, max_depth);
@@ -352,21 +349,21 @@ impl BDT {
         }
     }
 
-    fn insert_leaf(&mut self, class: Class, params: BddParams) -> BDTNodeId {
+    fn insert_leaf(&mut self, class: Class, params: GraphColors) -> BDTNodeId {
         let leaf = BDTNode::Leaf { class, params };
         let leaf_id = self.next_id();
         self.insert_or_replace(leaf_id, leaf, false);
         return BDTNodeId(leaf_id);
     }
 
-    fn insert_unprocessed(&mut self, classes: HashMap<Class, BddParams>) -> BDTNodeId {
+    fn insert_unprocessed(&mut self, classes: HashMap<Class, GraphColors>) -> BDTNodeId {
         let node = BDTNode::Unprocessed { classes };
         let id = self.next_id();
         self.insert_or_replace(id, node, false);
         return BDTNodeId(id);
     }
 
-    fn insert_new_node(&mut self, classes: HashMap<Class, BddParams>) -> BDTNodeId {
+    fn insert_new_node(&mut self, classes: HashMap<Class, GraphColors>) -> BDTNodeId {
         assert!(!classes.is_empty(), "Inserting empty node.");
         return if classes.len() == 1 {
             let (class, params) = classes.into_iter().next().unwrap();
@@ -413,9 +410,8 @@ impl BDT {
         assert_eq!(
             replace,
             old.is_some(),
-            "Modifying {:?}, but {:?} already in the tree.",
+            "Modifying {:?}, but it is already in the tree.",
             id,
-            old
         );
     }
 
@@ -428,12 +424,12 @@ impl BDT {
 
 /// Restrict given classes using the specified attribute parameters
 fn apply_attribute(
-    classes: &HashMap<Class, BddParams>,
-    attribute: &BddParams,
-) -> HashMap<Class, BddParams> {
+    classes: &HashMap<Class, GraphColors>,
+    attribute: &GraphColors,
+) -> HashMap<Class, GraphColors> {
     let mut result = HashMap::new();
     for (c, p) in classes {
-        let new_p = attribute.intersect(p);
+        let new_p = Params::intersect(attribute, p);
         if !new_p.is_empty() {
             result.insert(c.clone(), new_p);
         }
@@ -442,7 +438,7 @@ fn apply_attribute(
 }
 
 /// Compute entropy of the behaviour class data set
-fn entropy(classes: &HashMap<Class, BddParams>) -> f64 {
+fn entropy(classes: &HashMap<Class, GraphColors>) -> f64 {
     if classes.is_empty() {
         return f64::INFINITY;
     }
@@ -459,22 +455,22 @@ fn entropy(classes: &HashMap<Class, BddParams>) -> f64 {
 #[derive(Clone)]
 pub struct Attribute {
     name: String,
-    positive: BddParams,
-    negative: BddParams,
+    positive: GraphColors,
+    negative: GraphColors,
 }
 
 impl Attribute {
     pub fn restrict(
         &self,
-        classes: &HashMap<Class, BddParams>,
-    ) -> (HashMap<Class, BddParams>, HashMap<Class, BddParams>) {
+        classes: &HashMap<Class, GraphColors>,
+    ) -> (HashMap<Class, GraphColors>, HashMap<Class, GraphColors>) {
         return (
             apply_attribute(classes, &self.negative),
             apply_attribute(classes, &self.positive),
         );
     }
 
-    pub fn information_gain(&self, classes: &HashMap<Class, BddParams>) -> f64 {
+    pub fn information_gain(&self, classes: &HashMap<Class, GraphColors>) -> f64 {
         let original_entropy = entropy(classes);
         let (left, right) = self.restrict(classes);
         print!("L: {}, R: {} // ", left.len(), right.len());
@@ -491,9 +487,9 @@ impl Attribute {
    in naming of variables and functions, only in the names of the attributes.
 */
 pub fn make_network_attributes(network: &BooleanNetwork) -> Vec<Attribute> {
-    let ref encoder = BddParameterEncoder::new(network);
+    let ref encoder = SymbolicAsyncGraph::new(network.clone()).unwrap();
     let mut result = Vec::new();
-    for target in network.graph().variable_ids() {
+    /*for target in network.graph().variable_ids() {
         for regulator in network.graph().regulators(target) {
             let regulation = network.graph().find_regulation(regulator, target).unwrap();
             if regulation.get_monotonicity() == None {
@@ -573,19 +569,36 @@ pub fn make_network_attributes(network: &BooleanNetwork) -> Vec<Attribute> {
                 }
             }
         }
-    }
-    for bdd_var in encoder.bdd_variables.variables() {
-        result.push(Attribute {
-            name: format!("{:?}", bdd_var),
-            positive: BddParams::from(encoder.bdd_variables.mk_var(bdd_var)),
-            negative: BddParams::from(encoder.bdd_variables.mk_not_var(bdd_var)),
-        })
+    }*/
+    
+    for v in network.graph().variable_ids() {
+        if network.get_update_function(v).is_none() {
+            if !network.graph().regulators(v).is_empty() {
+                panic!("Unsupported network with non-trivial parameters?");
+            } else {
+                // There should be exactly one BDD variable corresponding to value of this "parameter"
+                result.push(Attribute {
+                    name: format!("{:?}", network.graph().get_variable(v).get_name()),
+                    positive: encoder.unit_colors().intersect_bdd(
+                        &encoder
+                            .function_context()
+                            .true_when_implicit_parameter(v, Vec::new()),
+                    ),
+                    negative: encoder.unit_colors().intersect_bdd(
+                        &encoder
+                            .function_context()
+                            .true_when_implicit_parameter(v, Vec::new())
+                            .not(),
+                    ),
+                })
+            }
+        }
     }
     return result;
 }
 
 /// Find implicit function table entries which satisfy given context conditions
-fn implicit_function_table<'a, 'b>(
+/*fn implicit_function_table<'a, 'b>(
     encoder: &'a BddParameterEncoder,
     target: VariableId,
     conditionals: &'b Vec<(VariableId, bool)>,
@@ -598,8 +611,9 @@ fn implicit_function_table<'a, 'b>(
         }
     }
     return result;
-}
+}*/
 
+/*
 /// Construct all context variable combinations.
 ///
 /// For example, given regulators [A, B, C, D, E] where C is the significant regulator, the function
@@ -626,7 +640,9 @@ fn context_combinations(
     );
     return result;
 }
+ */
 
+/*
 fn context_combinations_recursive(
     result: &mut Vec<Vec<VariableId>>,
     partial_context: &mut Vec<VariableId>,
@@ -642,15 +658,17 @@ fn context_combinations_recursive(
             partial_context.pop();
         }
     }
-}
+}*/
 
+/*
 fn wildcard_combinations(wildcards: &Vec<VariableId>) -> Vec<Vec<VariableId>> {
     let mut result = Vec::new();
     let mut partial = Vec::new();
     wildcard_combinations_recursive(&mut result, wildcards, &mut partial);
     return result;
-}
+}*/
 
+/*
 fn wildcard_combinations_recursive(
     result: &mut Vec<Vec<VariableId>>,
     wildcards: &Vec<VariableId>,
@@ -665,10 +683,10 @@ fn wildcard_combinations_recursive(
             partial_tuple.pop();
         }
     }
-}
+}*/
 
 /// Produce all conditional assignment of the given context variables.
-fn conditionals_for_context(context_variables: Vec<VariableId>) -> Vec<Vec<(VariableId, bool)>> {
+/*fn conditionals_for_context(context_variables: Vec<VariableId>) -> Vec<Vec<(VariableId, bool)>> {
     let mut result = Vec::new();
     for i in 0..(1 << context_variables.len()) {
         let mut conditionals = Vec::new();
@@ -679,8 +697,9 @@ fn conditionals_for_context(context_variables: Vec<VariableId>) -> Vec<Vec<(Vari
         result.push(conditionals);
     }
     return result;
-}
+}*/
 
+/*
 fn context_get_value(context: &Vec<(VariableId, bool)>, var: VariableId) -> Option<bool> {
     for (v, b) in context {
         if *v == var {
@@ -688,8 +707,9 @@ fn context_get_value(context: &Vec<(VariableId, bool)>, var: VariableId) -> Opti
         }
     }
     return None;
-}
+}*/
 
+/*
 fn context_flip_value(
     context: &Vec<(VariableId, bool)>,
     var: VariableId,
@@ -701,8 +721,8 @@ fn context_flip_value(
         }
     }
     return result;
-}
-
+}*/
+/*
 fn wildcards_for_context(
     context_variables: &Vec<VariableId>,
     regulators: &Vec<VariableId>,
@@ -715,8 +735,8 @@ fn wildcards_for_context(
         }
     }
     return result;
-}
-
+}*/
+/*
 fn make_conditional_observability(
     network: &BooleanNetwork,
     encoder: &BddParameterEncoder,
@@ -753,8 +773,8 @@ fn make_conditional_observability(
         negative: BddParams::from(params.not()),
         positive: BddParams::from(params),
     };
-}
-
+}*/
+/*
 fn make_conditional_non_observability(
     network: &BooleanNetwork,
     encoder: &BddParameterEncoder,
@@ -791,9 +811,9 @@ fn make_conditional_non_observability(
         negative: BddParams::from(params.not()),
         positive: BddParams::from(params),
     };
-}
+}*/
 
-pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, BddParams>) {
+pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, GraphColors>) {
     for v in network.graph().variable_ids() {
         if network.get_update_function(v).is_some() {
             panic!("Only fully parametrised networks are supported at the moment.")
@@ -847,12 +867,12 @@ const CUT_OFF: bool = false;
 
 fn learn(
     network: &BooleanNetwork,
-    encoder: &BddParameterEncoder,
+    encoder: &SymbolicFunctionContext,
     node_id: &mut usize,
     attributes: &Vec<Attribute>,
-    classes: &HashMap<Class, BddParams>,
+    classes: &HashMap<Class, GraphColors>,
     remaining: &mut f64,
-    prefer_leaf: Option<Class>,
+    _prefer_leaf: Option<Class>,
 ) -> (f64, f64, usize) {
     if classes.len() == 0 {
         panic!("This should not happen")
@@ -879,7 +899,7 @@ fn learn(
           return (c, 0.0, 1);
       }*/
     if CUT_OFF {
-        let cardinality: Vec<f64> = classes.iter().map(|(c, p)| p.cardinality()).collect();
+        let cardinality: Vec<f64> = classes.iter().map(|(_, p)| p.cardinality()).collect();
         let total = cardinality.iter().fold(0.0, |a, b| a + *b);
         for c in cardinality {
             if c > 0.8 * total {
@@ -931,11 +951,11 @@ fn learn(
                 max_gain = gain;
                 max_attribute = Some(attr.clone());
             }
-            let all_c = classes.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
-            let p_c = positive_dataset
+            let _all_c = classes.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
+            let _p_c = positive_dataset
                 .iter()
                 .fold(0.0, |a, (_, p)| a + p.cardinality());
-            let n_c = negative_dataset
+            let _n_c = negative_dataset
                 .iter()
                 .fold(0.0, |a, (_, p)| a + p.cardinality());
             //println!("{} gain {} // {}({}%) | {}({}%)", attr.name, gain, positive_dataset.len(), ((p_c/all_c) * 100.0) as i32, negative_dataset.len(), ((n_c/all_c) * 100.0) as i32);
@@ -951,7 +971,7 @@ fn learn(
         println!("{} -> {} [style=filled];", my_node_id, node_id);
         let positive_dataset = apply_attribute(classes, &attr.positive);
         let negative_dataset = apply_attribute(classes, &attr.negative);
-        let prefer = if positive_dataset.len() == 1 {
+        let _prefer = if positive_dataset.len() == 1 {
             Some(positive_dataset.iter().next().unwrap().0.clone())
         } else if negative_dataset.len() == 1 {
             Some(negative_dataset.iter().next().unwrap().0.clone())
@@ -991,16 +1011,18 @@ fn learn(
     }
 }
 
+/*
 fn make_attributes(
     network: &BooleanNetwork,
     encoder: &BddParameterEncoder,
-    all: &BddParams,
+    all: &GraphColors,
 ) -> Vec<Attribute> {
     let mut result = Vec::new();
 
     return result;
 }
-
+ */
+/*
 fn both(name: &str, a: Attribute, b: Attribute) -> Attribute {
     let valid = a.positive.into_bdd().and(&b.positive.into_bdd());
     return Attribute {
@@ -1018,7 +1040,9 @@ fn iff(name: &str, a: Attribute, b: Attribute) -> Attribute {
         positive: BddParams::from(valid),
     };
 }
+ */
 
+/*
 fn make_inhibition(
     network: &BooleanNetwork,
     encoder: &BddParameterEncoder,
@@ -1046,7 +1070,9 @@ fn make_inhibition(
         positive: BddParams::from(params),
     };
 }
+*/
 
+/*
 fn make_activation(
     network: &BooleanNetwork,
     encoder: &BddParameterEncoder,
@@ -1074,3 +1100,4 @@ fn make_activation(
         positive: BddParams::from(params),
     };
 }
+*/

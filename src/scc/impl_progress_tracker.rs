@@ -1,20 +1,20 @@
 use crate::scc::ProgressTracker;
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
+use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use std::sync::Mutex;
 
 impl ProgressTracker {
-    pub fn new(graph: &AsyncGraph) -> ProgressTracker {
-        let unit_cardinality = graph.unit_params().cardinality();
+    pub fn new(graph: &SymbolicAsyncGraph) -> ProgressTracker {
+        let unit_cardinality = graph.unit_colors().cardinality();
         let num_states = graph.num_states() as f64;
         let graph_size = unit_cardinality * num_states;
         return ProgressTracker {
             total: graph_size,
             remaining: Mutex::new(graph_size),
-            last_wave: Mutex::new(0),
+            last_wave: Mutex::new(0.0),
         };
     }
 
-    pub fn update_last_wave(&self, value: usize) {
+    pub fn update_last_wave(&self, value: f64) {
         {
             let mut last_wave = self.last_wave.lock().unwrap();
             *last_wave = value;

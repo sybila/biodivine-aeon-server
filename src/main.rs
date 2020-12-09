@@ -14,17 +14,15 @@ use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
 use biodivine_aeon_server::scc::{Behaviour, Class, Classifier, ProgressTracker};
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
-use biodivine_lib_std::param_graph::{EvolutionOperator, Graph};
 use regex::Regex;
 use std::convert::TryFrom;
 
 mod test_main;
 
 use biodivine_aeon_server::bdt::{make_network_attributes, BDT};
-use biodivine_aeon_server::scc::algo_components::components;
-use biodivine_lib_param_bn::bdd_params::BddParams;
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
+use biodivine_lib_std::collections::bitvectors::{ArrayBitVector, BitVector};
 use rocket::config::Environment;
 use rocket::{Config, Data};
 use std::collections::HashMap;
@@ -39,7 +37,7 @@ struct Computation {
     timestamp: SystemTime,
     is_cancelled: Arc<AtomicBool>, // indicate to the server that the computation should be cancelled
     input_model: String,           // .aeon string representation of the model
-    graph: Option<Arc<AsyncGraph>>, // Model graph - used to create witnesses
+    graph: Option<Arc<SymbolicAsyncGraph>>, // Model graph - used to create witnesses
     classifier: Option<Arc<Classifier>>, // Classifier used to store the results of the computation
     progress: Option<Arc<ProgressTracker>>, // Used to access progress of the computation
     thread: Option<JoinHandle<()>>, // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
@@ -167,7 +165,7 @@ fn check_update_function(data: Data) -> BackendResponse {
         Ok(_) => {
             let graph = BooleanNetwork::try_from(model_string.as_str()).and_then(|model| {
                 if model.graph().num_vars() <= 5 {
-                    AsyncGraph::new(model)
+                    SymbolicAsyncGraph::new(model)
                 } else {
                     Err("Function too large for on-the-fly analysis.".to_string())
                 }
@@ -175,7 +173,7 @@ fn check_update_function(data: Data) -> BackendResponse {
             match graph {
                 Ok(graph) => BackendResponse::ok(&format!(
                     "{{\"cardinality\":\"{}\"}}",
-                    graph.unit_params().cardinality()
+                    graph.unit_colors().cardinality()
                 )),
                 Err(error) => BackendResponse::err(&error),
             }
@@ -222,7 +220,7 @@ fn ping() -> BackendResponse {
 }
 
 // Try to obtain current class data or none if classifier is busy
-fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> {
+/*fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> {
     for _ in 0..5 {
         if let Some(data) = classifier.try_export_result() {
             return Some(data);
@@ -231,9 +229,9 @@ fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> 
         std::thread::sleep(Duration::new(1, 0));
     }
     return None;
-}
+}*/
 
-fn try_get_class_params(classifier: &Classifier, class: &Class) -> Option<Option<BddParams>> {
+fn try_get_class_params(classifier: &Classifier, class: &Class) -> Option<Option<GraphColors>> {
     for _ in 0..5 {
         if let Some(data) = classifier.try_get_params(class) {
             return Some(data);
@@ -392,51 +390,50 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                     witness.graph().get_variable(id).to_string()
                                 ));
                             }
-                            let var_count = all_variables.len();
-                            let async_graph = AsyncGraph::new(witness);
-                            match async_graph {
-                                Ok(async_graph) => {
-                                    let _false = AtomicBool::new(false);
-                                    let _progress = Arc::new(ProgressTracker::new(&async_graph));
-                                    let fwd = (&async_graph).fwd();
-                                    let all_attractors = Mutex::new(vec![]);
+                            let witness_graph = SymbolicAsyncGraph::new(witness);
+                            match witness_graph {
+                                Ok(witness_graph) => {
+                                    let all_attractors: Mutex<
+                                        Vec<(Behaviour, Vec<(ArrayBitVector, ArrayBitVector)>)>,
+                                    > = Mutex::new(vec![]);
 
-                                    components(&async_graph, &_progress, &_false, |component| {
-                                        let mut attractor_graph = vec![];
-                                        let size = component.iter().count();
+                                    // This is a witness network, so there is exactly ONE parametrisation...
+                                    biodivine_aeon_server::scc::algo_symbolic_components::components(
+                                        &witness_graph,
+                                        &ProgressTracker::new(&witness_graph),
+                                        &AtomicBool::new(false),
+                                        |component| {
+                                            let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> = vec![];
 
-                                        if size == 0 {
-                                            return;
-                                        }
+                                            let behaviour = Classifier::classify_component(&component, &witness_graph);
+                                            assert_eq!(behaviour.len(), 1);
+                                            let behaviour = behaviour.into_iter().next().unwrap().0;
 
-                                        let classifier = Classifier::new(&async_graph);
-                                        for (from_state, _) in component.iter() {
-                                            let mut no_succ = true;
-                                            for (to_state, under_param) in fwd.step(from_state) {
-                                                if under_param.cardinality() > 0.0 {
-                                                    no_succ = false;
-                                                    attractor_graph.push((from_state, to_state));
+                                            for source in component.state_projection(&witness_graph).states(&witness_graph) {
+                                                let source_set = witness_graph.vertex(&source);
+                                                let mut target_set = witness_graph.empty_vertices().clone();
+                                                for v in witness_graph.network().graph().variable_ids() {
+                                                    let post = witness_graph.any_post(v, &source_set);
+                                                    target_set = target_set.union(&post);
+                                                }
+
+                                                let mut is_sink = true;
+                                                for target in target_set.state_projection(&witness_graph).states(&witness_graph) {
+                                                    is_sink = false;
+                                                    attractor_graph.push((source.clone(), target));
+                                                }
+
+                                                if is_sink {
+                                                    attractor_graph.push((source.clone(), source.clone()));
                                                 }
                                             }
-                                            if no_succ {
-                                                // it's a stability, so it has no successors
-                                                attractor_graph.push((from_state, from_state));
-                                            }
-                                        }
-                                        classifier.add_component(component, &async_graph);
-                                        let behavior = classifier
-                                            .try_export_result()
-                                            .unwrap()
-                                            .keys()
-                                            .collect::<Vec<_>>()
-                                            .first()
-                                            .unwrap()
-                                            .get_vector();
-                                        all_attractors
-                                            .lock()
-                                            .unwrap()
-                                            .push((behavior, attractor_graph));
-                                    });
+
+                                            all_attractors
+                                                .lock()
+                                                .unwrap()
+                                                .push((behaviour, attractor_graph));
+                                        },
+                                    );
                                     // now the data is stored in `all_attractors`, just convert it to json:
                                     let mut json = String::new();
 
@@ -446,48 +443,19 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                         if i != 0 {
                                             json += ",";
                                         } // json? no trailing commas for you
-                                        if behavior.len() != 1 {
-                                            // multiple stabilities
-                                            for (j, edge) in graph.iter().enumerate() {
-                                                if j != 0 {
-                                                    json += ",";
-                                                }
-                                                let from_index: usize = edge.0.into();
-                                                let from: String = format!("{:064b}", from_index)
-                                                    .chars()
-                                                    .rev()
-                                                    .take(var_count)
-                                                    .collect();
-                                                json += &format!("{{\"class\":\"Stability\", \"edges\":0, \"graph\": [[\"{}\", \"{}\"]]}}", from, from);
+                                        json +=
+                                            &format!("{{\"class\":\"{:?}\", \"graph\":[", behavior);
+                                        let mut edge_count = 0;
+                                        for (j, edge) in graph.iter().enumerate() {
+                                            let from: String = format!("{:?}", edge.0.values());
+                                            let to: String = format!("{:?}", edge.1.values());
+                                            if j != 0 {
+                                                json += ","
                                             }
-                                        } else if behavior.len() == 1 {
-                                            // everything else
-                                            json += &format!(
-                                                "{{\"class\":\"{:?}\", \"graph\":[",
-                                                behavior.first().unwrap()
-                                            );
-                                            let mut edge_count = 0;
-                                            for (j, edge) in graph.iter().enumerate() {
-                                                let from_index: usize = edge.0.into();
-                                                let to_index: usize = edge.1.into();
-                                                let from: String = format!("{:064b}", from_index)
-                                                    .chars()
-                                                    .rev()
-                                                    .take(var_count)
-                                                    .collect();
-                                                let to: String = format!("{:064b}", to_index)
-                                                    .chars()
-                                                    .rev()
-                                                    .take(var_count)
-                                                    .collect();
-                                                if j != 0 {
-                                                    json += ","
-                                                }
-                                                json += &format!("[\"{}\", \"{}\"]", from, to);
-                                                edge_count += 1;
-                                            }
-                                            json += &format!("], \"edges\":{}}}", edge_count);
+                                            json += &format!("[\"{}\", \"{}\"]", from, to);
+                                            edge_count += 1;
                                         }
+                                        json += &format!("], \"edges\":{}}}", edge_count);
                                     }
                                     json = "{ \"attractors\":[".to_owned()
                                         + &json
@@ -576,7 +544,7 @@ fn start_computation(data: Data) -> BackendResponse {
                         // stuff.
                         let cmp_thread = std::thread::spawn(move || {
                             let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-                            match AsyncGraph::new(network.clone()) {
+                            match SymbolicAsyncGraph::new(network.clone()) {
                                 Ok(graph) => {
                                     // Now that we have graph, we can create classifier and progress
                                     // and save them into the computation.
@@ -594,9 +562,8 @@ fn start_computation(data: Data) -> BackendResponse {
                                     }
 
                                     // Now we can actually start the computation...
-                                    components(&graph, &progress, &*cancelled, |component| {
-                                        let size = component.iter().count();
-                                        println!("Component {}", size);
+                                    biodivine_aeon_server::scc::algo_symbolic_components::components(&graph, &progress, &*cancelled, |component| {
+                                        println!("Component {}", component.cardinality());
                                         classifier.add_component(component, &graph);
                                     });
 
@@ -784,10 +751,11 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
     let mut aeon_string = String::new();
     return match stream.read_to_string(&mut aeon_string) {
         Ok(_) => {
-            match BooleanNetwork::try_from(aeon_string.as_str()).and_then(|bn| AsyncGraph::new(bn))
+            match BooleanNetwork::try_from(aeon_string.as_str())
+                .and_then(|bn| SymbolicAsyncGraph::new(bn))
             {
                 Ok(graph) => {
-                    let witness = graph.make_witness(graph.unit_params());
+                    let witness = graph.make_witness(graph.unit_colors());
                     let layout = read_layout(&aeon_string);
                     BackendResponse::ok(
                         &object! { "model" => witness.to_sbml(&layout) }.to_string(),

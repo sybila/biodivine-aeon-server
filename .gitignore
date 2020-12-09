@@ -15,3 +15,7 @@ Cargo.lock
 *.ipr
 *.iml
 *.iws
+
+# Benchmark runs
+bench1*
+bench_run*

@@ -1,10 +1,5 @@
-use crate::scc::{Behaviour, StateSet};
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
-use biodivine_lib_param_bn::bdd_params::BddParams;
+use crate::scc::Behaviour;
 use biodivine_lib_param_bn::{BinaryOp, VariableId};
-use biodivine_lib_std::param_graph::Params;
-use biodivine_lib_std::IdState;
-use std::collections::HashMap;
 
 pub mod parser;
 
@@ -44,12 +39,12 @@ pub type StateFormula = BooleanFormula<StateAtom>;
 pub type AttractorFormula = BooleanFormula<AttractorAtom>;
 
 pub type ALLFormula = BooleanFormula<ALLAtom>;
-
+/*
 impl ALLFormula {
     pub fn eval(
         &self,
         attractors: &Vec<(StateSet, HashMap<Behaviour, BddParams>)>,
-        graph: &AsyncGraph,
+        graph: &SymbolicAsyncGraph,
     ) -> BddParams {
         return match self {
             BooleanFormula::Not(inner) => graph.unit_params().minus(&inner.eval(attractors, graph)),
@@ -110,7 +105,7 @@ impl AttractorFormula {
     pub fn eval(
         &self,
         attractor: &StateSet,
-        graph: &AsyncGraph,
+        graph: &SymbolicAsyncGraph,
         classification: &HashMap<Behaviour, BddParams>,
     ) -> BddParams {
         return match self {
@@ -159,3 +154,4 @@ impl AttractorFormula {
         };
     }
 }
+*/
