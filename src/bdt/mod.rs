@@ -594,6 +594,29 @@ pub fn make_network_attributes(network: &BooleanNetwork) -> Vec<Attribute> {
             }
         }
     }
+    for p in network.parameter_ids() {
+        let parameter = network.get_parameter(p);
+        if parameter.get_cardinality() > 0 {
+            panic!("Unsupported network with non-trivial parameters?");
+        } else {
+            // There should be exactly one BDD variable corresponding to value of this "parameter"
+            result.push(Attribute {
+                name: format!("{:?}", parameter.get_name()),
+                positive: encoder.unit_colors().intersect_bdd(
+                    &encoder
+                        .function_context()
+                        .true_when_parameter(p, &Vec::new()),
+                ),
+                negative: encoder.unit_colors().intersect_bdd(
+                    &encoder
+                        .function_context()
+                        .true_when_parameter(p, &Vec::new())
+                        .not(),
+                ),
+            })
+        }
+    }
+
     return result;
 }
 
