@@ -14,7 +14,7 @@ use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
 use biodivine_aeon_server::scc::{Behaviour, Class, Classifier, ProgressTracker};
-use biodivine_lib_param_bn::BooleanNetwork;
+use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate};
 use regex::Regex;
 use std::convert::TryFrom;
 
@@ -30,6 +30,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use biodivine_lib_std::collections::bitvectors::{ArrayBitVector, BitVector};
+use std::cmp::max;
 
 /// Computation keeps all information
 struct Computation {
@@ -64,29 +65,55 @@ impl Computation {
 
 lazy_static! {
     static ref COMPUTATION: Arc<RwLock<Option<Computation>>> = Arc::new(RwLock::new(None));
+    static ref CHECK_UPDATE_FUNCTION_LOCK: Arc<RwLock<bool>> = Arc::new(RwLock::new(true));
+}
+
+fn max_parameter_cardinality(function: &FnUpdate) -> usize {
+    return match function {
+        FnUpdate::Const(_) | FnUpdate::Var(_) => 0,
+        FnUpdate::Param(_, args) => args.len(),
+        FnUpdate::Not(inner) => max_parameter_cardinality(inner),
+        FnUpdate::Binary(_, left, right) => max(
+            max_parameter_cardinality(left),
+            max_parameter_cardinality(right)
+        )
+    };
 }
 
 /// Accept a partial model containing only the necessary regulations and one update function.
 /// Return cardinality of such model (i.e. the number of instantiations of this update function)
 /// or error if the update function (or model) is invalid.
-/// TODO: On some large models, this sometimes returns some bogus number even though the model is too large to run :O
 #[post("/check_update_function", format = "plain", data = "<data>")]
 fn check_update_function(data: Data) -> BackendResponse {
     let mut stream = data.open().take(10_000_000); // limit model size to 10MB
     let mut model_string = String::new();
     return match stream.read_to_string(&mut model_string) {
         Ok(_) => {
+            let lock = CHECK_UPDATE_FUNCTION_LOCK.clone();
+            let mut lock = lock.write().unwrap();
+            let start = SystemTime::now();
             let graph = BooleanNetwork::try_from(model_string.as_str()).and_then(|model| {
-                if model.graph().num_vars() <= 5 {
+                let mut max_size = 0;
+                for v in model.graph().variable_ids() {
+                    if let Some(update_function) = model.get_update_function(v) {
+                        max_size = max(max_size, max_parameter_cardinality(update_function));
+                    } else {
+                        max_size = max(max_size, model.graph().regulators(v).len())
+                    }
+                }
+                if max_size <= 4 {
+                    println!("Start partial function analysis. {} variables and complexity {}.", model.graph().num_vars(), max_size);
                     SymbolicAsyncGraph::new(model)
                 } else {
                     Err("Function too large for on-the-fly analysis.".to_string())
                 }
-            });
+            }).map(|g| g.unit_colors().cardinality());
+            println!("Elapsed: {}, result {:?}", start.elapsed().unwrap().as_millis(), graph);
+            (*lock) = !(*lock);
             match graph {
-                Ok(graph) => BackendResponse::ok(&format!(
+                Ok(cardinality) => BackendResponse::ok(&format!(
                     "{{\"cardinality\":\"{}\"}}",
-                    graph.unit_colors().cardinality()
+                    cardinality
                 )),
                 Err(error) => BackendResponse::err(&error),
             }

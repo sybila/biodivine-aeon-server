@@ -6,7 +6,6 @@ use std::convert::TryFrom;
 use std::io::Read;
 use std::sync::atomic::AtomicBool;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::ops::Shl;
 
 fn main() {
     let mut buffer = String::new();
