@@ -351,7 +351,7 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                             let behaviour = behaviour.into_iter().next().unwrap().0;
 
                                             for source in component.state_projection(&witness_graph).states(&witness_graph) {
-                                                let source_set = witness_graph.vertex(source.clone());
+                                                let source_set = witness_graph.vertex(&source);
                                                 let mut target_set = witness_graph.empty_vertices().clone();
                                                 for v in witness_graph.network().graph().variable_ids() {
                                                     let post = witness_graph.any_post(v, &source_set);
@@ -744,7 +744,10 @@ impl BackendResponse {
 
     fn err(message: &String) -> Self {
         return BackendResponse {
-            message: format!("{{ \"status\": false, \"message\": \"{}\" }}", message),
+            message: object! {
+            "status" => false,
+            "message" => message.replace("\n", "<br>").clone(),
+            }.to_string(),
         };
     }
 }
