@@ -1,4 +1,4 @@
-use biodivine_aeon_server::scc::algo_symbolic_components::components;
+use biodivine_aeon_server::scc::algo_symbolic_components::{components, components_2};
 use biodivine_aeon_server::scc::{Classifier, ProgressTracker};
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
@@ -32,18 +32,19 @@ fn main() {
         "Admissible parametrisations: {}",
         graph.unit_colors().cardinality()
     );
-    println!(
-        "State space: {}",
-        graph.unit_vertices().cardinality()
-    );
+    println!("State space: {}", graph.unit_vertices().cardinality());
 
     let classifier = Classifier::new(&graph);
     let progress = ProgressTracker::new(&graph);
-    components(&graph, &progress, &AtomicBool::new(false), |component| {
-        println!("Found attractor...");
-        println!("Remaining: {}", progress.get_percent_string());
-        classifier.add_component(component, &graph);
-    });
+    components_2(
+        &graph,
+        /*&progress, &AtomicBool::new(false), */
+        |component| {
+            println!("Found attractor...");
+            println!("Remaining: {}", progress.get_percent_string());
+            classifier.add_component(component, &graph);
+        },
+    );
 
     classifier.print();
 

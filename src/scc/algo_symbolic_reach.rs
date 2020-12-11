@@ -1,8 +1,8 @@
 use crate::scc::ProgressTracker;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::io;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub fn guarded_reach_fwd(
     graph: &SymbolicAsyncGraph,
@@ -57,12 +57,15 @@ pub fn guarded_reach_fwd(
 
         progress.update_last_wave(result.cardinality());
 
-        println!("{}/{} ({:+e}%, nodes result({}))",
-                 result.cardinality(),
-                 guard.cardinality(),
-                 (result.cardinality()/guard.cardinality()) * 100.0,
-                 result.clone().into_bdd().size()
-        );
+        if result.as_bdd().size() > 10_000 {
+            println!(
+                "{}/{} ({:+e}%, nodes result({}))",
+                result.cardinality(),
+                guard.cardinality(),
+                (result.cardinality() / guard.cardinality()) * 100.0,
+                result.clone().into_bdd().size()
+            );
+        }
         let mut successors = graph.empty_vertices().clone();
         for variable in graph.network().graph().variable_ids() {
             io::stdout().flush().unwrap();
@@ -75,8 +78,12 @@ pub fn guarded_reach_fwd(
                 println!("{:?} -> {}", variable, s.into_bdd().size());
             }*/
         }
-        print!(" || {}", successors.clone().into_bdd().size());
-        println!();
+        if result.as_bdd().size() > 10_000 {
+            println!(
+                "Successor node count: {}",
+                successors.clone().into_bdd().size()
+            );
+        }
         successors = successors.minus(&result);
         if successors.is_empty() {
             break;
@@ -156,12 +163,15 @@ pub fn guarded_reach_bwd(
 
         progress.update_last_wave(result.cardinality());
 
-        println!("{}/{} ({:+e}%, nodes result({}))",
-                 result.cardinality(),
-                 guard.cardinality(),
-                 (result.cardinality()/guard.cardinality()) * 100.0,
-                 result.clone().into_bdd().size()
-        );
+        if result.as_bdd().size() > 10_000 {
+            println!(
+                "{}/{} ({:+e}%, nodes result({}))",
+                result.cardinality(),
+                guard.cardinality(),
+                (result.cardinality() / guard.cardinality()) * 100.0,
+                result.clone().into_bdd().size()
+            );
+        }
         let mut predecessors = graph.empty_vertices().clone();
         for variable in graph.network().graph().variable_ids() {
             io::stdout().flush().unwrap();
@@ -174,8 +184,12 @@ pub fn guarded_reach_bwd(
                 println!("{:?} -> {}", variable, s.into_bdd().size());
             }*/
         }
-        print!(" || {}", predecessors.clone().into_bdd().size());
-        println!();
+        if result.as_bdd().size() > 10_000 {
+            print!(
+                "Predecessor node count {}",
+                predecessors.clone().into_bdd().size()
+            );
+        }
         predecessors = predecessors.minus(&result);
         if predecessors.is_empty() {
             break;

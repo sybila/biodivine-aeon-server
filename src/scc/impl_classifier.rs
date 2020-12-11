@@ -1,6 +1,6 @@
 use super::{Behaviour, Class, Classifier};
 use biodivine_lib_param_bn::symbolic_async_graph::{
-    GraphColoredVertices, GraphColors, SymbolicAsyncGraph,
+    GraphColoredVertices, GraphColors, GraphVertices, SymbolicAsyncGraph,
 };
 use biodivine_lib_std::param_graph::Params;
 use std::collections::HashMap;
@@ -12,6 +12,7 @@ impl Classifier {
         map.insert(Class::new_empty(), graph.unit_colors().clone());
         return Classifier {
             classes: Mutex::new(map),
+            attractors: Mutex::new(Vec::new()),
         };
     }
 
@@ -50,13 +51,16 @@ impl Classifier {
     }
 
     /// Static function to classify just one component and immediately obtain results.
-    pub fn classify_component(component: &GraphColoredVertices, graph: &SymbolicAsyncGraph) -> HashMap<Behaviour, GraphColors> {
+    pub fn classify_component(
+        component: &GraphColoredVertices,
+        graph: &SymbolicAsyncGraph,
+    ) -> HashMap<Behaviour, GraphColors> {
         let classifier = Classifier::new(graph);
         classifier.add_component(component.clone(), graph);
         let mut result: HashMap<Behaviour, GraphColors> = HashMap::new();
         for (class, colors) in classifier.export_result() {
             if class.0.is_empty() {
-                continue    // This is an empty class - those colors were not in the attractor.
+                continue; // This is an empty class - those colors were not in the attractor.
             } else if class.0.len() > 1 {
                 unreachable!("Multiple behaviours in one component.");
             } else {
@@ -66,33 +70,71 @@ impl Classifier {
         return result;
     }
 
+    /// Find attractor of the given witness colour. The argument set must be a singleton.
+    pub fn attractors(
+        &self,
+        witness_colour: &GraphColors,
+        graph: &SymbolicAsyncGraph,
+    ) -> Vec<(GraphVertices, Behaviour)> {
+        if witness_colour.cardinality() != 1.0 {
+            eprintln!("WARNING: Computing attractor witnesses for non-singleton set. (This may be just a floating point error in large models).");
+        }
+        let mut result = Vec::new();
+        let attractors = self.attractors.lock().unwrap();
+        for (attractor, behaviour) in attractors.iter() {
+            let attractor_states = attractor.intersect_colors(witness_colour);
+            if attractor_states.is_empty() {
+                continue;
+            }
+            let attractor_states = attractor_states.state_projection(graph);
+            let attractor_behaviour = behaviour
+                .iter()
+                .find(|(_, c)| witness_colour.is_subset(c))
+                .unwrap()
+                .0
+                .clone();
+            result.push((attractor_states, attractor_behaviour));
+        }
+        return result;
+    }
+
     // TODO: Parallelism
     pub fn add_component(&self, component: GraphColoredVertices, graph: &SymbolicAsyncGraph) {
-        let without_sinks = self.filter_sinks(component, graph);
-        let not_sink_params = without_sinks.color_projection();
-        if not_sink_params.is_empty() {
-            return;
+        let mut component_classification = HashMap::new();
+        let without_sinks = self.filter_sinks(component.clone(), graph);
+        let not_sink_params = without_sinks.color_projection(graph);
+        let sink_params = component.color_projection(graph).minus(&not_sink_params);
+        if !sink_params.is_empty() {
+            component_classification.insert(Behaviour::Stability, sink_params);
         }
-        let mut disorder = graph.empty_colors().clone();
-        for variable in graph.network().graph().variable_ids() {
-            let found_first_successor = &graph.has_any_post(variable, &without_sinks);
-            for next_variable in graph.network().graph().variable_ids() {
-                if next_variable == variable {
-                    continue;
+        if !not_sink_params.is_empty() {
+            let mut disorder = graph.empty_colors().clone();
+            for variable in graph.network().graph().variable_ids() {
+                let found_first_successor = &graph.has_any_post(variable, &without_sinks);
+                for next_variable in graph.network().graph().variable_ids() {
+                    if next_variable == variable {
+                        continue;
+                    }
+                    let found_second_successor =
+                        &graph.has_any_post(next_variable, &found_first_successor);
+                    disorder = disorder.union(&found_second_successor.color_projection(graph));
                 }
-                let found_second_successor =
-                    &graph.has_any_post(next_variable, &found_first_successor);
-                disorder = disorder.union(&found_second_successor.color_projection());
+            }
+            let cycle = without_sinks.color_projection(graph).minus(&disorder);
+            if !cycle.is_empty() {
+                println!("Found cycle: {}", cycle.cardinality());
+                component_classification.insert(Behaviour::Oscillation, cycle.clone());
+                self.push(Behaviour::Oscillation, cycle);
+            }
+            if !disorder.is_empty() {
+                println!("Found disorder: {}", disorder.cardinality());
+                component_classification.insert(Behaviour::Disorder, disorder.clone());
+                self.push(Behaviour::Disorder, disorder);
             }
         }
-        let cycle = without_sinks.color_projection().minus(&disorder);
-        if !cycle.is_empty() {
-            println!("Found cycle: {}", cycle.cardinality());
-            self.push(Behaviour::Oscillation, cycle);
-        }
-        if !disorder.is_empty() {
-            println!("Found disorder: {}", disorder.cardinality());
-            self.push(Behaviour::Disorder, disorder);
+        {
+            let mut attractors = self.attractors.lock().unwrap();
+            attractors.push((component, component_classification));
         }
     }
 
@@ -149,8 +191,8 @@ impl Classifier {
             }
         }
         let is_sink = component
-            .color_projection()
-            .minus(&is_not_sink.color_projection());
+            .color_projection(graph)
+            .minus(&is_not_sink.color_projection(graph));
         if !is_sink.is_empty() {
             self.push(Behaviour::Stability, is_sink);
         }

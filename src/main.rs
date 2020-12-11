@@ -21,16 +21,16 @@ use std::convert::TryFrom;
 mod test_main;
 
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
+use biodivine_lib_std::collections::bitvectors::{ArrayBitVector, BitVector};
 use rocket::config::Environment;
 use rocket::{Config, Data};
-use std::collections::HashMap;
+use std::cmp::max;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use biodivine_lib_std::collections::bitvectors::{ArrayBitVector, BitVector};
-use std::cmp::max;
 
 /// Computation keeps all information
 struct Computation {
@@ -75,8 +75,8 @@ fn max_parameter_cardinality(function: &FnUpdate) -> usize {
         FnUpdate::Not(inner) => max_parameter_cardinality(inner),
         FnUpdate::Binary(_, left, right) => max(
             max_parameter_cardinality(left),
-            max_parameter_cardinality(right)
-        )
+            max_parameter_cardinality(right),
+        ),
     };
 }
 
@@ -92,29 +92,38 @@ fn check_update_function(data: Data) -> BackendResponse {
             let lock = CHECK_UPDATE_FUNCTION_LOCK.clone();
             let mut lock = lock.write().unwrap();
             let start = SystemTime::now();
-            let graph = BooleanNetwork::try_from(model_string.as_str()).and_then(|model| {
-                let mut max_size = 0;
-                for v in model.graph().variable_ids() {
-                    if let Some(update_function) = model.get_update_function(v) {
-                        max_size = max(max_size, max_parameter_cardinality(update_function));
-                    } else {
-                        max_size = max(max_size, model.graph().regulators(v).len())
+            let graph = BooleanNetwork::try_from(model_string.as_str())
+                .and_then(|model| {
+                    let mut max_size = 0;
+                    for v in model.graph().variable_ids() {
+                        if let Some(update_function) = model.get_update_function(v) {
+                            max_size = max(max_size, max_parameter_cardinality(update_function));
+                        } else {
+                            max_size = max(max_size, model.graph().regulators(v).len())
+                        }
                     }
-                }
-                if max_size <= 4 {
-                    println!("Start partial function analysis. {} variables and complexity {}.", model.graph().num_vars(), max_size);
-                    SymbolicAsyncGraph::new(model)
-                } else {
-                    Err("Function too large for on-the-fly analysis.".to_string())
-                }
-            }).map(|g| g.unit_colors().cardinality());
-            println!("Elapsed: {}, result {:?}", start.elapsed().unwrap().as_millis(), graph);
+                    if max_size <= 4 {
+                        println!(
+                            "Start partial function analysis. {} variables and complexity {}.",
+                            model.graph().num_vars(),
+                            max_size
+                        );
+                        SymbolicAsyncGraph::new(model)
+                    } else {
+                        Err("Function too large for on-the-fly analysis.".to_string())
+                    }
+                })
+                .map(|g| g.unit_colors().cardinality());
+            println!(
+                "Elapsed: {}, result {:?}",
+                start.elapsed().unwrap().as_millis(),
+                graph
+            );
             (*lock) = !(*lock);
             match graph {
-                Ok(cardinality) => BackendResponse::ok(&format!(
-                    "{{\"cardinality\":\"{}\"}}",
-                    cardinality
-                )),
+                Ok(cardinality) => {
+                    BackendResponse::ok(&format!("{{\"cardinality\":\"{}\"}}", cardinality))
+                }
                 Err(error) => BackendResponse::err(&error),
             }
         }
@@ -324,99 +333,132 @@ fn get_attractors(class_str: String) -> BackendResponse {
                 if let Some(has_class) = try_get_class_params(classifier, &class) {
                     if let Some(class) = has_class {
                         if let Some(graph) = &cmp.graph {
-                            let witness: BooleanNetwork = graph.make_witness(&class);
-                            let witness_str = format!("{}", witness);
-                            let mut all_variables = vec![];
-                            for id in witness.graph().variable_ids() {
-                                all_variables.push(format!(
-                                    "{:?}",
-                                    witness.graph().get_variable(id).to_string()
+                            let witness_colour = class.pick_color(graph).unwrap();
+                            let witness_network: BooleanNetwork = graph.make_witness(&class);
+                            let witness_graph =
+                                SymbolicAsyncGraph::new(witness_network.clone()).unwrap();
+                            let witness_str = witness_network.to_string();
+                            let witness_attractors = classifier.attractors(&witness_colour, graph);
+                            let variable_name_strings =
+                                witness_network.graph().variable_ids().map(|id| {
+                                    format!(
+                                        "\"{}\"",
+                                        witness_network.graph().get_variable(id).get_name()
+                                    )
+                                });
+
+                            let mut all_attractors: Vec<(
+                                Behaviour,
+                                Vec<(ArrayBitVector, ArrayBitVector)>,
+                                HashSet<usize>,
+                            )> = Vec::new();
+
+                            // Note that the choice of graph/witness_graph is not arbitrary.
+                            // The attractor set is from the original graph, but source_set/target_set
+                            // are based on the witness_graph. This means they have different number
+                            // of BDD variables inside!
+                            for (attractor, behaviour) in witness_attractors.iter() {
+                                println!(
+                                    "Attractor {:?} state count: {}",
+                                    behaviour,
+                                    attractor.cardinality()
+                                );
+                                if attractor.cardinality() >= 2_000.0 {
+                                    return BackendResponse::err(&format!("Attractor has {} states. Visualisation size limit exceeded.", attractor.cardinality()));
+                                }
+                                let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> =
+                                    Vec::new();
+                                let mut not_fixed_vars: HashSet<usize> = HashSet::new();
+                                if *behaviour == Behaviour::Stability {
+                                    // This is a sink - no edges
+                                    assert_eq!(attractor.states(&graph).count(), 1);
+                                    let sink: ArrayBitVector =
+                                        attractor.states(&graph).next().unwrap();
+                                    attractor_graph.push((sink.clone(), sink));
+                                    for i in 0..witness_network.graph().num_vars() {
+                                        // In sink, we mark everything as "not-fixed" because we want to just display it normally.
+                                        not_fixed_vars.insert(i);
+                                    }
+                                } else {
+                                    for source in attractor.states(&graph) {
+                                        let source_set = witness_graph.vertex(&source);
+                                        let mut target_set = witness_graph.empty_vertices().clone();
+                                        for v in witness_graph.network().graph().variable_ids() {
+                                            let post = witness_graph.any_post(v, &source_set);
+                                            if !post.is_empty() {
+                                                not_fixed_vars.insert(v.into());
+                                                target_set = target_set.union(&post);
+                                            }
+                                        }
+
+                                        for target in target_set
+                                            .state_projection(&witness_graph)
+                                            .states(&witness_graph)
+                                        {
+                                            attractor_graph.push((source.clone(), target));
+                                        }
+                                    }
+                                }
+
+                                all_attractors.push((
+                                    behaviour.clone(),
+                                    attractor_graph,
+                                    not_fixed_vars,
                                 ));
                             }
-                            let witness_graph = SymbolicAsyncGraph::new(witness);
-                            match witness_graph {
-                                Ok(witness_graph) => {
-                                    let all_attractors: Mutex<Vec<(Behaviour, Vec<(ArrayBitVector, ArrayBitVector)>)>> = Mutex::new(vec![]);
 
-                                    // This is a witness network, so there is exactly ONE parametrisation...
-                                    biodivine_aeon_server::scc::algo_symbolic_components::components(
-                                        &witness_graph,
-                                        &ProgressTracker::new(&witness_graph),
-                                        &AtomicBool::new(false),
-                                        |component| {
-                                            let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> = vec![];
+                            // now the data is stored in `all_attractors`, just convert it to json:
+                            let mut json = String::new();
 
-                                            let behaviour = Classifier::classify_component(&component, &witness_graph);
-                                            assert_eq!(behaviour.len(), 1);
-                                            let behaviour = behaviour.into_iter().next().unwrap().0;
-
-                                            for source in component.state_projection(&witness_graph).states(&witness_graph) {
-                                                let source_set = witness_graph.vertex(&source);
-                                                let mut target_set = witness_graph.empty_vertices().clone();
-                                                for v in witness_graph.network().graph().variable_ids() {
-                                                    let post = witness_graph.any_post(v, &source_set);
-                                                    target_set = target_set.union(&post);
-                                                }
-
-                                                let mut is_sink = true;
-                                                for target in target_set.state_projection(&witness_graph).states(&witness_graph) {
-                                                    is_sink = false;
-                                                    attractor_graph.push((source.clone(), target));
-                                                }
-
-                                                if is_sink {
-                                                    attractor_graph.push((source.clone(), source.clone()));
-                                                }
+                            for (i, (behavior, graph, not_fixed)) in
+                                all_attractors.iter().enumerate()
+                            {
+                                if i != 0 {
+                                    json += ",";
+                                } // json? no trailing commas for you
+                                json += &format!("{{\"class\":\"{:?}\", \"graph\":[", behavior);
+                                let mut edge_count = 0;
+                                for (j, edge) in graph.iter().enumerate() {
+                                    fn state_to_binary(
+                                        state: &ArrayBitVector,
+                                        not_fixed: &HashSet<usize>,
+                                    ) -> String {
+                                        let mut result = String::new();
+                                        for i in 0..state.len() {
+                                            if not_fixed.contains(&i) {
+                                                result.push(if state.get(i) { '1' } else { '0' });
+                                            } else {
+                                                result.push(if state.get(i) {
+                                                    '⊤'
+                                                } else {
+                                                    '⊥'
+                                                });
                                             }
-
-                                            all_attractors
-                                                .lock()
-                                                .unwrap()
-                                                .push((behaviour, attractor_graph));
-                                        },
-                                    );
-                                    // now the data is stored in `all_attractors`, just convert it to json:
-                                    let mut json = String::new();
-
-                                    for (i, (behavior, graph)) in
-                                        all_attractors.into_inner().unwrap().iter().enumerate()
-                                    {
-                                        if i != 0 {
-                                            json += ",";
-                                        } // json? no trailing commas for you
-                                        json += &format!(
-                                            "{{\"class\":\"{:?}\", \"graph\":[",
-                                            behavior
-                                        );
-                                        let mut edge_count = 0;
-                                        for (j, edge) in graph.iter().enumerate() {
-                                            let from: String = format!("{:?}", edge.0.values());
-                                            let to: String = format!("{:?}", edge.1.values());
-                                            if j != 0 {
-                                                json += ","
-                                            }
-                                            json += &format!("[\"{}\", \"{}\"]", from, to);
-                                            edge_count += 1;
                                         }
-                                        json += &format!("], \"edges\":{}}}", edge_count);
+                                        return result;
                                     }
-                                    json = "{ \"attractors\":[".to_owned()
-                                        + &json
-                                        + "], \"variables\":[";
-                                    for (i, var) in all_variables.iter().enumerate() {
-                                        if i != 0 {
-                                            json += ",";
-                                        }
-                                        json += var;
+                                    let from: String = state_to_binary(&edge.0, not_fixed);
+                                    let to: String = state_to_binary(&edge.1, not_fixed);
+                                    if j != 0 {
+                                        json += ","
                                     }
-                                    json += &format!(
-                                        "], \"model\":{}",
-                                        &object! { "model" => witness_str }.to_string()
-                                    );
-                                    BackendResponse::ok(&(json + "}"))
+                                    json += &format!("[\"{}\", \"{}\"]", from, to);
+                                    edge_count += 1;
                                 }
-                                Err(error_msg) => BackendResponse::err(&error_msg),
+                                json += &format!("], \"edges\":{}}}", edge_count);
                             }
+                            json = "{ \"attractors\":[".to_owned() + &json + "], \"variables\":[";
+                            for (i, var) in variable_name_strings.enumerate() {
+                                if i != 0 {
+                                    json += ",";
+                                }
+                                json += var.as_str();
+                            }
+                            json += &format!(
+                                "], \"model\":{}",
+                                &object! { "model" => witness_str }.to_string()
+                            );
+                            BackendResponse::ok(&(json + "}"))
                         } else {
                             return BackendResponse::err(&"No results available.".to_string());
                         }
@@ -747,7 +789,8 @@ impl BackendResponse {
             message: object! {
             "status" => false,
             "message" => message.replace("\n", "<br>").clone(),
-            }.to_string(),
+            }
+            .to_string(),
         };
     }
 }

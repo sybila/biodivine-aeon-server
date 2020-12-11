@@ -1,7 +1,15 @@
-use biodivine_lib_param_bn::symbolic_async_graph::{SymbolicAsyncGraph, GraphColoredVertices};
+use crate::scc::algo_reach::reach;
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
+use std::cmp::min;
+use std::collections::HashSet;
+use std::env::var;
+use std::fs::read;
 
-pub fn remove_effectively_constant_states_2(graph: &SymbolicAsyncGraph, set: GraphColoredVertices) -> GraphColoredVertices {
+pub fn remove_effectively_constant_states_2(
+    graph: &SymbolicAsyncGraph,
+    set: GraphColoredVertices,
+) -> GraphColoredVertices {
     println!("Remove effectively constant states.");
     let mut universe = set;
     for variable in graph.network().graph().variable_ids() {
@@ -10,7 +18,11 @@ pub fn remove_effectively_constant_states_2(graph: &SymbolicAsyncGraph, set: Gra
     return universe;
 }
 
-fn cut_variable(graph: &SymbolicAsyncGraph, variable: VariableId, universe: GraphColoredVertices) -> GraphColoredVertices {
+fn cut_variable(
+    graph: &SymbolicAsyncGraph,
+    variable: VariableId,
+    universe: GraphColoredVertices,
+) -> GraphColoredVertices {
     let mut scc_candidate = universe.clone();
     let mut not_attractor = graph.empty_vertices().clone();
 
@@ -19,7 +31,8 @@ fn cut_variable(graph: &SymbolicAsyncGraph, variable: VariableId, universe: Grap
     loop {
         let vertices_where_var_can_jump = graph.has_any_post(variable, &scc_candidate);
         let vertices_where_var_jumped = graph.any_post(variable, &scc_candidate);
-        let reachable_after_jump = reach_fwd_excluding(graph, &vertices_where_var_jumped, &scc_candidate, variable);
+        let reachable_after_jump =
+            reach_fwd_excluding(graph, &vertices_where_var_jumped, &scc_candidate, variable);
         let can_jump_again = reachable_after_jump.intersect(&vertices_where_var_can_jump);
         let will_never_jump_again = vertices_where_var_can_jump.minus(&can_jump_again);
         scc_candidate = reachable_after_jump;
@@ -27,12 +40,21 @@ fn cut_variable(graph: &SymbolicAsyncGraph, variable: VariableId, universe: Grap
             break;
         }
         not_attractor = not_attractor.union(&will_never_jump_again);
-        println!("{:?} will never jump again: {}", variable, will_never_jump_again.cardinality());
+        println!(
+            "{:?} will never jump again: {}",
+            variable,
+            will_never_jump_again.cardinality()
+        );
     }
 
     // Now finish the SCCs
     let vertices_where_var_can_jump = graph.has_any_post(variable, &scc_candidate);
-    let scc = reach_bwd_excluding(graph, &vertices_where_var_can_jump, &scc_candidate, variable);
+    let scc = reach_bwd_excluding(
+        graph,
+        &vertices_where_var_can_jump,
+        &scc_candidate,
+        variable,
+    );
     let not_scc = graph.unit_vertices().minus(&scc);
     for other_variable in graph.network().graph().variable_ids() {
         let can_jump_out = graph.any_pre(other_variable, &not_scc).intersect(&scc);
@@ -43,7 +65,11 @@ fn cut_variable(graph: &SymbolicAsyncGraph, variable: VariableId, universe: Grap
     }
 
     let to_remove = reach_bwd_excluding(graph, &not_attractor, &universe, variable);
-    println!("Eliminated: {}/{}", to_remove.cardinality(), universe.cardinality());
+    println!(
+        "Eliminated: {}/{}",
+        to_remove.cardinality(),
+        universe.cardinality()
+    );
     return universe.minus(&to_remove);
 }
 
@@ -55,39 +81,183 @@ fn cut_variable(graph: &SymbolicAsyncGraph, variable: VariableId, universe: Grap
 ///
 /// Note that this does not mean the variable has to strictly always jump - that is why we need the
 /// backward reachability to detect states that can actually achieve irreversible jump.
-pub fn remove_effectively_constant_states(graph: &SymbolicAsyncGraph, set: GraphColoredVertices) -> GraphColoredVertices {
+pub fn remove_effectively_constant_states(
+    graph: &SymbolicAsyncGraph,
+    set: GraphColoredVertices,
+) -> (GraphColoredVertices, Vec<VariableId>) {
     println!("Remove effectively constant states.");
     let original_size = set.cardinality();
     let mut universe = set;
     let mut stop = false;
+    let mut variables: Vec<VariableId> = graph.network().graph().variable_ids().collect();
     while !stop {
         stop = true;
         let mut to_remove = graph.empty_vertices().clone();
-        for variable in graph.network().graph().variable_ids() {
-            let vertices_where_var_can_jump = graph.has_post(variable, &universe);
-            let vertices_where_var_jumped = graph.post(variable, &universe, &universe);
-            let reachable_after_jump = reach_fwd_excluding(graph, &vertices_where_var_jumped, &universe, variable);
+        for variable in &variables {
+            let active_variables: Vec<VariableId> = variables
+                .iter()
+                .filter(|it| *it != variable)
+                .cloned()
+                .collect();
+            let vertices_where_var_can_jump = graph.has_post(*variable, &universe);
+            let vertices_where_var_jumped = graph.post(*variable, &universe, &universe);
+            let reachable_after_jump = reach_saturated_fwd_excluding(
+                graph,
+                &vertices_where_var_jumped,
+                &universe,
+                &active_variables,
+            );
             let can_jump_again = reachable_after_jump.intersect(&vertices_where_var_can_jump);
             let will_never_jump_again = vertices_where_var_can_jump.minus(&can_jump_again);
             if !will_never_jump_again.is_empty() {
-                println!("{:?} will never jump again: {}", variable, will_never_jump_again.cardinality());
-            }
-            if !will_never_jump_again.is_empty() {
                 stop = false;
-                let to_remove_for_var = reach_bwd_excluding(graph, &will_never_jump_again, &universe, variable);
+                let to_remove_for_var = reach_saturated_bwd_excluding(
+                    graph,
+                    &will_never_jump_again,
+                    &universe,
+                    &active_variables,
+                );
                 to_remove = to_remove.union(&to_remove_for_var);
-                //universe = universe.minus(&to_remove);
-                println!("Eliminated {}/{} {:+e}%", to_remove.cardinality(), universe.cardinality(), (to_remove.cardinality()/universe.cardinality()) * 100.0);
+                //universe = universe.minus(&to_remove); THIS IS A BAD IDEA...
+                println!(
+                    "{:?} will never jump again: {}",
+                    variable,
+                    will_never_jump_again.cardinality()
+                );
+                println!(
+                    "Eliminated {}/{} {:+e}%",
+                    to_remove.cardinality(),
+                    universe.cardinality(),
+                    (to_remove.cardinality() / universe.cardinality()) * 100.0
+                );
             }
         }
         universe = universe.minus(&to_remove);
-        println!("Universe now has {} nodes.", universe.clone().into_bdd().size());
+        let original_vars = variables.len();
+        variables = variables
+            .into_iter()
+            .filter(|v| !graph.has_post(*v, &universe).is_empty())
+            .collect();
+        println!(
+            "Universe now has {} nodes. Eliminated {} variables.",
+            universe.clone().into_bdd().size(),
+            original_vars - variables.len()
+        );
     }
-    println!("Removed {}/{} {:+e}%; {} nodes.", universe.cardinality(), original_size, (universe.cardinality()/original_size) * 100.0, universe.clone().into_bdd().size());
-    return universe;
+
+    println!("Final active variables: {}", variables.len());
+    println!(
+        "Removed {}/{} {:+e}%; {} nodes.",
+        universe.cardinality(),
+        original_size,
+        (universe.cardinality() / original_size) * 100.0,
+        universe.clone().into_bdd().size()
+    );
+
+    for v in &variables {
+        let vertices_where_var_can_jump = graph.has_post(*v, &universe);
+        let reachable_before_jump = reach_saturated_bwd_excluding(
+            graph,
+            &vertices_where_var_can_jump,
+            &universe,
+            &variables,
+        );
+        let reachable_after_jump = reach_saturated_fwd_excluding(
+            graph,
+            &vertices_where_var_can_jump,
+            &universe,
+            &variables,
+        );
+        let components = reachable_before_jump.intersect(&reachable_after_jump);
+        let below = reachable_after_jump.minus(&components);
+        let can_reach_below =
+            reach_saturated_bwd_excluding(graph, &below, &universe, &variables).minus(&below);
+        println!(
+            "({:?}) Below: {} Can reach below: {}",
+            v,
+            below.cardinality(),
+            can_reach_below.cardinality()
+        );
+        universe = universe.minus(&can_reach_below);
+    }
+
+    println!("Final active variables: {}", variables.len());
+    println!(
+        "Removed {}/{} {:+e}%; {} nodes.",
+        universe.cardinality(),
+        original_size,
+        (universe.cardinality() / original_size) * 100.0,
+        universe.clone().into_bdd().size()
+    );
+    return (universe, variables);
 }
 
-pub fn reach_fwd_excluding(graph: &SymbolicAsyncGraph, initial: &GraphColoredVertices, guard: &GraphColoredVertices, exclude: VariableId) -> GraphColoredVertices {
+pub fn reach_saturated_fwd_excluding(
+    graph: &SymbolicAsyncGraph,
+    initial: &GraphColoredVertices,
+    guard: &GraphColoredVertices,
+    variables: &Vec<VariableId>,
+) -> GraphColoredVertices {
+    if variables.is_empty() {
+        return initial.clone();
+    }
+    let mut result = initial.clone();
+    let last_variable = variables.len() - 1;
+    let mut active_variable = last_variable;
+    loop {
+        let variable = variables[active_variable];
+        let post = graph.post(variable, &result, guard).minus(&result);
+        result = result.union(&post);
+
+        if !post.is_empty() {
+            active_variable = last_variable;
+        } else {
+            if active_variable == 0 {
+                break;
+            } else {
+                active_variable -= 1;
+            }
+        }
+    }
+    return result;
+}
+
+pub fn reach_saturated_bwd_excluding(
+    graph: &SymbolicAsyncGraph,
+    initial: &GraphColoredVertices,
+    guard: &GraphColoredVertices,
+    variables: &Vec<VariableId>,
+) -> GraphColoredVertices {
+    if variables.is_empty() {
+        return initial.clone();
+    }
+    let mut result = initial.clone();
+    let last_variable = variables.len() - 1;
+    let mut active_variable = last_variable;
+    loop {
+        let variable = variables[active_variable];
+        let post = graph.pre(variable, &result, guard).minus(&result);
+        result = result.union(&post);
+
+        if !post.is_empty() {
+            active_variable = last_variable;
+        } else {
+            if active_variable == 0 {
+                break;
+            } else {
+                active_variable -= 1;
+            }
+        }
+    }
+    return result;
+}
+
+pub fn reach_fwd_excluding(
+    graph: &SymbolicAsyncGraph,
+    initial: &GraphColoredVertices,
+    guard: &GraphColoredVertices,
+    exclude: VariableId,
+) -> GraphColoredVertices {
     let mut result = initial.clone();
     //println!("Reach fwd excluding {:?}...", exclude);
     loop {
@@ -123,7 +293,12 @@ pub fn reach_fwd_excluding(graph: &SymbolicAsyncGraph, initial: &GraphColoredVer
     return result;
 }
 
-pub fn reach_bwd_excluding(graph: &SymbolicAsyncGraph, initial: &GraphColoredVertices, guard: &GraphColoredVertices, exclude: VariableId) -> GraphColoredVertices {
+pub fn reach_bwd_excluding(
+    graph: &SymbolicAsyncGraph,
+    initial: &GraphColoredVertices,
+    guard: &GraphColoredVertices,
+    exclude: VariableId,
+) -> GraphColoredVertices {
     let mut result = initial.clone();
     //println!("Reach bwd excluding {:?}...", exclude);
     loop {
