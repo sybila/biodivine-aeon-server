@@ -74,9 +74,8 @@ impl Classifier {
     pub fn attractors(
         &self,
         witness_colour: &GraphColors,
-        graph: &SymbolicAsyncGraph,
     ) -> Vec<(GraphVertices, Behaviour)> {
-        if witness_colour.cardinality() != 1.0 {
+        if witness_colour.approx_cardinality() != 1.0 {
             eprintln!("WARNING: Computing attractor witnesses for non-singleton set. (This may be just a floating point error in large models).");
         }
         let mut result = Vec::new();
@@ -86,7 +85,7 @@ impl Classifier {
             if attractor_states.is_empty() {
                 continue;
             }
-            let attractor_states = attractor_states.state_projection(graph);
+            let attractor_states = attractor_states.vertices();
             let attractor_behaviour = behaviour
                 .iter()
                 .find(|(_, c)| witness_colour.is_subset(c))
@@ -102,32 +101,32 @@ impl Classifier {
     pub fn add_component(&self, component: GraphColoredVertices, graph: &SymbolicAsyncGraph) {
         let mut component_classification = HashMap::new();
         let without_sinks = self.filter_sinks(component.clone(), graph);
-        let not_sink_params = without_sinks.color_projection(graph);
-        let sink_params = component.color_projection(graph).minus(&not_sink_params);
+        let not_sink_params = without_sinks.colors();
+        let sink_params = component.colors().minus(&not_sink_params);
         if !sink_params.is_empty() {
             component_classification.insert(Behaviour::Stability, sink_params);
         }
         if !not_sink_params.is_empty() {
-            let mut disorder = graph.empty_colors().clone();
-            for variable in graph.network().graph().variable_ids() {
-                let found_first_successor = &graph.has_any_post(variable, &without_sinks);
-                for next_variable in graph.network().graph().variable_ids() {
+            let mut disorder = graph.mk_empty_colors();
+            for variable in graph.network().variables() {
+                let found_first_successor = &graph.var_can_post(variable, &without_sinks);
+                for next_variable in graph.network().variables() {
                     if next_variable == variable {
                         continue;
                     }
                     let found_second_successor =
-                        &graph.has_any_post(next_variable, &found_first_successor);
-                    disorder = disorder.union(&found_second_successor.color_projection(graph));
+                        &graph.var_can_post(next_variable, &found_first_successor);
+                    disorder = disorder.union(&found_second_successor.colors());
                 }
             }
-            let cycle = without_sinks.color_projection(graph).minus(&disorder);
+            let cycle = without_sinks.colors().minus(&disorder);
             if !cycle.is_empty() {
-                println!("Found cycle: {}", cycle.cardinality());
+                println!("Found cycle: {}", cycle.approx_cardinality());
                 component_classification.insert(Behaviour::Oscillation, cycle.clone());
                 self.push(Behaviour::Oscillation, cycle);
             }
             if !disorder.is_empty() {
-                println!("Found disorder: {}", disorder.cardinality());
+                println!("Found disorder: {}", disorder.approx_cardinality());
                 component_classification.insert(Behaviour::Disorder, disorder.clone());
                 self.push(Behaviour::Disorder, disorder);
             }
@@ -172,7 +171,7 @@ impl Classifier {
     pub fn print(&self) {
         let classes = self.classes.lock().unwrap();
         for (c, p) in &(*classes) {
-            println!("Class {:?}, cardinality: {}", c, p.cardinality());
+            println!("Class {:?}, cardinality: {}", c, p.approx_cardinality());
         }
     }
 
@@ -184,15 +183,13 @@ impl Classifier {
         graph: &SymbolicAsyncGraph,
     ) -> GraphColoredVertices {
         let mut is_not_sink = graph.empty_vertices().clone();
-        for variable in graph.network().graph().variable_ids() {
-            let has_successor = &graph.has_any_post(variable, &component);
+        for variable in graph.network().variables() {
+            let has_successor = &graph.var_can_post(variable, &component);
             if !has_successor.is_empty() {
                 is_not_sink = is_not_sink.union(has_successor);
             }
         }
-        let is_sink = component
-            .color_projection(graph)
-            .minus(&is_not_sink.color_projection(graph));
+        let is_sink = component.colors().minus(&is_not_sink.colors());
         if !is_sink.is_empty() {
             self.push(Behaviour::Stability, is_sink);
         }

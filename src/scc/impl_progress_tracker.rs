@@ -4,8 +4,8 @@ use std::sync::Mutex;
 
 impl ProgressTracker {
     pub fn new(graph: &SymbolicAsyncGraph) -> ProgressTracker {
-        let unit_cardinality = graph.unit_colors().cardinality();
-        let num_states = graph.num_states() as f64;
+        let unit_cardinality = graph.unit_colors().approx_cardinality();
+        let num_states = graph.unit_vertices().vertices().approx_cardinality();
         let graph_size = unit_cardinality * num_states;
         return ProgressTracker {
             total: graph_size,

@@ -61,31 +61,28 @@ fn main() {
                 Ok(mut model) => {
                     // Check that basic properties match SBML model. But note that variables can be re-ordered...
                     let mut models_match =
-                        model.graph().num_vars() == sbml_model.graph().num_vars();
-                    if model.graph().num_vars() != sbml_model.graph().num_vars() {
+                        model.num_vars() == sbml_model.num_vars();
+                    if model.num_vars() != sbml_model.num_vars() {
                         eprintln!(
                             "{} != {}",
-                            model.graph().num_vars(),
-                            sbml_model.graph().num_vars()
+                            model.num_vars(),
+                            sbml_model.num_vars()
                         );
                     }
-                    for v in model.graph().variable_ids() {
+                    for v in model.variables() {
                         let regulators_in_model: HashSet<String> = model
-                            .graph()
                             .regulators(v)
                             .into_iter()
-                            .map(|r| model.graph().get_variable(r).get_name().clone())
+                            .map(|r| model.get_variable_name(r).clone())
                             .collect();
                         let regulators_in_sbml_model: HashSet<String> = sbml_model
-                            .graph()
                             .regulators(
-                                sbml_model
-                                    .graph()
-                                    .find_variable(model.graph().get_variable(v).get_name())
+                                sbml_model.as_graph()
+                                    .find_variable(model.get_variable_name(v))
                                     .unwrap(),
                             )
                             .into_iter()
-                            .map(|r| sbml_model.graph().get_variable(r).get_name().clone())
+                            .map(|r| sbml_model.get_variable_name(r).clone())
                             .collect();
                         if regulators_in_model != regulators_in_sbml_model {
                             eprintln!(
@@ -105,7 +102,7 @@ fn main() {
                     }
                     // Check that all update functions are set (for non-parametrized model anyway).
                     let mut model_ok = true;
-                    for v in model.graph().variable_ids() {
+                    for v in model.variables() {
                         let function = model.get_update_function(v);
                         if function.is_none() {
                             model_ok = false;
@@ -128,11 +125,11 @@ fn main() {
                         let graph = SymbolicAsyncGraph::new(model);
                         match graph {
                             Ok(graph) => {
-                                if graph.unit_colors().cardinality() != 1.0 {
+                                if graph.unit_colors().approx_cardinality() != 1.0 {
                                     errors += 1;
                                     eprintln!(
                                         "ERROR: Default model has {} colors in {}.",
-                                        graph.unit_colors().cardinality(),
+                                        graph.unit_colors().approx_cardinality(),
                                         bench_dir.path().display()
                                     );
                                 }

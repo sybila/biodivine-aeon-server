@@ -18,8 +18,6 @@ use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate};
 use regex::Regex;
 use std::convert::TryFrom;
 
-mod test_main;
-
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
 use biodivine_lib_std::collections::bitvectors::{ArrayBitVector, BitVector};
 use rocket::config::Environment;
@@ -95,17 +93,17 @@ fn check_update_function(data: Data) -> BackendResponse {
             let graph = BooleanNetwork::try_from(model_string.as_str())
                 .and_then(|model| {
                     let mut max_size = 0;
-                    for v in model.graph().variable_ids() {
+                    for v in model.variables() {
                         if let Some(update_function) = model.get_update_function(v) {
                             max_size = max(max_size, max_parameter_cardinality(update_function));
                         } else {
-                            max_size = max(max_size, model.graph().regulators(v).len())
+                            max_size = max(max_size, model.regulators(v).len())
                         }
                     }
                     if max_size <= 4 {
                         println!(
                             "Start partial function analysis. {} variables and complexity {}.",
-                            model.graph().num_vars(),
+                            model.num_vars(),
                             max_size
                         );
                         SymbolicAsyncGraph::new(model)
@@ -113,7 +111,7 @@ fn check_update_function(data: Data) -> BackendResponse {
                         Err("Function too large for on-the-fly analysis.".to_string())
                     }
                 })
-                .map(|g| g.unit_colors().cardinality());
+                .map(|g| g.unit_colors().approx_cardinality());
             println!(
                 "Elapsed: {}, result {:?}",
                 start.elapsed().unwrap().as_millis(),
@@ -231,7 +229,7 @@ fn get_results() -> BackendResponse {
     };
     let lines: Vec<String> = data
         .iter()
-        .map(|(c, p)| format!("{{\"sat_count\":{},\"phenotype\":{}}}", p.cardinality(), c))
+        .map(|(c, p)| format!("{{\"sat_count\":{},\"phenotype\":{}}}", p.approx_cardinality(), c))
         .collect();
 
     println!("Result {:?}", lines);
@@ -274,7 +272,7 @@ fn get_witness(class_str: String) -> BackendResponse {
                 if let Some(has_class) = try_get_class_params(classifier, &class) {
                     if let Some(class) = has_class {
                         if let Some(graph) = &cmp.graph {
-                            let witness = graph.make_witness(&class);
+                            let witness = graph.pick_witness(&class);
                             let layout = read_layout(cmp.input_model.as_str());
                             let mut model_string = format!("{}", witness); // convert back to aeon
                             model_string += "\n";
@@ -333,18 +331,15 @@ fn get_attractors(class_str: String) -> BackendResponse {
                 if let Some(has_class) = try_get_class_params(classifier, &class) {
                     if let Some(class) = has_class {
                         if let Some(graph) = &cmp.graph {
-                            let witness_colour = class.pick_color(graph).unwrap();
-                            let witness_network: BooleanNetwork = graph.make_witness(&class);
+                            let witness_colour = class.pick_singleton();
+                            let witness_network: BooleanNetwork = graph.pick_witness(&witness_colour);
                             let witness_graph =
                                 SymbolicAsyncGraph::new(witness_network.clone()).unwrap();
                             let witness_str = witness_network.to_string();
-                            let witness_attractors = classifier.attractors(&witness_colour, graph);
+                            let witness_attractors = classifier.attractors(&witness_colour);
                             let variable_name_strings =
-                                witness_network.graph().variable_ids().map(|id| {
-                                    format!(
-                                        "\"{}\"",
-                                        witness_network.graph().get_variable(id).get_name()
-                                    )
+                                witness_network.variables().map(|id| {
+                                    format!("\"{}\"", witness_network.get_variable_name(id))
                                 });
 
                             let mut all_attractors: Vec<(
@@ -361,40 +356,36 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                 println!(
                                     "Attractor {:?} state count: {}",
                                     behaviour,
-                                    attractor.cardinality()
+                                    attractor.approx_cardinality()
                                 );
-                                if attractor.cardinality() >= 2_000.0 {
-                                    return BackendResponse::err(&format!("Attractor has {} states. Visualisation size limit exceeded.", attractor.cardinality()));
+                                if attractor.approx_cardinality() >= 2_000.0 {
+                                    return BackendResponse::err(&format!("Attractor has {} states. Visualisation size limit exceeded.", attractor.approx_cardinality()));
                                 }
                                 let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> =
                                     Vec::new();
                                 let mut not_fixed_vars: HashSet<usize> = HashSet::new();
                                 if *behaviour == Behaviour::Stability {
                                     // This is a sink - no edges
-                                    assert_eq!(attractor.states(&graph).count(), 1);
-                                    let sink: ArrayBitVector =
-                                        attractor.states(&graph).next().unwrap();
+                                    assert_eq!(attractor.materialize().iter().count(), 1);
+                                    let sink: ArrayBitVector = attractor.materialize().iter().next().unwrap();
                                     attractor_graph.push((sink.clone(), sink));
-                                    for i in 0..witness_network.graph().num_vars() {
+                                    for i in 0..witness_network.num_vars() {
                                         // In sink, we mark everything as "not-fixed" because we want to just display it normally.
                                         not_fixed_vars.insert(i);
                                     }
                                 } else {
-                                    for source in attractor.states(&graph) {
+                                    for source in attractor.materialize().iter() {
                                         let source_set = witness_graph.vertex(&source);
-                                        let mut target_set = witness_graph.empty_vertices().clone();
-                                        for v in witness_graph.network().graph().variable_ids() {
-                                            let post = witness_graph.any_post(v, &source_set);
+                                        let mut target_set = witness_graph.mk_empty_vertices();
+                                        for v in witness_graph.network().variables() {
+                                            let post = witness_graph.var_post(v, &source_set);
                                             if !post.is_empty() {
                                                 not_fixed_vars.insert(v.into());
                                                 target_set = target_set.union(&post);
                                             }
                                         }
 
-                                        for target in target_set
-                                            .state_projection(&witness_graph)
-                                            .states(&witness_graph)
-                                        {
+                                        for target in target_set.vertices().materialize().iter() {
                                             attractor_graph.push((source.clone(), target));
                                         }
                                     }
@@ -548,7 +539,7 @@ fn start_computation(data: Data) -> BackendResponse {
 
                                     // Now we can actually start the computation...
                                     biodivine_aeon_server::scc::algo_symbolic_components::components(&graph, &progress, &*cancelled, |component| {
-                                        println!("Component {}", component.cardinality());
+                                        println!("Component {}", component.approx_cardinality());
                                         classifier.add_component(component, &graph);
                                     });
 
@@ -729,7 +720,7 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
                 .and_then(|bn| SymbolicAsyncGraph::new(bn))
             {
                 Ok(graph) => {
-                    let witness = graph.make_witness(graph.unit_colors());
+                    let witness = graph.pick_witness(graph.unit_colors());
                     let layout = read_layout(&aeon_string);
                     BackendResponse::ok(
                         &object! { "model" => witness.to_sbml(&layout) }.to_string(),

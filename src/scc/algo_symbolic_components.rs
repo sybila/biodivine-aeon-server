@@ -2,63 +2,10 @@ use crate::scc::algo_effectively_constant::{
     reach_saturated_bwd_excluding, reach_saturated_fwd_excluding,
     remove_effectively_constant_states,
 };
-use crate::scc::algo_symbolic_reach::{guarded_reach_bwd, guarded_reach_fwd};
 use crate::scc::ProgressTracker;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
-use biodivine_lib_param_bn::VariableId;
 use biodivine_lib_std::param_graph::Params;
-use std::io;
-use std::io::Write;
-use std::option::Option::Some;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-pub fn prune_sources(
-    graph: &SymbolicAsyncGraph,
-    set: GraphColoredVertices,
-) -> GraphColoredVertices {
-    let start = set.cardinality();
-    let mut result = set;
-    println!("Pruning sources...");
-    loop {
-        let mut found_something = false;
-        for v in graph.network().graph().variable_ids() {
-            let v_true = graph.state_variable_true(v);
-            let v_false = graph.state_variable_false(v);
-            let jumps_false_to_true = graph.has_any_post(v, &result.intersect(&v_false));
-            let jumps_true_to_false = graph.has_any_post(v, &result.intersect(&v_true));
-            /*
-               Now we are looking for colors that only jump one way: for these, we can fix the value
-               because they will never flip back...
-            */
-            let colors_false_to_true = jumps_false_to_true.color_projection(graph);
-            let colors_true_to_false = jumps_true_to_false.color_projection(graph);
-            let colors_that_jump_both_ways = colors_true_to_false.intersect(&colors_true_to_false);
-            let colors_that_jump_only_one_way = (colors_false_to_true.union(&colors_true_to_false))
-                .minus(&colors_that_jump_both_ways);
-
-            if !colors_that_jump_only_one_way.is_empty() {
-                found_something = true;
-                let one_way_colors_false_to_true =
-                    colors_false_to_true.intersect(&colors_that_jump_only_one_way);
-                let one_way_colors_true_to_false =
-                    colors_true_to_false.intersect(&colors_that_jump_only_one_way);
-                result = result.minus(&v_true.intersect_colors(&one_way_colors_true_to_false));
-                result = result.minus(&v_false.intersect_colors(&one_way_colors_false_to_true));
-            }
-            println!("{:?} -> {}", v, colors_that_jump_only_one_way.cardinality());
-        }
-        println!(
-            "Keeping {}/{} ({:+e}%, nodes result({}))",
-            result.cardinality(),
-            start,
-            (result.cardinality() / start) * 100.0,
-            result.clone().into_bdd().size()
-        );
-        if !found_something {
-            return result;
-        }
-    }
-}
+use std::sync::atomic::{AtomicBool};
 
 pub fn components_2<F>(graph: &SymbolicAsyncGraph, on_component: F)
 where
@@ -66,68 +13,24 @@ where
 {
     let mut universe = graph.unit_vertices().clone();
 
-    /*let mut can_be_sink = graph.unit_vertices().clone();    // intentionally use all vertices
-    //panic!("");
-    for variable in graph.network().graph().variable_ids() {
-        print!("{:?}...", variable);
-        io::stdout().flush().unwrap();
-        let has_successor = &graph.has_any_post(variable, graph.unit_vertices());
-        can_be_sink = can_be_sink.minus(has_successor);
-    }
-    println!();
-
-    let mut is_sink = can_be_sink.clone();
-
-    let sinks = is_sink.clone();
-    // Now we have to report sinks, but we have to satisfy that every reported set has only one component:
-    while !is_sink.is_empty() {
-        let to_report = is_sink.pivots(graph);
-        is_sink = is_sink.minus(&to_report);
-        on_component(to_report);
-    }
-
-    println!("Sinks detected: {}", sinks.cardinality());
-
-    let variables: Vec<VariableId> = graph.network().graph().variable_ids().collect();
-    universe = universe.minus(&reach_saturated_bwd_excluding(graph, &sinks, graph.unit_vertices(), &variables));
-    if universe.is_empty() {
-        println!("Everything is in sink!");
-        return;
-    }*/
-
     let (constrained, variables) = remove_effectively_constant_states(graph, universe);
     universe = constrained.clone();
 
-    let mut attractor_candidates = graph.empty_vertices().clone();
     while !universe.is_empty() {
         println!("Pick a new pivot branch...");
-        let mut pivot = universe.pivots(graph);
-        //while !pivot.is_empty() {
+        let pivot = universe.pick_vertex();
+
         let bwd_pivot = reach_saturated_bwd_excluding(graph, &pivot, &universe, &variables);
         let component_with_pivot =
             reach_saturated_fwd_excluding(graph, &pivot, &bwd_pivot, &variables);
-        let after_component = post(graph, &component_with_pivot).minus(&component_with_pivot);
-        let is_candidate = component_with_pivot
-            .color_projection(graph)
-            .minus(&after_component.color_projection(graph));
+        let after_component = graph.post(&component_with_pivot).minus(&component_with_pivot);
+        let is_candidate = component_with_pivot.colors()
+            .minus(&after_component.colors());
         if !is_candidate.is_empty() {
-            //attractor_candidates = attractor_candidates.union(&component_with_pivot.intersect_colors(&is_candidate));
             on_component(component_with_pivot.intersect_colors(&is_candidate));
         }
-        pivot = after_component;
         universe = universe.minus(&bwd_pivot);
-        println!(
-            "Attractor candidates: {} Universe: {}",
-            attractor_candidates.cardinality(),
-            universe.cardinality()
-        );
-        //}
     }
-    println!(
-        "Attractor candidates: {}/{}",
-        attractor_candidates.cardinality(),
-        constrained.cardinality()
-    );
 }
 
 /*
@@ -186,22 +89,6 @@ fn components_with(graph: &SymbolicAsyncGraph, initial: &GraphColoredVertices) -
     // The final result is the intersection of the two.
     return fwd.intersect(&bwd);
 }*/
-
-fn post(graph: &SymbolicAsyncGraph, initial: &GraphColoredVertices) -> GraphColoredVertices {
-    let mut result = graph.empty_vertices().clone();
-    for v in graph.network().graph().variable_ids() {
-        result = result.union(&graph.any_post(v, initial));
-    }
-    return result;
-}
-
-fn pre(graph: &SymbolicAsyncGraph, initial: &GraphColoredVertices) -> GraphColoredVertices {
-    let mut result = graph.empty_vertices().clone();
-    for v in graph.network().graph().variable_ids() {
-        result = result.union(&graph.any_pre(v, initial));
-    }
-    return result;
-}
 
 pub fn components<F>(
     graph: &SymbolicAsyncGraph,
