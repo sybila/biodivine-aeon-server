@@ -134,7 +134,10 @@ pub fn reach_saturated_fwd_excluding(
     let mut active_variable = last_variable;
     loop {
         let variable = variables[active_variable];
-        let post = graph.var_post(variable, &result).intersect(guard).minus(&result);
+        let post = graph
+            .var_post(variable, &result)
+            .intersect(guard)
+            .minus(&result);
         result = result.union(&post);
 
         if !post.is_empty() {
@@ -164,7 +167,10 @@ pub fn reach_saturated_bwd_excluding(
     let mut active_variable = last_variable;
     loop {
         let variable = variables[active_variable];
-        let post = graph.var_pre(variable, &result).intersect(guard).minus(&result);
+        let post = graph
+            .var_pre(variable, &result)
+            .intersect(guard)
+            .minus(&result);
         result = result.union(&post);
 
         if !post.is_empty() {

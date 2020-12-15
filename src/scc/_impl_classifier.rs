@@ -71,10 +71,7 @@ impl Classifier {
     }
 
     /// Find attractor of the given witness colour. The argument set must be a singleton.
-    pub fn attractors(
-        &self,
-        witness_colour: &GraphColors,
-    ) -> Vec<(GraphVertices, Behaviour)> {
+    pub fn attractors(&self, witness_colour: &GraphColors) -> Vec<(GraphVertices, Behaviour)> {
         if witness_colour.approx_cardinality() != 1.0 {
             eprintln!("WARNING: Computing attractor witnesses for non-singleton set. (This may be just a floating point error in large models).");
         }

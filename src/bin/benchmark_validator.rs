@@ -60,14 +60,9 @@ fn main() {
             match model {
                 Ok(mut model) => {
                     // Check that basic properties match SBML model. But note that variables can be re-ordered...
-                    let mut models_match =
-                        model.num_vars() == sbml_model.num_vars();
+                    let mut models_match = model.num_vars() == sbml_model.num_vars();
                     if model.num_vars() != sbml_model.num_vars() {
-                        eprintln!(
-                            "{} != {}",
-                            model.num_vars(),
-                            sbml_model.num_vars()
-                        );
+                        eprintln!("{} != {}", model.num_vars(), sbml_model.num_vars());
                     }
                     for v in model.variables() {
                         let regulators_in_model: HashSet<String> = model
@@ -77,7 +72,8 @@ fn main() {
                             .collect();
                         let regulators_in_sbml_model: HashSet<String> = sbml_model
                             .regulators(
-                                sbml_model.as_graph()
+                                sbml_model
+                                    .as_graph()
                                     .find_variable(model.get_variable_name(v))
                                     .unwrap(),
                             )

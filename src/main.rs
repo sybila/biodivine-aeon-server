@@ -229,7 +229,13 @@ fn get_results() -> BackendResponse {
     };
     let lines: Vec<String> = data
         .iter()
-        .map(|(c, p)| format!("{{\"sat_count\":{},\"phenotype\":{}}}", p.approx_cardinality(), c))
+        .map(|(c, p)| {
+            format!(
+                "{{\"sat_count\":{},\"phenotype\":{}}}",
+                p.approx_cardinality(),
+                c
+            )
+        })
         .collect();
 
     println!("Result {:?}", lines);
@@ -332,15 +338,15 @@ fn get_attractors(class_str: String) -> BackendResponse {
                     if let Some(class) = has_class {
                         if let Some(graph) = &cmp.graph {
                             let witness_colour = class.pick_singleton();
-                            let witness_network: BooleanNetwork = graph.pick_witness(&witness_colour);
+                            let witness_network: BooleanNetwork =
+                                graph.pick_witness(&witness_colour);
                             let witness_graph =
                                 SymbolicAsyncGraph::new(witness_network.clone()).unwrap();
                             let witness_str = witness_network.to_string();
                             let witness_attractors = classifier.attractors(&witness_colour);
-                            let variable_name_strings =
-                                witness_network.variables().map(|id| {
-                                    format!("\"{}\"", witness_network.get_variable_name(id))
-                                });
+                            let variable_name_strings = witness_network
+                                .variables()
+                                .map(|id| format!("\"{}\"", witness_network.get_variable_name(id)));
 
                             let mut all_attractors: Vec<(
                                 Behaviour,
@@ -367,7 +373,8 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                 if *behaviour == Behaviour::Stability {
                                     // This is a sink - no edges
                                     assert_eq!(attractor.materialize().iter().count(), 1);
-                                    let sink: ArrayBitVector = attractor.materialize().iter().next().unwrap();
+                                    let sink: ArrayBitVector =
+                                        attractor.materialize().iter().next().unwrap();
                                     attractor_graph.push((sink.clone(), sink));
                                     for i in 0..witness_network.num_vars() {
                                         // In sink, we mark everything as "not-fixed" because we want to just display it normally.

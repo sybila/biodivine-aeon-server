@@ -1,4 +1,4 @@
-use biodivine_aeon_server::scc::algo_symbolic_components::{components_2};
+use biodivine_aeon_server::scc::algo_symbolic_components::components_2;
 use biodivine_aeon_server::scc::{Classifier, ProgressTracker};
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
@@ -16,7 +16,10 @@ fn main() {
         .as_millis();
 
     let model = BooleanNetwork::try_from(buffer.as_str()).unwrap();
-    let names: Vec<_> = model.variables().map(|id| model.get_variable_name(id)).collect();
+    let names: Vec<_> = model
+        .variables()
+        .map(|id| model.get_variable_name(id))
+        .collect();
     println!("Model loaded...");
     println!("{} variables: {:?}", model.num_vars(), names);
 
@@ -27,7 +30,10 @@ fn main() {
         "Admissible parametrisations: {}",
         graph.unit_colors().approx_cardinality()
     );
-    println!("State space: {}", graph.unit_vertices().approx_cardinality());
+    println!(
+        "State space: {}",
+        graph.unit_vertices().approx_cardinality()
+    );
 
     let classifier = Classifier::new(&graph);
     let progress = ProgressTracker::new(&graph);

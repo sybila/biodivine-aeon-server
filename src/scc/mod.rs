@@ -5,12 +5,12 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::vec::IntoIter;
 
-pub mod algo_effectively_constant;
-pub mod algo_symbolic_components;
 /// **(internal)** Utility methods for the behaviour `Class`.
 mod _impl_class;
 /// **(internal)** Implementation of `Behaviour` classification in `Classifier`.
 mod _impl_classifier;
+pub mod algo_effectively_constant;
+pub mod algo_symbolic_components;
 mod impl_progress_tracker;
 mod impl_state_set_iterator;
 
