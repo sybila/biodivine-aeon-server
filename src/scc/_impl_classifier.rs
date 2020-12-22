@@ -1,6 +1,6 @@
 use super::{Behaviour, Class, Classifier};
 use biodivine_lib_param_bn::symbolic_async_graph::{
-    GraphColoredVertices, GraphColors, SymbolicAsyncGraph,
+    GraphColoredVertices, GraphColors, GraphVertices, SymbolicAsyncGraph,
 };
 use biodivine_lib_std::param_graph::Params;
 use std::collections::HashMap;
@@ -77,6 +77,30 @@ impl Classifier {
         return result;
     }
 
+    /// Find attractor of the given witness colour. The argument set must be a singleton.
+    pub fn attractors(&self, witness_colour: &GraphColors) -> Vec<(GraphVertices, Behaviour)> {
+        if witness_colour.approx_cardinality() != 1.0 {
+            eprintln!("WARNING: Computing attractor witnesses for non-singleton set. (This may be just a floating point error in large models).");
+        }
+        let mut result = Vec::new();
+        let attractors = self.attractors.lock().unwrap();
+        for (attractor, behaviour) in attractors.iter() {
+            let attractor_states = attractor.intersect_colors(witness_colour);
+            if attractor_states.is_empty() {
+                continue;
+            }
+            let attractor_states = attractor_states.vertices();
+            let attractor_behaviour = behaviour
+                .iter()
+                .find(|(_, c)| witness_colour.is_subset(c))
+                .unwrap()
+                .0
+                .clone();
+            result.push((attractor_states, attractor_behaviour));
+        }
+        return result;
+    }
+
     pub fn add_component(&self, component: GraphColoredVertices, graph: &SymbolicAsyncGraph) {
         let mut attractor_behaviour: HashMap<Behaviour, GraphColors> = HashMap::new();
         let without_sinks = self.filter_sinks(component.clone(), graph);
@@ -90,16 +114,29 @@ impl Classifier {
             (*attractors).push((component, attractor_behaviour));
             return;
         }
-        let mut disorder = graph.empty_colors().clone();
-        for variable in graph.network().graph().variable_ids() {
-            let found_first_successor = &graph.has_any_post(variable, &without_sinks);
-            for next_variable in graph.network().graph().variable_ids() {
-                if next_variable == variable {
-                    continue;
+        if !not_sink_params.is_empty() {
+            let mut disorder = graph.mk_empty_colors();
+            for variable in graph.network().variables() {
+                let found_first_successor = &graph.var_can_post(variable, &without_sinks);
+                for next_variable in graph.network().variables() {
+                    if next_variable == variable {
+                        continue;
+                    }
+                    let found_second_successor =
+                        &graph.var_can_post(next_variable, &found_first_successor);
+                    disorder = disorder.union(&found_second_successor.colors());
                 }
-                let found_second_successor =
-                    &graph.has_any_post(next_variable, &found_first_successor);
-                disorder = disorder.union(&found_second_successor.color_projection());
+            }
+            let cycle = without_sinks.colors().minus(&disorder);
+            if !cycle.is_empty() {
+                println!("Found cycle: {}", cycle.approx_cardinality());
+                component_classification.insert(Behaviour::Oscillation, cycle.clone());
+                self.push(Behaviour::Oscillation, cycle);
+            }
+            if !disorder.is_empty() {
+                println!("Found disorder: {}", disorder.approx_cardinality());
+                component_classification.insert(Behaviour::Disorder, disorder.clone());
+                self.push(Behaviour::Disorder, disorder);
             }
         }
         let cycle = without_sinks.color_projection().minus(&disorder);
@@ -151,7 +188,7 @@ impl Classifier {
     pub fn print(&self) {
         let classes = self.classes.lock().unwrap();
         for (c, p) in &(*classes) {
-            println!("Class {:?}, cardinality: {}", c, p.cardinality());
+            println!("Class {:?}, cardinality: {}", c, p.approx_cardinality());
         }
     }
 
@@ -163,15 +200,13 @@ impl Classifier {
         graph: &SymbolicAsyncGraph,
     ) -> GraphColoredVertices {
         let mut is_not_sink = graph.empty_vertices().clone();
-        for variable in graph.network().graph().variable_ids() {
-            let has_successor = &graph.has_any_post(variable, &component);
+        for variable in graph.network().variables() {
+            let has_successor = &graph.var_can_post(variable, &component);
             if !has_successor.is_empty() {
                 is_not_sink = is_not_sink.union(has_successor);
             }
         }
-        let is_sink = component
-            .color_projection()
-            .minus(&is_not_sink.color_projection());
+        let is_sink = component.colors().minus(&is_not_sink.colors());
         if !is_sink.is_empty() {
             self.push(Behaviour::Stability, is_sink);
         }

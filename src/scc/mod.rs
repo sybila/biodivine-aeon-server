@@ -5,18 +5,13 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::vec::IntoIter;
 
-pub mod algo_components;
+/// **(internal)** Utility methods for the behaviour `Class`.
+mod _impl_class;
+/// **(internal)** Implementation of `Behaviour` classification in `Classifier`.
+mod _impl_classifier;
 pub mod algo_effectively_constant;
-pub mod algo_par_reach;
-pub mod algo_par_utils;
-pub mod algo_reach;
 pub mod algo_symbolic_components;
-pub mod algo_symbolic_reach;
-mod impl_class;
-mod impl_classifier;
-mod impl_old_classifier;
 mod impl_progress_tracker;
-mod impl_state_set;
 mod impl_state_set_iterator;
 
 #[derive(Clone, Debug)]
@@ -63,10 +58,6 @@ pub struct Classifier {
     //graph: &'a AsyncGraph,
     classes: Mutex<HashMap<Class, GraphColors>>,
     attractors: Mutex<Vec<(GraphColoredVertices, HashMap<Behaviour, GraphColors>)>>,
-}
-
-pub struct OldClassifier {
-    classes: Mutex<HashMap<Class, BddParams>>,
 }
 
 pub struct ProgressTracker {

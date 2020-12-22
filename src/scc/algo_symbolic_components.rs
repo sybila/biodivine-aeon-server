@@ -1,69 +1,108 @@
-use crate::scc::algo_effectively_constant::remove_effectively_constant_states;
-use crate::scc::algo_symbolic_reach::{guarded_reach_bwd, guarded_reach_fwd};
+use crate::scc::algo_effectively_constant::{
+    reach_saturated_bwd_excluding, reach_saturated_fwd_excluding,
+    remove_effectively_constant_states,
+};
 use crate::scc::ProgressTracker;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_std::param_graph::Params;
-use std::io;
-use std::io::Write;
-use std::option::Option::Some;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
-pub fn prune_sources(
-    graph: &SymbolicAsyncGraph,
-    set: GraphColoredVertices,
-) -> GraphColoredVertices {
-    let start = set.cardinality();
-    let mut result = set;
-    println!("Pruning sources...");
-    loop {
-        let mut found_something = false;
-        for v in graph.network().graph().variable_ids() {
-            let v_true = graph.state_variable_true(v);
-            let v_false = graph.state_variable_false(v);
-            let jumps_false_to_true = graph.has_any_post(v, &result.intersect(&v_false));
-            let jumps_true_to_false = graph.has_any_post(v, &result.intersect(&v_true));
-            /*
-               Now we are looking for colors that only jump one way: for these, we can fix the value
-               because they will never flip back...
-            */
-            let colors_false_to_true = jumps_false_to_true.color_projection();
-            let colors_true_to_false = jumps_true_to_false.color_projection();
-            let colors_that_jump_both_ways = colors_true_to_false.intersect(&colors_true_to_false);
-            let colors_that_jump_only_one_way = (colors_false_to_true.union(&colors_true_to_false))
-                .minus(&colors_that_jump_both_ways);
+pub fn components_2<F>(graph: &SymbolicAsyncGraph, on_component: F)
+where
+    F: Fn(GraphColoredVertices) -> () + Send + Sync,
+{
+    let mut universe = graph.unit_vertices().clone();
 
-            if !colors_that_jump_only_one_way.is_empty() {
-                found_something = true;
-                let one_way_colors_false_to_true =
-                    colors_false_to_true.intersect(&colors_that_jump_only_one_way);
-                let one_way_colors_true_to_false =
-                    colors_true_to_false.intersect(&colors_that_jump_only_one_way);
-                result = result.minus(&v_true.intersect_colors(&one_way_colors_true_to_false));
-                result = result.minus(&v_false.intersect_colors(&one_way_colors_false_to_true));
-            }
-            println!("{:?} -> {}", v, colors_that_jump_only_one_way.cardinality());
+    let (constrained, variables) = remove_effectively_constant_states(graph, universe);
+    universe = constrained.clone();
+
+    while !universe.is_empty() {
+        println!("Pick a new pivot branch...");
+        let pivot = universe.pick_vertex();
+
+        let bwd_pivot = reach_saturated_bwd_excluding(graph, &pivot, &universe, &variables);
+        let component_with_pivot =
+            reach_saturated_fwd_excluding(graph, &pivot, &bwd_pivot, &variables);
+        let after_component = graph
+            .post(&component_with_pivot)
+            .minus(&component_with_pivot);
+        let is_candidate = component_with_pivot
+            .colors()
+            .minus(&after_component.colors());
+        if !is_candidate.is_empty() {
+            on_component(component_with_pivot.intersect_colors(&is_candidate));
         }
-        println!(
-            "Keeping {}/{} ({:+e}%, nodes result({}))",
-            result.cardinality(),
-            start,
-            (result.cardinality() / start) * 100.0,
-            result.clone().into_bdd().size()
-        );
-        if !found_something {
-            return result;
-        }
+        universe = universe.minus(&bwd_pivot);
     }
 }
 
+/*
+/// Compute the SCCs that are induced by the vertices in `initial`.
+///
+/// Uses lockstep, so in terms of symbolic steps, this should be optimal.
+fn components_with(graph: &SymbolicAsyncGraph, initial: &GraphColoredVertices) -> GraphColoredVertices {
+    println!("Lockstep component search.");
+    let mut still_running = initial.color_projection(graph);
+    let mut fwd = initial.clone();
+    let mut bwd = initial.clone();
+    let mut fwd_frontier = initial.clone();
+    let mut bwd_frontier = initial.clone();
+    let mut fwd_unfinished = graph.empty_vertices().clone();
+    let mut bwd_unfinished = graph.empty_vertices().clone();
+    // First, find fwd/bwd templates using lockstep.
+    while !still_running.is_empty() {
+        println!("(1) Still running {}; {} {} {} {}", still_running.cardinality(), fwd.as_bdd().size(), bwd.as_bdd().size(), fwd_unfinished.as_bdd().size(), bwd_unfinished.as_bdd().size());
+        let post = post(graph, &fwd_frontier).minus(&fwd);
+        let pre = pre(graph, &bwd_frontier).minus(&bwd);
+        // Compute colours that FINISHED in this iteration.
+        let fwd_finished_now = fwd_frontier.color_projection(graph).minus(&post.color_projection(graph));
+        let bwd_finished_now = bwd_frontier.color_projection(graph).minus(&pre.color_projection(graph));
+        let bwd_finished_now = bwd_finished_now.minus(&fwd_finished_now); // Resolve ties.
+        // Remove BWD-FINISHED colours from FWD frontier and move all vertices with these colours to unfinished.
+        fwd_frontier = post.minus_colors(&bwd_finished_now);
+        fwd_unfinished = fwd_unfinished.union(&fwd.intersect_colors(&bwd_finished_now));
+        fwd = fwd.minus_colors(&bwd_finished_now).union(&fwd_frontier);
+        // Remove FWD-FINISHED colours from BWD frontier and move all vertices with these colours to unfinished.
+        bwd_frontier = pre.minus_colors(&fwd_finished_now);
+        bwd_unfinished = bwd_unfinished.union(&bwd.intersect_colors(&fwd_finished_now));
+        bwd = bwd.minus_colors(&fwd_finished_now).union(&bwd_frontier);
+        // Mark finished colours as done.
+        still_running = still_running.minus(&fwd_finished_now.union(&bwd_finished_now));
+    }
+    // Now fwd and bwd contain VALID forward/backward sets and are colour disjoint.
+    // We have to continue computing unfinished within these valid bounds.
+    assert!(fwd.color_projection(graph).intersect(&bwd.color_projection(graph)).is_empty());
+    assert!(initial.color_projection(graph).minus(&fwd.color_projection(graph)).minus(&bwd.color_projection(graph)).is_empty());
+
+    loop {
+        let post = post(graph, &fwd_unfinished).minus(&fwd_unfinished).intersect(&bwd);
+        let pre = pre(graph, &bwd_unfinished).minus(&bwd_unfinished).intersect(&fwd);
+        fwd_unfinished = fwd_unfinished.union(&post);
+        bwd_unfinished = bwd_unfinished.union(&pre);
+        println!("(2) Still running {}", post.cardinality() + pre.cardinality());
+        if post.is_empty() && pre.is_empty() {
+            break;
+        }
+    }
+    // At this point, fwd_unfinished and bwd_unfinished are completely done within the bounds of bwd/fwd.
+    // We can therefore join them back
+    fwd = fwd.union(&fwd_unfinished);
+    bwd = bwd.union(&bwd_unfinished);
+
+    // The final result is the intersection of the two.
+    return fwd.intersect(&bwd);
+}*/
+
 pub fn components<F>(
     graph: &SymbolicAsyncGraph,
-    progress: &ProgressTracker,
-    cancelled: &AtomicBool,
+    _progress: &ProgressTracker,
+    _cancelled: &AtomicBool,
     on_component: F,
 ) where
     F: Fn(GraphColoredVertices) -> () + Send + Sync,
 {
+    components_2(graph, on_component);
+    /*
     crossbeam::thread::scope(|scope| {
         println!("Detect eventually stable...");
         // TODO: This is not correct, because for parametrisations can_move will never be empty...
@@ -89,8 +128,9 @@ pub fn components<F>(
 
         println!("Start detecting sinks");
 
-        let mut can_be_sink = graph.unit_vertices().clone(); // intentionally use all vertices
-                                                             //panic!("");
+
+        let mut can_be_sink = graph.unit_vertices().clone();    // intentionally use all vertices
+        //panic!("");
         for variable in graph.network().graph().variable_ids() {
             print!("{:?}...", variable);
             io::stdout().flush().unwrap();
@@ -122,7 +162,7 @@ pub fn components<F>(
         let sinks = is_sink.clone();
         // Now we have to report sinks, but we have to satisfy that every reported set has only one component:
         while !is_sink.is_empty() {
-            let to_report = is_sink.pivots();
+            let to_report = is_sink.pivots(graph);
             is_sink = is_sink.minus(&to_report);
             on_component(to_report);
         }
@@ -138,18 +178,15 @@ pub fn components<F>(
             .collect();
         let has_successors = par_fold(has_successors, |a, b| a.union(b));*/
 
-        let not_constant = remove_effectively_constant_states(graph, graph.unit_vertices().clone());
-        println!(
-            "Not constant: {}/{}",
-            not_constant.cardinality(),
-            graph.unit_vertices().cardinality()
-        );
+        let (not_constant, _) = remove_effectively_constant_states(graph, graph.unit_vertices().clone());
+        println!("Not constant: {}/{}", not_constant.cardinality(), graph.unit_vertices().cardinality());
 
         if cancelled.load(Ordering::SeqCst) {
             return ();
         }
 
-        let can_reach_sink = guarded_reach_bwd(&graph, &sinks, &not_constant, cancelled, progress);
+        let can_reach_sink =
+            guarded_reach_bwd(&graph, &sinks, &not_constant, cancelled, progress);
 
         if cancelled.load(Ordering::SeqCst) {
             return ();
@@ -179,18 +216,16 @@ pub fn components<F>(
             let remaining: f64 = queue.iter().map(|(a, _)| *a).sum::<f64>() + universe_cardinality;
             progress.update_remaining(remaining);
             println!("Look for pivots...");
-            let pivots = universe.pivots();
-            println!("Pivots cardinality: {}", pivots.cardinality());
+            let pivots = universe.pivots(graph);
             let backward = guarded_reach_bwd(&graph, &pivots, &universe, cancelled, progress);
-            let component_with_pivots =
-                guarded_reach_fwd(&graph, &pivots, &backward, cancelled, progress);
+            let pivots = improve_pivots(graph, pivots.clone(), &(universe.minus(&backward).union(&pivots)));
+            println!("Pivots cardinality: {}", pivots.cardinality());
+            let backward = guarded_reach_bwd(&graph, &backward.union(&pivots), &universe, cancelled, progress);
+            let component_with_pivots = guarded_reach_fwd(&graph, &pivots, &backward, cancelled, progress);
 
-            let mut is_terminal = component_with_pivots.color_projection();
+            let mut is_terminal = component_with_pivots.color_projection(graph);
             for v in graph.network().graph().variable_ids() {
-                let successors = graph
-                    .any_post(v, &component_with_pivots)
-                    .minus(&component_with_pivots)
-                    .color_projection();
+                let successors = graph.any_post(v, &component_with_pivots).minus(&component_with_pivots).color_projection(graph);
                 if !successors.is_empty() {
                     is_terminal = is_terminal.minus(&successors);
                 }
@@ -253,5 +288,35 @@ pub fn components<F>(
 
         println!("Main component loop done...");
     })
-    .unwrap();
+    .unwrap();*/
 }
+
+/*fn improve_pivots(graph: &SymbolicAsyncGraph, pivots: GraphColoredVertices, universe: &GraphColoredVertices) -> GraphColoredVertices {
+    let mut discovered = pivots.clone();
+    let mut final_pivots = graph.empty_vertices().clone();
+    let mut frontier = pivots.clone();
+    println!("Pivot optimisation...");
+    while !frontier.is_empty() {
+        if discovered.as_bdd().size() > 10_000 {
+            println!("{}/{} ({:+e}%, nodes result({}))",
+                     discovered.cardinality(),
+                     universe.cardinality(),
+                     (discovered.cardinality() / universe.cardinality()) * 100.0,
+                     discovered.as_bdd().size()
+            );
+        }
+        let mut new_successor = graph.empty_vertices().clone();
+        for v in graph.network().graph().variable_ids() {
+            new_successor = new_successor.union(&graph.any_post(v, &frontier));
+        }
+        new_successor = new_successor.minus(&discovered);
+        let stopped_in_this_step = frontier.color_projection(graph).minus(&new_successor.color_projection(graph));
+        if !stopped_in_this_step.is_empty() {
+            // For colours that stopped in this iteration
+            final_pivots = final_pivots.union(&frontier.intersect_colors(&stopped_in_this_step).pivots(graph))
+        }
+        frontier = new_successor;
+        discovered = discovered.union(&frontier);
+    }
+    return final_pivots;
+}*/

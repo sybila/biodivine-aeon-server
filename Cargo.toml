@@ -1,6 +1,6 @@
 [package]
 name = "biodivine-aeon-server"
-version = "0.2.0"
+version = "0.3.0-beta.1"
 authors = ["Samuel Pastva <daemontus@gmail.com>"]
 edition = "2018"
 default-run = "biodivine-aeon-server"
@@ -17,8 +17,7 @@ debug = true
 
 [dependencies]
 biodivine-lib-std = { git = "https://github.com/sybila/biodivine-lib-std.git" }
-biodivine-lib-param-bn = { git = "https://github.com/sybila/biodivine-lib-param-bn.git", rev = "c7fcbe72fd564caf329c7427be487746f41fe9d5" }
-biodivine-lib-bdd = "0.1.0"
+biodivine-lib-param-bn = { git = "https://github.com/sybila/biodivine-lib-param-bn.git", tag = "v0.1.0-beta.1" }
 rocket = "0.4.6"
 rayon = "1.5.0"
 crossbeam = "0.8.0"
