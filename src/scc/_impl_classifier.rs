@@ -104,8 +104,8 @@ impl Classifier {
     pub fn add_component(&self, component: GraphColoredVertices, graph: &SymbolicAsyncGraph) {
         let mut attractor_behaviour: HashMap<Behaviour, GraphColors> = HashMap::new();
         let without_sinks = self.filter_sinks(component.clone(), graph);
-        let not_sink_params = without_sinks.color_projection();
-        let sink_params = component.color_projection().minus(&not_sink_params);
+        let not_sink_params = without_sinks.colors();
+        let sink_params = component.colors().minus(&not_sink_params);
         if !sink_params.is_empty() {
             attractor_behaviour.insert(Behaviour::Stability, sink_params);
         }
@@ -130,28 +130,17 @@ impl Classifier {
             let cycle = without_sinks.colors().minus(&disorder);
             if !cycle.is_empty() {
                 println!("Found cycle: {}", cycle.approx_cardinality());
-                component_classification.insert(Behaviour::Oscillation, cycle.clone());
+                attractor_behaviour.insert(Behaviour::Oscillation, cycle.clone());
                 self.push(Behaviour::Oscillation, cycle);
             }
             if !disorder.is_empty() {
                 println!("Found disorder: {}", disorder.approx_cardinality());
-                component_classification.insert(Behaviour::Disorder, disorder.clone());
+                attractor_behaviour.insert(Behaviour::Disorder, disorder.clone());
                 self.push(Behaviour::Disorder, disorder);
             }
+            let mut attractors = self.attractors.lock().unwrap();
+            (*attractors).push((component, attractor_behaviour));
         }
-        let cycle = without_sinks.color_projection().minus(&disorder);
-        if !cycle.is_empty() {
-            println!("Found cycle: {}", cycle.cardinality());
-            attractor_behaviour.insert(Behaviour::Oscillation, cycle.clone());
-            self.push(Behaviour::Oscillation, cycle);
-        }
-        if !disorder.is_empty() {
-            println!("Found disorder: {}", disorder.cardinality());
-            attractor_behaviour.insert(Behaviour::Disorder, disorder.clone());
-            self.push(Behaviour::Disorder, disorder);
-        }
-        let mut attractors = self.attractors.lock().unwrap();
-        (*attractors).push((component, attractor_behaviour));
     }
 
     fn push(&self, behaviour: Behaviour, params: GraphColors) {

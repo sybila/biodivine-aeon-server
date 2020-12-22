@@ -1,7 +1,5 @@
 use crate::scc::Class;
-use biodivine_lib_param_bn::symbolic_async_graph::{
-    GraphColors, SymbolicAsyncGraph, SymbolicFunctionContext,
-};
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph, SymbolicContext};
 use biodivine_lib_param_bn::BooleanNetwork;
 use biodivine_lib_std::param_graph::Params;
 use json::JsonValue;
@@ -190,7 +188,7 @@ impl BDT {
                     "id" => id,
                     "type" => "leaf".to_string(),
                     "class" => format!("{}", class),
-                    "cardinality" => params.cardinality(),
+                    "cardinality" => params.approx_cardinality(),
             },
             BDTNode::Decision {
                 attribute,
@@ -217,7 +215,7 @@ impl BDT {
             class_list
                 .push(object! {
                     "class" => format!("{}", c),
-                    "cardinality" => p.cardinality(),
+                    "cardinality" => p.approx_cardinality(),
                 })
                 .unwrap();
         }
@@ -256,13 +254,13 @@ impl BDT {
                     "{}[label=\"{}({})\"];",
                     node,
                     format!("{}", class).replace("\"", ""),
-                    params.cardinality()
+                    params.approx_cardinality()
                 );
             }
             BDTNode::Unprocessed { classes } => {
                 let classes: Vec<String> = classes
                     .iter()
-                    .map(|(c, p)| format!("({},{})", c, p.cardinality()).replace("\"", ""))
+                    .map(|(c, p)| format!("({},{})", c, p.approx_cardinality()).replace("\"", ""))
                     .collect();
                 let classes = format!("{:?}", classes).replace("\"", "");
                 println!("{}[label=\"Unprocessed({})\"]", node, classes);
@@ -443,7 +441,7 @@ fn entropy(classes: &HashMap<Class, GraphColors>) -> f64 {
         return f64::INFINITY;
     }
     let mut result = 0.0;
-    let cardinality: Vec<f64> = classes.values().map(|it| it.cardinality()).collect();
+    let cardinality: Vec<f64> = classes.values().map(|it| it.approx_cardinality()).collect();
     let total = cardinality.iter().fold(0.0, |a, b| a + *b);
     for c in cardinality.iter() {
         let proportion = *c / total;
@@ -571,48 +569,34 @@ pub fn make_network_attributes(network: &BooleanNetwork) -> Vec<Attribute> {
         }
     }*/
     
-    for v in network.graph().variable_ids() {
+    for v in network.variables() {
         if network.get_update_function(v).is_none() {
-            if !network.graph().regulators(v).is_empty() {
+            if !network.regulators(v).is_empty() {
                 panic!("Unsupported network with non-trivial parameters?");
             } else {
                 // There should be exactly one BDD variable corresponding to value of this "parameter"
+                let bdd = encoder.symbolic_context().mk_implicit_function_is_true(v, &vec![]);
+                let negative = encoder.unit_colors().copy(bdd.not()).intersect(encoder.unit_colors());
+                let positive = encoder.unit_colors().copy(bdd).intersect(encoder.unit_colors());
                 result.push(Attribute {
-                    name: format!("{:?}", network.graph().get_variable(v).get_name()),
-                    positive: encoder.unit_colors().intersect_bdd(
-                        &encoder
-                            .function_context()
-                            .true_when_implicit_parameter(v, Vec::new()),
-                    ),
-                    negative: encoder.unit_colors().intersect_bdd(
-                        &encoder
-                            .function_context()
-                            .true_when_implicit_parameter(v, Vec::new())
-                            .not(),
-                    ),
+                    name: format!("{:?}", network.get_variable_name(v)),
+                    positive, negative,
                 })
             }
         }
     }
-    for p in network.parameter_ids() {
+    for p in network.parameters() {
         let parameter = network.get_parameter(p);
-        if parameter.get_cardinality() > 0 {
+        if parameter.get_arity() > 0 {
             panic!("Unsupported network with non-trivial parameters?");
         } else {
             // There should be exactly one BDD variable corresponding to value of this "parameter"
+            let bdd = encoder.symbolic_context().mk_uninterpreted_function_is_true(p, &vec![]);
+            let negative = encoder.unit_colors().copy(bdd.not()).intersect(encoder.unit_colors());
+            let positive = encoder.unit_colors().copy(bdd).intersect(encoder.unit_colors());
             result.push(Attribute {
                 name: format!("{:?}", parameter.get_name()),
-                positive: encoder.unit_colors().intersect_bdd(
-                    &encoder
-                        .function_context()
-                        .true_when_parameter(p, &Vec::new()),
-                ),
-                negative: encoder.unit_colors().intersect_bdd(
-                    &encoder
-                        .function_context()
-                        .true_when_parameter(p, &Vec::new())
-                        .not(),
-                ),
+                positive, negative,
             })
         }
     }
@@ -837,13 +821,13 @@ fn make_conditional_non_observability(
 }*/
 
 pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, GraphColors>) {
-    for v in network.graph().variable_ids() {
+    for v in network.variables() {
         if network.get_update_function(v).is_some() {
             panic!("Only fully parametrised networks are supported at the moment.")
         }
 
-        for r in network.graph().regulators(v) {
-            let reg = network.graph().find_regulation(r, v).unwrap();
+        for r in network.regulators(v) {
+            let reg = network.as_graph().find_regulation(r, v).unwrap();
             if reg.get_monotonicity().is_none() {
                 //panic!("Regulation with unspecified monotonicity found.")
             }
@@ -890,7 +874,7 @@ const CUT_OFF: bool = false;
 
 fn learn(
     network: &BooleanNetwork,
-    encoder: &SymbolicFunctionContext,
+    encoder: &SymbolicContext,
     node_id: &mut usize,
     attributes: &Vec<Attribute>,
     classes: &HashMap<Class, GraphColors>,
@@ -901,14 +885,14 @@ fn learn(
         panic!("This should not happen")
     } else if classes.len() == 1 {
         let (class, params) = classes.iter().next().unwrap();
-        let c = params.cardinality();
+        let c = params.approx_cardinality();
         *remaining -= c;
         //println!("Remaining: {}; Classified: {}", remaining, c);
         println!(
             "{}[label=\"{}({})\"];",
             node_id,
             format!("{}", class).replace("\"", ""),
-            params.cardinality()
+            params.approx_cardinality()
         );
         return (c, 0.0, 1);
     } /* else if classes.len() == 2 {
@@ -922,7 +906,7 @@ fn learn(
           return (c, 0.0, 1);
       }*/
     if CUT_OFF {
-        let cardinality: Vec<f64> = classes.iter().map(|(_, p)| p.cardinality()).collect();
+        let cardinality: Vec<f64> = classes.iter().map(|(_, p)| p.approx_cardinality()).collect();
         let total = cardinality.iter().fold(0.0, |a, b| a + *b);
         for c in cardinality {
             if c > 0.8 * total {
@@ -974,13 +958,13 @@ fn learn(
                 max_gain = gain;
                 max_attribute = Some(attr.clone());
             }
-            let _all_c = classes.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
+            let _all_c = classes.iter().fold(0.0, |a, (_, p)| a + p.approx_cardinality());
             let _p_c = positive_dataset
                 .iter()
-                .fold(0.0, |a, (_, p)| a + p.cardinality());
+                .fold(0.0, |a, (_, p)| a + p.approx_cardinality());
             let _n_c = negative_dataset
                 .iter()
-                .fold(0.0, |a, (_, p)| a + p.cardinality());
+                .fold(0.0, |a, (_, p)| a + p.approx_cardinality());
             //println!("{} gain {} // {}({}%) | {}({}%)", attr.name, gain, positive_dataset.len(), ((p_c/all_c) * 100.0) as i32, negative_dataset.len(), ((n_c/all_c) * 100.0) as i32);
             gain > f64::NEG_INFINITY
         })
@@ -1027,7 +1011,7 @@ fn learn(
         let (_, params) = classes.iter().next().unwrap();
         println!("{}", network.make_witness(params, encoder));
         panic!("");*/
-        let scrap = classes.iter().fold(0.0, |a, (_, p)| a + p.cardinality());
+        let scrap = classes.iter().fold(0.0, |a, (_, p)| a + p.approx_cardinality());
         *remaining -= scrap;
         println!("Remaining: {}; Scrap: {}", remaining, scrap);
         return (0.0, scrap, 1);
