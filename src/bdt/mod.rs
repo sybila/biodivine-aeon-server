@@ -75,6 +75,15 @@ impl BDT {
         return result.to_string();
     }
 
+    pub fn params_for_leaf(&self, node: usize) -> Option<&GraphColors> {
+        let node = self.storage.get(&node)?;
+        if let BDTNode::Leaf { params, .. } = node {
+            return Some(params);
+        } else {
+            return None;
+        }
+    }
+
     pub fn attribute_gain_list(&self, node: usize) -> Option<String> {
         return if let BDTNode::Unprocessed { classes } = &self.storage[&node] {
             let mut result = array![];
@@ -870,8 +879,6 @@ pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, Gra
     println!("}}");*/
 }
 
-const CUT_OFF: bool = false;
-
 fn learn(
     network: &BooleanNetwork,
     encoder: &SymbolicContext,
@@ -905,17 +912,6 @@ fn learn(
           println!("{}[label=\"{}({}) and {}({})\"];", node_id, format!("{}", c1).replace("\"", ""), p1.cardinality(), format!("{}", c2).replace("\"", ""), p2.cardinality());
           return (c, 0.0, 1);
       }*/
-    if CUT_OFF {
-        let cardinality: Vec<f64> = classes.iter().map(|(_, p)| p.approx_cardinality()).collect();
-        let total = cardinality.iter().fold(0.0, |a, b| a + *b);
-        for c in cardinality {
-            if c > 0.8 * total {
-                *remaining -= total;
-                println!("Remaining: {}; Classified: {}", remaining, c);
-                return (total, 0.0, 1);
-            }
-        }
-    }
     let original_entropy = entropy(classes);
     let mut max_gain = f64::NEG_INFINITY;
     let mut max_attribute: Option<Attribute> = None;

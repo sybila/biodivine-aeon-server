@@ -344,6 +344,24 @@ fn get_results() -> BackendResponse {
     return BackendResponse::ok(&json);
 }
 
+#[get("/get_tree_witness/<node_id>")]
+fn get_tree_witness(node_id: String) -> BackendResponse {
+    let node_id = if let Ok(value) = node_id.parse::<usize>() { value } else {
+        return BackendResponse::err(&format!("Cannot parse node id {}.", node_id));
+    };
+    let tree = TREE.clone();
+    let tree = tree.read().unwrap();
+    return if let Some(tree) = &*tree {
+        if let Some(params) = tree.params_for_leaf(node_id) {
+            get_witness_network(params)
+        } else {
+            BackendResponse::err(&"Given node is not an unprocessed node.".to_string())
+        }
+    } else {
+        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+    };
+}
+
 #[get("/get_witness/<class_str>")]
 fn get_witness(class_str: String) -> BackendResponse {
     let mut class = Class::new_empty();
@@ -364,25 +382,7 @@ fn get_witness(class_str: String) -> BackendResponse {
             if let Some(classifier) = &cmp.classifier {
                 if let Some(has_class) = try_get_class_params(classifier, &class) {
                     if let Some(class) = has_class {
-                        if let Some(graph) = &cmp.graph {
-                            let witness = graph.pick_witness(&class);
-                            let layout = read_layout(cmp.input_model.as_str());
-                            let mut model_string = format!("{}", witness); // convert back to aeon
-                            model_string += "\n";
-                            for (var, (x, y)) in layout {
-                                model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
-                            }
-                            let (name, description) = read_metadata(cmp.input_model.as_str());
-                            if let Some(name) = name {
-                                model_string += format!("#name:{}\n", name).as_str();
-                            }
-                            if let Some(description) = description {
-                                model_string += format!("#description:{}\n", description).as_str();
-                            }
-                            BackendResponse::ok(&object! { "model" => model_string }.to_string())
-                        } else {
-                            return BackendResponse::err(&"No results available.".to_string());
-                        }
+                        get_witness_network(&class)
                     } else {
                         return BackendResponse::err(
                             &"Specified class has no witness.".to_string(),
@@ -400,6 +400,34 @@ fn get_witness(class_str: String) -> BackendResponse {
         } else {
             return BackendResponse::err(&"No results available.".to_string());
         }
+    }
+}
+
+fn get_witness_network(colors: &GraphColors) -> BackendResponse {
+    let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+    let cmp = cmp.read().unwrap();
+    if let Some(cmp) = &*cmp {
+        if let Some(graph) = &cmp.graph {
+            let witness = graph.pick_witness(&colors);
+            let layout = read_layout(cmp.input_model.as_str());
+            let mut model_string = format!("{}", witness); // convert back to aeon
+            model_string += "\n";
+            for (var, (x, y)) in layout {
+                model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
+            }
+            let (name, description) = read_metadata(cmp.input_model.as_str());
+            if let Some(name) = name {
+                model_string += format!("#name:{}\n", name).as_str();
+            }
+            if let Some(description) = description {
+                model_string += format!("#description:{}\n", description).as_str();
+            }
+            BackendResponse::ok(&object! { "model" => model_string }.to_string())
+        } else {
+            return BackendResponse::err(&"No results available.".to_string());
+        }
+    } else {
+        return BackendResponse::err(&"No results available.".to_string());
     }
 }
 
@@ -859,6 +887,7 @@ fn main() {
                 cancel_computation,
                 get_results,
                 get_witness,
+                get_tree_witness,
                 get_attractors,
                 check_update_function,
                 sbml_to_aeon,
