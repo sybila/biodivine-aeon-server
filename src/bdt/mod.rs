@@ -588,7 +588,7 @@ pub fn make_network_attributes(network: &BooleanNetwork) -> Vec<Attribute> {
                 let negative = encoder.unit_colors().copy(bdd.not()).intersect(encoder.unit_colors());
                 let positive = encoder.unit_colors().copy(bdd).intersect(encoder.unit_colors());
                 result.push(Attribute {
-                    name: format!("{:?}", network.get_variable_name(v)),
+                    name: format!("{}", network.get_variable_name(v)),
                     positive, negative,
                 })
             }
@@ -604,7 +604,7 @@ pub fn make_network_attributes(network: &BooleanNetwork) -> Vec<Attribute> {
             let negative = encoder.unit_colors().copy(bdd.not()).intersect(encoder.unit_colors());
             let positive = encoder.unit_colors().copy(bdd).intersect(encoder.unit_colors());
             result.push(Attribute {
-                name: format!("{:?}", parameter.get_name()),
+                name: format!("{}", parameter.get_name()),
                 positive, negative,
             })
         }
