@@ -144,8 +144,8 @@ impl BDT {
     }
 
     pub fn revert_decision(&mut self, node: usize) -> Option<String> {
-        let current = self.storage.remove(&node);
-        return if matches!(current, Some(BDTNode::Decision { .. })) {
+        let current = self.storage.get(&node);
+        return if matches!(current, Some(&BDTNode::Decision { .. })) {
             let mut delete_nodes = Vec::new();
             let mut stack = vec![node];
             let mut new_classes: HashMap<Class, GraphColors> = HashMap::new();
