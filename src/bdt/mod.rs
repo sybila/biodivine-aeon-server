@@ -19,6 +19,7 @@ pub enum BDTNode {
         attribute: AttributeId,
         left: BDTNodeId,
         right: BDTNodeId,
+        classes: HashMap<Class, GraphColors>,
     },
     Unprocessed {
         classes: HashMap<Class, GraphColors>,
@@ -124,12 +125,14 @@ impl BDT {
             if left_data.is_empty() || right_data.is_empty() {
                 return None;
             }
+            let classes = classes.clone();
             let left = self.insert_new_node(left_data);
             let right = self.insert_new_node(right_data);
             let decision = BDTNode::Decision {
                 attribute: AttributeId(attribute_id),
                 left,
                 right,
+                classes,
             };
             self.insert_or_replace(node, decision, true);
             let result = array![
@@ -203,19 +206,27 @@ impl BDT {
                 attribute,
                 left,
                 right,
+                classes
             } => object! {
                     "id" => id,
                     "type" => "decision".to_string(),
                     "attribute_name" => self.attributes[attribute.0].name.clone(),
+                    "cardinality" => Self::class_list_cardinality(classes),
+                    "classes" => self.class_list_to_json(classes),
                     "left" => left.0,
                     "right" => right.0,
             },
             BDTNode::Unprocessed { classes } => object! {
                     "id" => id,
                     "type" => "unprocessed".to_string(),
+                    "cardinality" => Self::class_list_cardinality(classes),
                     "classes" => self.class_list_to_json(classes)
             },
         };
+    }
+
+    fn class_list_cardinality(classes: &HashMap<Class, GraphColors>) -> f64 {
+        classes.iter().fold(0.0, |a, (_, c)| a + c.approx_cardinality())
     }
 
     fn class_list_to_json(&self, classes: &HashMap<Class, GraphColors>) -> JsonValue {
@@ -278,6 +289,7 @@ impl BDT {
                 attribute,
                 left,
                 right,
+                ..
             } => {
                 let (left, right) = (left.0, right.0);
                 let attribute = &self.attributes[attribute.0];
@@ -398,12 +410,14 @@ impl BDT {
                 "No decision based on attribute {}.",
                 attribute.name
             );
+            let classes = classes.clone();
             let left = self.insert_new_node(left_data);
             let right = self.insert_new_node(right_data);
             let decision = BDTNode::Decision {
                 attribute: attribute_id,
                 left,
                 right,
+                classes,
             };
             self.insert_or_replace(id, decision, true);
             return (left, right);
