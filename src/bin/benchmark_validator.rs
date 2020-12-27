@@ -105,6 +105,15 @@ fn main() {
                             model.add_update_function(v, FnUpdate::Const(true)).unwrap();
                         }
                     }
+                    let mut inputs = 0;
+                    for v in model.variables() {
+                        if model.regulators(v).len() == 0 {
+                            inputs += 1;
+                        }
+                    }
+                    if inputs > 0 {
+                        println!("INPUTS: {} inputs in {}.", inputs, bench_dir.path().display())
+                    }
                     if !model_ok {
                         errors += 1;
                         eprintln!(
