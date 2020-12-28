@@ -525,7 +525,7 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                             behaviour,
                             attractor.approx_cardinality()
                         );
-                        if attractor.approx_cardinality() >= 2_000.0 {
+                        if attractor.approx_cardinality() >= 500.0 {
                             return BackendResponse::err(&format!("Attractor has {} states. Visualisation size limit exceeded.", attractor.approx_cardinality()));
                         }
                         let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> =
