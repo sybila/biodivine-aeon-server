@@ -1,16 +1,13 @@
-use crate::bdt::{
-    entropy, information_gain, AppliedAttribute, Attribute, AttributeId, AttributeIds, BDTNode,
-    BDTNodeId, BDTNodeIds, BDT,
-};
+use crate::bdt::{entropy, information_gain, AppliedAttribute, Attribute, AttributeId, AttributeIds, BDTNode, BDTNodeId, BDTNodeIds, BDT, BifurcationFunction};
 use crate::scc::Class;
 use crate::util::functional::Functional;
 use crate::util::index_type::IndexType;
 use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 impl BDT {
     /// Create a new single-node tree for given classification and attributes.
-    pub fn new(classes: HashMap<Class, GraphColors>, attributes: Vec<Attribute>) -> BDT {
+    pub fn new(classes: BifurcationFunction, attributes: Vec<Attribute>) -> BDT {
         BDT {
             attributes,
             storage: HashMap::new(),
@@ -67,7 +64,7 @@ impl BDT {
     /// **(internal)** Create a leaf/unprocessed node for the given class list.
     pub(super) fn insert_node_with_classes(
         &mut self,
-        classes: HashMap<Class, GraphColors>,
+        classes: BifurcationFunction,
     ) -> BDTNodeId {
         assert!(!classes.is_empty(), "Inserting empty node.");
         return if classes.len() == 1 {
@@ -92,7 +89,7 @@ impl BDT {
         self.attributes()
             .filter_map(|id| {
                 let attribute = &self[id];
-                let (left, right) = attribute.restrict(&classes);
+                let (left, right) = attribute.split_function(&classes);
                 let gain = information_gain(original_entropy, entropy(&left), entropy(&right));
                 AppliedAttribute {
                     attribute: id,
@@ -123,7 +120,7 @@ impl BDT {
         }
         if let BDTNode::Unprocessed { classes } = &self[node] {
             let attr = &self[attribute];
-            let (left, right) = attr.restrict(classes);
+            let (left, right) = attr.split_function(classes);
             if left.is_empty() || right.is_empty() {
                 return Err(format!("No decision based on given attribute."));
             }
@@ -167,4 +164,42 @@ impl BDT {
         }
         deleted
     }
+
+    /// Automatically expands all unprocessed nodes with the first (best) decision attribute
+    /// up to the given `depth`.
+    ///
+    /// Returns the list of changed node ids.
+    pub fn auto_expand(&mut self, node: BDTNodeId, depth: usize) -> Vec<BDTNodeId> {
+        let mut changed = HashSet::new();
+        self.auto_expand_recursive(&mut changed, node, depth);
+        changed.into_iter().collect()
+    }
+
+    fn auto_expand_recursive(&mut self, changed: &mut HashSet<BDTNodeId>, node: BDTNodeId, depth: usize) {
+        if depth == 0 {
+            return;
+        }
+        // If this is unprocessed node, make a default decision.
+        if self[node].is_unprocessed() {
+            let attr = self.applied_attributes(node).into_iter().next();
+            if let Some(attr) = attr {
+                let (left, right) = self.make_decision(node, attr.attribute).unwrap();
+                changed.insert(node);
+                changed.insert(left);
+                changed.insert(right);
+                self.auto_expand_recursive(changed, left, depth - 1);
+                self.auto_expand_recursive(changed, right, depth - 1);
+            } else {
+                return; // No attributes, no fun...
+            }
+        }
+        // For expanded nodes, just follow.
+        if let BDTNode::Decision { left, right, .. } = &self[node] {
+            let (left, right) = (*left, *right);
+            self.auto_expand_recursive(changed, left, depth - 1);
+            self.auto_expand_recursive(changed, right, depth - 1);
+        }
+        // Leaves are ignored...
+    }
+
 }
