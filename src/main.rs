@@ -18,7 +18,7 @@ use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate};
 use regex::Regex;
 use std::convert::TryFrom;
 
-use biodivine_aeon_server::bdt::{make_network_attributes, AttributeId, BDTNodeId, BDT};
+use biodivine_aeon_server::bdt::{AttributeId, BDTNodeId, BDT};
 use biodivine_aeon_server::util::index_type::IndexType;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
 use biodivine_lib_std::collections::bitvectors::{ArrayBitVector, BitVector};
@@ -739,10 +739,7 @@ fn start_computation(data: Data) -> BackendResponse {
                                         let result = classifier.export_result();
                                         let tree = TREE.clone();
                                         let mut tree = tree.write().unwrap();
-                                        *tree = Some(BDT::new(
-                                            result,
-                                            make_network_attributes(&network),
-                                        ));
+                                        *tree = Some(BDT::new_from_graph(result, &graph));
                                         println!("Saved decision tree");
                                     }
 
