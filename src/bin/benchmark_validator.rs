@@ -112,7 +112,11 @@ fn main() {
                         }
                     }
                     if inputs > 0 {
-                        println!("INPUTS: {} inputs in {}.", inputs, bench_dir.path().display())
+                        println!(
+                            "INPUTS: {} inputs in {}.",
+                            inputs,
+                            bench_dir.path().display()
+                        )
                     }
                     if !model_ok {
                         errors += 1;

@@ -18,9 +18,11 @@ use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate};
 use regex::Regex;
 use std::convert::TryFrom;
 
-use biodivine_aeon_server::bdt::{make_network_attributes, BDT};
+use biodivine_aeon_server::bdt::{make_network_attributes, AttributeId, BDTNodeId, BDT};
+use biodivine_aeon_server::util::index_type::IndexType;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
 use biodivine_lib_std::collections::bitvectors::{ArrayBitVector, BitVector};
+use json::JsonValue;
 use rocket::config::Environment;
 use rocket::{Config, Data};
 use std::cmp::max;
@@ -98,7 +100,7 @@ fn get_bifurcation_tree() -> BackendResponse {
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
     return if let Some(tree) = &*tree {
-        BackendResponse::ok(&tree.json_tree())
+        BackendResponse::ok(&tree.to_json().to_string())
     } else {
         BackendResponse::err(&"No tree present. Run computation first.".to_string())
     };
@@ -106,15 +108,16 @@ fn get_bifurcation_tree() -> BackendResponse {
 
 #[get("/get_attributes/<node_id>")]
 fn get_attributes(node_id: String) -> BackendResponse {
-    let node_id = node_id.parse::<usize>().unwrap(); // TODO: error handling
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
     return if let Some(tree) = &*tree {
-        if let Some(gains) = tree.attribute_gain_list(node_id) {
-            BackendResponse::ok(&gains)
+        let node = BDTNodeId::try_from_str(&node_id, tree);
+        let node = if let Some(node) = node {
+            node
         } else {
-            BackendResponse::err(&"Given node is not an unprocessed node.".to_string())
-        }
+            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+        };
+        BackendResponse::ok(&tree.attribute_gains_json(node).to_string())
     } else {
         BackendResponse::err(&"No tree present. Run computation first.".to_string())
     };
@@ -122,13 +125,28 @@ fn get_attributes(node_id: String) -> BackendResponse {
 
 #[post("/apply_attribute/<node_id>/<attribute_id>")]
 fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
-    let node_id = node_id.parse::<usize>().unwrap();
-    let attribute_id = attribute_id.parse::<usize>().unwrap();
     let tree = TREE.clone();
     let mut tree = tree.write().unwrap();
     return if let Some(tree) = tree.as_mut() {
-        if let Some(changes) = tree.make_decision_json(node_id, attribute_id) {
-            BackendResponse::ok(&changes)
+        let node = BDTNodeId::try_from_str(&node_id, tree);
+        let node = if let Some(node) = node {
+            node
+        } else {
+            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+        };
+        let attribute = AttributeId::try_from_str(&attribute_id, tree);
+        let attribute = if let Some(val) = attribute {
+            val
+        } else {
+            return BackendResponse::err(&format!("Invalid attribute id {}.", attribute_id));
+        };
+        if let Ok((left, right)) = tree.make_decision(node, attribute) {
+            let changes = array![
+                tree.node_to_json(node),
+                tree.node_to_json(left),
+                tree.node_to_json(right),
+            ];
+            BackendResponse::ok(&changes.to_string())
         } else {
             BackendResponse::err(&"Invalid node or attribute id.".to_string())
         }
@@ -139,18 +157,28 @@ fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
 
 #[post("/revert_decision/<node_id>")]
 fn revert_decision(node_id: String) -> BackendResponse {
-    let node_id = node_id.parse::<usize>().unwrap();
     let tree = TREE.clone();
     let mut tree = tree.write().unwrap();
     return if let Some(tree) = tree.as_mut() {
-        if let Some(response) = tree.revert_decision(node_id) {
-            BackendResponse::ok(&response)
+        let node = BDTNodeId::try_from_str(&node_id, tree);
+        let node = if let Some(node) = node {
+            node
         } else {
-            BackendResponse::err(&"Invalid node id.".to_string())
-        }
+            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+        };
+        let removed = tree.revert_decision(node);
+        let removed = removed
+            .into_iter()
+            .map(|v| v.to_index())
+            .collect::<Vec<_>>();
+        let response = object! {
+                "node": tree.node_to_json(node),
+                "removed": JsonValue::from(removed)
+        };
+        BackendResponse::ok(&response.to_string())
     } else {
         BackendResponse::err(&"No tree present. Run computation first.".to_string())
-    }
+    };
 }
 
 fn max_parameter_cardinality(function: &FnUpdate) -> usize {
@@ -346,13 +374,17 @@ fn get_results() -> BackendResponse {
 
 #[get("/get_tree_witness/<node_id>")]
 fn get_tree_witness(node_id: String) -> BackendResponse {
-    let node_id = if let Ok(value) = node_id.parse::<usize>() { value } else {
-        return BackendResponse::err(&format!("Cannot parse node id {}.", node_id));
-    };
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
     return if let Some(tree) = &*tree {
-        if let Some(params) = tree.params_for_leaf(node_id) {
+        let node = BDTNodeId::try_from_str(&node_id, tree);
+        let node = if let Some(node) = node {
+            node
+        } else {
+            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+        };
+
+        if let Some(params) = tree.params_for_leaf(node) {
             get_witness_network(params)
         } else {
             BackendResponse::err(&"Given node is not an unprocessed node.".to_string())
@@ -431,16 +463,19 @@ fn get_witness_network(colors: &GraphColors) -> BackendResponse {
     }
 }
 
-
 #[get("/get_tree_attractors/<node_id>")]
 fn get_tree_attractors(node_id: String) -> BackendResponse {
-    let node_id = if let Ok(value) = node_id.parse::<usize>() { value } else {
-        return BackendResponse::err(&format!("Cannot parse node id {}.", node_id));
-    };
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
     return if let Some(tree) = &*tree {
-        if let Some(params) = tree.params_for_leaf(node_id) {
+        let node = BDTNodeId::try_from_str(&node_id, tree);
+        let node = if let Some(value) = node {
+            value
+        } else {
+            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+        };
+
+        if let Some(params) = tree.params_for_leaf(node) {
             get_witness_attractors(params)
         } else {
             BackendResponse::err(&"Given node is not an unprocessed node.".to_string())
@@ -499,10 +534,8 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
             if let Some(classifier) = &cmp.classifier {
                 if let Some(graph) = &cmp.graph {
                     let witness_colour = colors.pick_singleton();
-                    let witness_network: BooleanNetwork =
-                        graph.pick_witness(&witness_colour);
-                    let witness_graph =
-                        SymbolicAsyncGraph::new(witness_network.clone()).unwrap();
+                    let witness_network: BooleanNetwork = graph.pick_witness(&witness_colour);
+                    let witness_graph = SymbolicAsyncGraph::new(witness_network.clone()).unwrap();
                     let witness_str = witness_network.to_string();
                     let witness_attractors = classifier.attractors(&witness_colour);
                     let variable_name_strings = witness_network
@@ -526,10 +559,12 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                             attractor.approx_cardinality()
                         );
                         if attractor.approx_cardinality() >= 500.0 {
-                            return BackendResponse::err(&format!("Attractor has {} states. Visualisation size limit exceeded.", attractor.approx_cardinality()));
+                            return BackendResponse::err(&format!(
+                                "Attractor has {} states. Visualisation size limit exceeded.",
+                                attractor.approx_cardinality()
+                            ));
                         }
-                        let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> =
-                            Vec::new();
+                        let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> = Vec::new();
                         let mut not_fixed_vars: HashSet<usize> = HashSet::new();
                         if *behaviour == Behaviour::Stability {
                             // This is a sink - no edges
@@ -559,19 +594,13 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                             }
                         }
 
-                        all_attractors.push((
-                            behaviour.clone(),
-                            attractor_graph,
-                            not_fixed_vars,
-                        ));
+                        all_attractors.push((behaviour.clone(), attractor_graph, not_fixed_vars));
                     }
 
                     // now the data is stored in `all_attractors`, just convert it to json:
                     let mut json = String::new();
 
-                    for (i, (behavior, graph, not_fixed)) in
-                    all_attractors.iter().enumerate()
-                    {
+                    for (i, (behavior, graph, not_fixed)) in all_attractors.iter().enumerate() {
                         if i != 0 {
                             json += ",";
                         } // json? no trailing commas for you
@@ -587,11 +616,7 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                                     if not_fixed.contains(&i) {
                                         result.push(if state.get(i) { '1' } else { '0' });
                                     } else {
-                                        result.push(if state.get(i) {
-                                            '⊤'
-                                        } else {
-                                            '⊥'
-                                        });
+                                        result.push(if state.get(i) { '⊤' } else { '⊥' });
                                     }
                                 }
                                 return result;

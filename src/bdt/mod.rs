@@ -1,15 +1,29 @@
 use crate::scc::Class;
-use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph, SymbolicContext};
+use biodivine_lib_param_bn::symbolic_async_graph::{
+    GraphColors, SymbolicAsyncGraph, SymbolicContext,
+};
 use biodivine_lib_param_bn::BooleanNetwork;
 use biodivine_lib_std::param_graph::Params;
-use json::JsonValue;
-use std::cmp::PartialOrd;
+use std::collections::hash_map::Keys;
 use std::collections::HashMap;
+use std::iter::Map;
+use std::ops::Range;
+
+/// **(internal)** Implementation of utility methods for the binary decision tree.
+mod _impl_bdt;
+/// **(internal)** Implementation of .dot export utilities for a decision tree.
+mod _impl_bdt_dot_export;
+/// **(internal)** Implementation of json serialization of BDT structures.
+mod _impl_bdt_json;
+/// **(internal)** Implementation of general convenience methods for BDT nodes.
+mod _impl_bdt_node;
+/// **(internal)** Implementation of indexing operations provided by BDTNodeId and AttributeId.
+mod _impl_indexing;
 
 /// Encodes one node of a bifurcation decision tree. A node can be either a leaf (fully classified
 /// set of parametrisations), a decision node with a fixed attribute, or an unprocessed node
 /// with a remaining bifurcation function.
-//#[derive(Debug)]
+#[derive(Clone)]
 pub enum BDTNode {
     Leaf {
         class: Class,
@@ -34,272 +48,29 @@ pub enum BDTNode {
 #[derive(Debug, Clone, Copy)]
 pub struct BDTNodeId(usize);
 
+/// An attribute id is used to identify a specific attribute used in a decision tree.
+///
+/// These are bound to a specific BDT, but note that not all attributes have to be applicable
+/// to all BDT nodes (or, more specifically, they are applicable but have no effect).
 #[derive(Debug, Clone, Copy)]
 pub struct AttributeId(usize);
 
 /// A Bifurcation decision tree. It stores the BDT nodes, mapping IDs to actual structures.
+///
 /// It is the owner of the tree memory, so every addition/deletion in the tree must happen here.
 pub struct BDT {
     storage: HashMap<usize, BDTNode>,
     attributes: Vec<Attribute>,
     next_id: usize,
-    _remaining: GraphColors,
 }
 
+type BDTNodeIds<'a> = Map<Keys<'a, usize, BDTNode>, fn(&usize) -> BDTNodeId>;
+type AttributeIds<'a> = Map<Range<usize>, fn(usize) -> AttributeId>;
+
 impl BDT {
-    pub fn new(classes: HashMap<Class, GraphColors>, attributes: Vec<Attribute>) -> BDT {
-        let remaining = classes
-            .iter()
-            .fold(None, |a, (_, b)| {
-                return if let Some(a) = a {
-                    Some(b.union(&a))
-                } else {
-                    Some(b.clone())
-                };
-            })
-            .unwrap();
-        let mut tree = BDT {
-            storage: HashMap::new(),
-            attributes,
-            next_id: 0,
-            _remaining: remaining,
-        };
-        tree.insert_new_node(classes);
-        return tree;
-    }
-
-    pub fn json_tree(&self) -> String {
-        let mut result = array![];
-        for (id, node) in &self.storage {
-            result.push(self.node_to_json(*id, node)).unwrap();
-        }
-        return result.to_string();
-    }
-
-    pub fn params_for_leaf(&self, node: usize) -> Option<&GraphColors> {
-        let node = self.storage.get(&node)?;
-        if let BDTNode::Leaf { params, .. } = node {
-            return Some(params);
-        } else {
-            return None;
-        }
-    }
-
-    pub fn attribute_gain_list(&self, node: usize) -> Option<String> {
-        return if let BDTNode::Unprocessed { classes } = &self.storage[&node] {
-            let mut result = array![];
-            // Compute gains for all attributes
-            let mut gains = Vec::new();
-            for i_attr in 0..self.attributes.len() {
-                let attr = &self.attributes[i_attr];
-                let gain = attr.information_gain(classes);
-                if gain > f64::NEG_INFINITY {
-                    gains.push((i_attr, attr, gain));
-                }
-            }
-            // Sort by gain
-            gains.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap().reverse());
-            // Add them to result array
-            for (i_attr, attr, information_gain) in gains {
-                let (left, right) = attr.restrict(classes);
-                result
-                    .push(object! {
-                        "id" => i_attr,
-                        "name" => attr.name.clone(),
-                        "left" => self.class_list_to_json(&left),
-                        "right" => self.class_list_to_json(&right),
-                        "gain" => information_gain
-                    })
-                    .unwrap();
-            }
-            Some(result.to_string())
-        } else {
-            None
-        };
-    }
-
-    pub fn make_decision_json(&mut self, node: usize, attribute_id: usize) -> Option<String> {
-        return if let BDTNode::Unprocessed { classes } = &self.storage[&node] {
-            let attribute = &self.attributes[attribute_id]; // TODO: Error handling
-            let (left_data, right_data) = attribute.restrict(classes);
-            if left_data.is_empty() || right_data.is_empty() {
-                return None;
-            }
-            let classes = classes.clone();
-            let left = self.insert_new_node(left_data);
-            let right = self.insert_new_node(right_data);
-            let decision = BDTNode::Decision {
-                attribute: AttributeId(attribute_id),
-                left,
-                right,
-                classes,
-            };
-            self.insert_or_replace(node, decision, true);
-            let result = array![
-                self.node_to_json(node, &self.storage[&node]),
-                self.node_to_json(left.0, &self.storage[&left.0]),
-                self.node_to_json(right.0, &self.storage[&right.0]),
-            ];
-            Some(result.to_string())
-        } else {
-            None
-        };
-    }
-
-    pub fn revert_decision(&mut self, node: usize) -> Option<String> {
-        let current = self.storage.get(&node);
-        return if matches!(current, Some(&BDTNode::Decision { .. })) {
-            let mut delete_nodes = Vec::new();
-            let mut stack = vec![node];
-            let mut new_classes: HashMap<Class, GraphColors> = HashMap::new();
-            while let Some(expand) = stack.pop() {
-                let to_expand = self.storage.remove(&expand).unwrap();
-                match to_expand {
-                    BDTNode::Leaf { class, params } => {
-                        if let Some(current) = new_classes.get_mut(&class) {
-                            *current = params.union(current);
-                        } else {
-                            new_classes.insert(class, params);
-                        }
-                    }
-                    BDTNode::Decision { left, right, .. } => {
-                        delete_nodes.push(left.0);
-                        delete_nodes.push(right.0);
-                        stack.push(left.0);
-                        stack.push(right.0);
-                    }
-                    BDTNode::Unprocessed { classes } => {
-                        for (class, params) in classes {
-                            if let Some(current) = new_classes.get_mut(&class) {
-                                *current = params.union(current);
-                            } else {
-                                new_classes.insert(class, params);
-                            }
-                        }
-                    }
-                }
-            }
-            let new_node = BDTNode::Unprocessed {
-                classes: new_classes,
-            };
-
-            let result = object! {
-                node: self.node_to_json(node, &new_node),
-                removed: JsonValue::from(delete_nodes)
-            };
-            self.storage.insert(node, new_node);
-            Some(result.to_string())
-        } else {
-            None
-        };
-    }
-
-    fn node_to_json(&self, id: usize, node: &BDTNode) -> JsonValue {
-        return match node {
-            BDTNode::Leaf { class, params } => object! {
-                    "id" => id,
-                    "type" => "leaf".to_string(),
-                    "class" => format!("{}", class),
-                    "cardinality" => params.approx_cardinality(),
-            },
-            BDTNode::Decision {
-                attribute,
-                left,
-                right,
-                classes
-            } => object! {
-                    "id" => id,
-                    "type" => "decision".to_string(),
-                    "attribute_name" => self.attributes[attribute.0].name.clone(),
-                    "cardinality" => Self::class_list_cardinality(classes),
-                    "classes" => self.class_list_to_json(classes),
-                    "left" => left.0,
-                    "right" => right.0,
-            },
-            BDTNode::Unprocessed { classes } => object! {
-                    "id" => id,
-                    "type" => "unprocessed".to_string(),
-                    "cardinality" => Self::class_list_cardinality(classes),
-                    "classes" => self.class_list_to_json(classes)
-            },
-        };
-    }
-
-    fn class_list_cardinality(classes: &HashMap<Class, GraphColors>) -> f64 {
-        classes.iter().fold(0.0, |a, (_, c)| a + c.approx_cardinality())
-    }
-
-    fn class_list_to_json(&self, classes: &HashMap<Class, GraphColors>) -> JsonValue {
-        let mut class_list = array![];
-        for (c, p) in classes {
-            class_list
-                .push(object! {
-                    "class" => format!("{}", c),
-                    "cardinality" => p.approx_cardinality(),
-                })
-                .unwrap();
-        }
-        return class_list;
-    }
-
-    pub fn root_id() -> BDTNodeId {
-        return BDTNodeId(0);
-    }
-
-    pub fn is_unprocessed(&self, id: BDTNodeId) -> bool {
-        return if let BDTNode::Unprocessed { .. } = self.storage.get(&id.0).unwrap() {
-            true
-        } else {
-            false
-        };
-    }
-
     pub fn learn_tree(&mut self, max_depth: usize) {
         let attr: Vec<usize> = (0..(self.attributes.len())).collect();
         return self.learn_tree_recursive(0, &attr, 0, max_depth);
-    }
-
-    pub fn dump_dot(&self) {
-        println!("digraph G {{");
-        println!("init__ [label=\"\", style=invis, height=0, width=0];");
-        println!("init__ -> 0;");
-        self.dump_dot_recursive(0);
-        println!("}}");
-    }
-
-    fn dump_dot_recursive(&self, node: usize) {
-        match &self.storage[&node] {
-            BDTNode::Leaf { class, params } => {
-                println!(
-                    "{}[label=\"{}({})\"];",
-                    node,
-                    format!("{}", class).replace("\"", ""),
-                    params.approx_cardinality()
-                );
-            }
-            BDTNode::Unprocessed { classes } => {
-                let classes: Vec<String> = classes
-                    .iter()
-                    .map(|(c, p)| format!("({},{})", c, p.approx_cardinality()).replace("\"", ""))
-                    .collect();
-                let classes = format!("{:?}", classes).replace("\"", "");
-                println!("{}[label=\"Unprocessed({})\"]", node, classes);
-            }
-            BDTNode::Decision {
-                attribute,
-                left,
-                right,
-                ..
-            } => {
-                let (left, right) = (left.0, right.0);
-                let attribute = &self.attributes[attribute.0];
-                println!("{}[label=\"{}\"]", node, attribute.name);
-                println!("{} -> {} [style=dotted];", node, left);
-                println!("{} -> {} [style=filled];", node, right);
-                self.dump_dot_recursive(left);
-                self.dump_dot_recursive(right);
-            }
-        }
     }
 
     fn learn_tree_recursive(
@@ -352,7 +123,9 @@ impl BDT {
                         "Select attr: {}: {} with gain {}",
                         max, self.attributes[max].name, max_gain
                     );
-                    let (l, r) = self.make_decision(BDTNodeId(node), AttributeId(max));
+                    let (l, r) = self
+                        .make_decision(BDTNodeId(node), AttributeId(max))
+                        .unwrap();
                     self.learn_tree_recursive(l.0, &continue_with, depth + 1, max_depth);
                     self.learn_tree_recursive(r.0, &continue_with, depth + 1, max_depth);
                 } else {
@@ -366,80 +139,6 @@ impl BDT {
                 self.learn_tree_recursive(right, attr, depth + 1, max_depth);
             }
         }
-    }
-
-    fn insert_leaf(&mut self, class: Class, params: GraphColors) -> BDTNodeId {
-        let leaf = BDTNode::Leaf { class, params };
-        let leaf_id = self.next_id();
-        self.insert_or_replace(leaf_id, leaf, false);
-        return BDTNodeId(leaf_id);
-    }
-
-    fn insert_unprocessed(&mut self, classes: HashMap<Class, GraphColors>) -> BDTNodeId {
-        let node = BDTNode::Unprocessed { classes };
-        let id = self.next_id();
-        self.insert_or_replace(id, node, false);
-        return BDTNodeId(id);
-    }
-
-    fn insert_new_node(&mut self, classes: HashMap<Class, GraphColors>) -> BDTNodeId {
-        assert!(!classes.is_empty(), "Inserting empty node.");
-        return if classes.len() == 1 {
-            let (class, params) = classes.into_iter().next().unwrap();
-            self.insert_leaf(class, params)
-        } else {
-            self.insert_unprocessed(classes)
-        };
-    }
-
-    fn make_decision(
-        &mut self,
-        node: BDTNodeId,
-        attribute_id: AttributeId,
-    ) -> (BDTNodeId, BDTNodeId) {
-        let id = node.0;
-        let node = self.storage.get(&id).expect("Invalid node id.");
-        let attribute = self
-            .attributes
-            .get(attribute_id.0)
-            .expect("Invalid attribute id.");
-        if let BDTNode::Unprocessed { classes } = node {
-            let (left_data, right_data) = attribute.restrict(classes);
-            assert!(
-                !(left_data.is_empty() || right_data.is_empty()),
-                "No decision based on attribute {}.",
-                attribute.name
-            );
-            let classes = classes.clone();
-            let left = self.insert_new_node(left_data);
-            let right = self.insert_new_node(right_data);
-            let decision = BDTNode::Decision {
-                attribute: attribute_id,
-                left,
-                right,
-                classes,
-            };
-            self.insert_or_replace(id, decision, true);
-            return (left, right);
-        } else {
-            panic!("Expected unprocessed node.");
-        }
-    }
-
-    fn insert_or_replace(&mut self, id: usize, node: BDTNode, replace: bool) {
-        let old = self.storage.insert(id, node);
-        assert_eq!(
-            replace,
-            old.is_some(),
-            "Modifying {:?}, but it is already in the tree.",
-            id,
-        );
-    }
-
-    fn next_id(&mut self) -> usize {
-        let id = self.next_id;
-        self.next_id += 1;
-        return id;
     }
 }
 
@@ -480,6 +179,13 @@ pub struct Attribute {
     negative: GraphColors,
 }
 
+pub struct AppliedAttribute {
+    attribute: AttributeId,
+    left: HashMap<Class, GraphColors>,
+    right: HashMap<Class, GraphColors>,
+    information_gain: f64,
+}
+
 impl Attribute {
     pub fn restrict(
         &self,
@@ -494,9 +200,12 @@ impl Attribute {
     pub fn information_gain(&self, classes: &HashMap<Class, GraphColors>) -> f64 {
         let original_entropy = entropy(classes);
         let (left, right) = self.restrict(classes);
-        print!("L: {}, R: {} // ", left.len(), right.len());
         return original_entropy - (0.5 * entropy(&left) + 0.5 * entropy(&right));
     }
+}
+
+fn information_gain(original: f64, left: f64, right: f64) -> f64 {
+    original - (0.5 * left + 0.5 * right)
 }
 
 /*
@@ -598,12 +307,21 @@ pub fn make_network_attributes(network: &BooleanNetwork) -> Vec<Attribute> {
                 panic!("Unsupported network with non-trivial parameters?");
             } else {
                 // There should be exactly one BDD variable corresponding to value of this "parameter"
-                let bdd = encoder.symbolic_context().mk_implicit_function_is_true(v, &vec![]);
-                let negative = encoder.unit_colors().copy(bdd.not()).intersect(encoder.unit_colors());
-                let positive = encoder.unit_colors().copy(bdd).intersect(encoder.unit_colors());
+                let bdd = encoder
+                    .symbolic_context()
+                    .mk_implicit_function_is_true(v, &vec![]);
+                let negative = encoder
+                    .unit_colors()
+                    .copy(bdd.not())
+                    .intersect(encoder.unit_colors());
+                let positive = encoder
+                    .unit_colors()
+                    .copy(bdd)
+                    .intersect(encoder.unit_colors());
                 result.push(Attribute {
                     name: format!("{}", network.get_variable_name(v)),
-                    positive, negative,
+                    positive,
+                    negative,
                 })
             }
         }
@@ -614,12 +332,21 @@ pub fn make_network_attributes(network: &BooleanNetwork) -> Vec<Attribute> {
             panic!("Unsupported network with non-trivial parameters?");
         } else {
             // There should be exactly one BDD variable corresponding to value of this "parameter"
-            let bdd = encoder.symbolic_context().mk_uninterpreted_function_is_true(p, &vec![]);
-            let negative = encoder.unit_colors().copy(bdd.not()).intersect(encoder.unit_colors());
-            let positive = encoder.unit_colors().copy(bdd).intersect(encoder.unit_colors());
+            let bdd = encoder
+                .symbolic_context()
+                .mk_uninterpreted_function_is_true(p, &vec![]);
+            let negative = encoder
+                .unit_colors()
+                .copy(bdd.not())
+                .intersect(encoder.unit_colors());
+            let positive = encoder
+                .unit_colors()
+                .copy(bdd)
+                .intersect(encoder.unit_colors());
             result.push(Attribute {
                 name: format!("{}", parameter.get_name()),
-                positive, negative,
+                positive,
+                negative,
             })
         }
     }
@@ -866,7 +593,7 @@ pub fn make_decision_tree(network: &BooleanNetwork, classes: &HashMap<Class, Gra
 
     let mut tree = BDT::new(classes.clone(), attributes);
     tree.learn_tree(10);
-    tree.dump_dot();
+    println!("{}", tree.to_dot());
 
     /*println!("digraph G {{");
     println!("init__ [label=\"\", style=invis, height=0, width=0];");
@@ -968,7 +695,9 @@ fn learn(
                 max_gain = gain;
                 max_attribute = Some(attr.clone());
             }
-            let _all_c = classes.iter().fold(0.0, |a, (_, p)| a + p.approx_cardinality());
+            let _all_c = classes
+                .iter()
+                .fold(0.0, |a, (_, p)| a + p.approx_cardinality());
             let _p_c = positive_dataset
                 .iter()
                 .fold(0.0, |a, (_, p)| a + p.approx_cardinality());
@@ -1021,7 +750,9 @@ fn learn(
         let (_, params) = classes.iter().next().unwrap();
         println!("{}", network.make_witness(params, encoder));
         panic!("");*/
-        let scrap = classes.iter().fold(0.0, |a, (_, p)| a + p.approx_cardinality());
+        let scrap = classes
+            .iter()
+            .fold(0.0, |a, (_, p)| a + p.approx_cardinality());
         *remaining -= scrap;
         println!("Remaining: {}; Scrap: {}", remaining, scrap);
         return (0.0, scrap, 1);
