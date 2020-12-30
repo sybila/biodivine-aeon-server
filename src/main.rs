@@ -215,7 +215,7 @@ fn check_update_function(data: Data) -> BackendResponse {
                             max_size = max(max_size, model.regulators(v).len())
                         }
                     }
-                    if max_size <= 4 {
+                    if max_size <= 5 {
                         println!(
                             "Start partial function analysis. {} variables and complexity {}.",
                             model.num_vars(),

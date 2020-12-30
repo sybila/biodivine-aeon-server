@@ -5,6 +5,11 @@ use std::collections::HashMap;
 use std::iter::Map;
 use std::ops::Range;
 
+/// **(internal)** All necessary building blocks for computing a list of attributes from a
+/// Boolean network.
+mod _attributes_for_network;
+/// **(internal)** Some utility functions for working with attributes.
+mod _impl_attribute;
 /// **(internal)** Implementation of utility methods for the binary decision tree.
 mod _impl_bdt;
 /// **(internal)** Implementation of .dot export utilities for a decision tree.
@@ -15,11 +20,6 @@ mod _impl_bdt_json;
 mod _impl_bdt_node;
 /// **(internal)** Implementation of indexing operations provided by BDTNodeId and AttributeId.
 mod _impl_indexing;
-/// **(internal)** Some utility functions for working with attributes.
-mod _impl_attribute;
-/// **(internal)** All necessary building blocks for computing a list of attributes from a
-/// Boolean network.
-mod _attributes_for_network;
 
 type BifurcationFunction = HashMap<Class, GraphColors>;
 

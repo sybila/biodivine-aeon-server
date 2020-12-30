@@ -1,4 +1,7 @@
-use crate::bdt::{entropy, information_gain, AppliedAttribute, Attribute, AttributeId, AttributeIds, BDTNode, BDTNodeId, BDTNodeIds, BDT, BifurcationFunction};
+use crate::bdt::{
+    entropy, information_gain, AppliedAttribute, Attribute, AttributeId, AttributeIds, BDTNode,
+    BDTNodeId, BDTNodeIds, BifurcationFunction, BDT,
+};
 use crate::scc::Class;
 use crate::util::functional::Functional;
 use crate::util::index_type::IndexType;
@@ -62,10 +65,7 @@ impl BDT {
     }
 
     /// **(internal)** Create a leaf/unprocessed node for the given class list.
-    pub(super) fn insert_node_with_classes(
-        &mut self,
-        classes: BifurcationFunction,
-    ) -> BDTNodeId {
+    pub(super) fn insert_node_with_classes(&mut self, classes: BifurcationFunction) -> BDTNodeId {
         assert!(!classes.is_empty(), "Inserting empty node.");
         return if classes.len() == 1 {
             let (class, params) = classes.into_iter().next().unwrap();
@@ -175,7 +175,12 @@ impl BDT {
         changed.into_iter().collect()
     }
 
-    fn auto_expand_recursive(&mut self, changed: &mut HashSet<BDTNodeId>, node: BDTNodeId, depth: usize) {
+    fn auto_expand_recursive(
+        &mut self,
+        changed: &mut HashSet<BDTNodeId>,
+        node: BDTNodeId,
+        depth: usize,
+    ) {
         if depth == 0 {
             return;
         }
@@ -201,5 +206,4 @@ impl BDT {
         }
         // Leaves are ignored...
     }
-
 }
