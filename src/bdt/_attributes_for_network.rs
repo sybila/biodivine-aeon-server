@@ -1,5 +1,6 @@
 use crate::bdt::{BDT, Attribute, BifurcationFunction};
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
+use biodivine_lib_std::param_graph::Params;
 
 impl BDT {
 
@@ -8,6 +9,16 @@ impl BDT {
         attributes_for_network_inputs(graph, &mut attributes);
         attributes_for_constant_parameters(graph, &mut attributes);
         attributes_for_missing_constraints(graph, &mut attributes);
+        attributes_for_implicit_function_tables(graph, &mut attributes);
+        attributes_for_explicit_function_tables(graph, &mut attributes);
+        let attributes = attributes.into_iter()
+            .filter(|a| {
+                let is_not_empty = !a.positive.is_empty() && !a.negative.is_empty();
+                let is_not_empty = is_not_empty && !a.positive.intersect(graph.unit_colors()).is_empty();
+                let is_not_empty = is_not_empty && !a.negative.intersect(graph.unit_colors()).is_empty();
+                is_not_empty
+            })
+            .collect();
         BDT::new(classes, attributes)
     }
 
@@ -70,17 +81,15 @@ fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<
             let fn_x0_to_1 = fn_is_true.and(&regulator_is_false).var_project(regulator);
             let observability = fn_x1_to_1.xor(&fn_x0_to_1).project(&context.state_variables());
 
-            if !observability.is_true() && !observability.is_false() {
-                out.push(Attribute {
-                    name: format!(
-                        "{} observable in {}",
-                        network.get_variable_name(reg.get_regulator()),
-                        network.get_variable_name(reg.get_target()),
-                    ),
-                    negative: graph.empty_colors().copy(observability.not()),
-                    positive: graph.empty_colors().copy(observability)
-                });
-            }
+            out.push(Attribute {
+                name: format!(
+                    "{} observable in {}",
+                    network.get_variable_name(reg.get_regulator()),
+                    network.get_variable_name(reg.get_target()),
+                ),
+                negative: graph.empty_colors().copy(observability.not()),
+                positive: graph.empty_colors().copy(observability)
+            });
         }
 
         if reg.get_monotonicity().is_none() {
@@ -92,27 +101,74 @@ fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<
             let fn_x1_to_1 = fn_is_true.and(&regulator_is_true).var_project(regulator);
             let non_inhibition = fn_x0_to_0.and(&fn_x1_to_1).project(&context.state_variables());
 
-            if !non_activation.is_true() && !non_activation.is_false() {
+            out.push(Attribute {
+                name: format!(
+                    "{} activation in {}",
+                    network.get_variable_name(reg.get_regulator()),
+                    network.get_variable_name(reg.get_target()),
+                ),
+                positive: graph.empty_colors().copy(non_activation.not()),
+                negative: graph.empty_colors().copy(non_activation),
+            });
+
+            out.push(Attribute {
+                name: format!(
+                    "{} inhibition in {}",
+                    network.get_variable_name(reg.get_regulator()),
+                    network.get_variable_name(reg.get_target()),
+                ),
+                positive: graph.empty_colors().copy(non_inhibition.not()),
+                negative: graph.empty_colors().copy(non_inhibition),
+            });
+        }
+    }
+}
+
+/// **(internal)** Make an explicit attributes (like `f[1,0,1] = 1`) for every implicit update
+/// function row in the network.
+fn attributes_for_implicit_function_tables(graph: &SymbolicAsyncGraph, out: &mut Vec<Attribute>) {
+    for v in graph.network().variables() {
+        let is_implicit_function = graph.network().get_update_function(v).is_none();
+        let is_implicit_function = is_implicit_function && !graph.network().regulators(v).is_empty();
+        if is_implicit_function {
+            let table = graph.symbolic_context().get_implicit_function_table(v);
+            for (ctx, var) in table {
+                let bdd = graph.symbolic_context().bdd_variable_set().mk_var(var);
+                let ctx: Vec<String> = ctx.into_iter()
+                    .zip(graph.network().regulators(v))
+                    .map(|(b, r)| {
+                        format!("{}{}", if b { "" } else { "¬" }, graph.network().get_variable_name(r))
+                    }).collect();
+                let name = format!("{}{:?}", graph.network().get_variable_name(v), ctx);
                 out.push(Attribute {
-                    name: format!(
-                        "{} activation in {}",
-                        network.get_variable_name(reg.get_regulator()),
-                        network.get_variable_name(reg.get_target()),
-                    ),
-                    positive: graph.empty_colors().copy(non_activation.not()),
-                    negative: graph.empty_colors().copy(non_activation),
+                    name: name.replace("\"", ""),
+                    negative: graph.mk_empty_colors().copy(bdd.not()),
+                    positive: graph.mk_empty_colors().copy(bdd),
                 });
             }
+        }
+    }
+}
 
-            if !non_inhibition.is_true() && !non_inhibition.is_false() {
+/// **(internal)** Make an explicit argument for every explicit parameter function row in the network.
+fn attributes_for_explicit_function_tables(graph: &SymbolicAsyncGraph, out: &mut Vec<Attribute>) {
+    for p in graph.network().parameters() {
+        let parameter = graph.network().get_parameter(p);
+        if parameter.get_arity() > 0 {
+            let table = graph.symbolic_context().get_explicit_function_table(p);
+            let arg_names = (0..parameter.get_arity()).map(|i| format!("x{}", i+1)).collect::<Vec<_>>();
+            for (ctx, var) in table {
+                let bdd = graph.symbolic_context().bdd_variable_set().mk_var(var);
+                let ctx: Vec<String> = ctx.into_iter()
+                    .zip(&arg_names)
+                    .map(|(b, r)| {
+                        format!("{}{}", if b { "" } else { "¬" }, r)
+                    }).collect();
+                let name = format!("{}{:?}", parameter.get_name(), ctx);
                 out.push(Attribute {
-                    name: format!(
-                        "{} inhibition in {}",
-                        network.get_variable_name(reg.get_regulator()),
-                        network.get_variable_name(reg.get_target()),
-                    ),
-                    positive: graph.empty_colors().copy(non_inhibition.not()),
-                    negative: graph.empty_colors().copy(non_inhibition),
+                    name: name.replace("\"", ""),
+                    negative: graph.mk_empty_colors().copy(bdd.not()),
+                    positive: graph.mk_empty_colors().copy(bdd),
                 });
             }
         }
