@@ -1,7 +1,4 @@
-use crate::scc::algo_effectively_constant::{
-    reach_saturated_bwd_excluding, reach_saturated_fwd_excluding,
-    remove_effectively_constant_states,
-};
+use crate::scc::algo_effectively_constant::{reach_saturated_bwd_excluding, reach_saturated_fwd_excluding, remove_effectively_constant_states_lockstep};
 use crate::scc::ProgressTracker;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_std::param_graph::Params;
@@ -13,7 +10,7 @@ where
 {
     let mut universe = graph.unit_vertices().clone();
 
-    let (constrained, variables) = remove_effectively_constant_states(graph, universe);
+    let (constrained, variables) = remove_effectively_constant_states_lockstep(graph, universe);
     universe = constrained.clone();
 
     while !universe.is_empty() {

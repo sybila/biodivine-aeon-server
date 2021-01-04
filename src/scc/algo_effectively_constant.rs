@@ -1,5 +1,194 @@
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
+use std::io::Write;
+
+struct VarProcess<'a> {
+    graph: &'a SymbolicAsyncGraph,
+    variable: VariableId,               // Variable examined by this process.
+    active_variables: Vec<VariableId>,  // Variables used for reachability.
+    active_variable: usize,             // Variable which will be used for next reachability step.
+    universe: GraphColoredVertices,     // Total set of states that we need to explore.
+    reach_fwd: GraphColoredVertices     // So-far reached states.
+}
+
+impl<'a> VarProcess<'a> {
+
+    fn mk<'b, 'c>(
+        graph: &'a SymbolicAsyncGraph,
+        variable: VariableId,
+        universe: &'b GraphColoredVertices,
+        active_variables: &'c [VariableId]
+    ) -> VarProcess<'a> {
+        let active_variables: Vec<VariableId> = active_variables
+            .iter()
+            .cloned()
+            .filter(|it| *it != variable)
+            .collect();
+        if active_variables.len() - 1 > active_variables.len() {
+            panic!("No active variables."); // TODO: Should not panic.
+        }
+        VarProcess {
+            graph, variable,
+            universe: universe.clone(),
+            active_variable: active_variables.len() - 1,
+            reach_fwd: graph.var_post(variable, universe),
+            active_variables,
+        }
+    }
+
+    /// Makes one reachability step - if reachability is done, returns the set of vertices
+    /// that will never jump again.
+    fn make_step(&mut self) -> Option<GraphColoredVertices> {
+        let step_var = self.active_variables[self.active_variable];
+        let post = self.graph
+            .var_post(step_var, &self.reach_fwd)
+            .intersect(&self.universe)
+            .minus(&self.reach_fwd);
+
+        if !post.is_empty() {
+            self.reach_fwd = self.reach_fwd.union(&post);
+            self.active_variable = self.active_variables.len() - 1;
+            None
+        } else {
+            if self.active_variable == 0 {
+                // We are done - reach_fwd now has all values reachable after jump.
+                let vertices_where_var_can_jump = self.graph.var_can_post(self.variable, &self.universe);
+                let reachable_after_jump = self.reach_fwd.clone();
+                let can_jump_again = reachable_after_jump.intersect(&vertices_where_var_can_jump);
+                let will_never_jump_again = vertices_where_var_can_jump.minus(&can_jump_again);
+                Some(will_never_jump_again)
+            } else {
+                self.active_variable -= 1;
+                None
+            }
+        }
+    }
+
+    fn restrict_universe(&mut self, to_remove: &GraphColoredVertices) {
+        self.universe = self.universe.minus(to_remove);
+        self.reach_fwd = self.reach_fwd.minus(to_remove);
+    }
+
+}
+
+pub fn remove_effectively_constant_states_lockstep(
+    graph: &SymbolicAsyncGraph,
+    set: GraphColoredVertices
+) -> (GraphColoredVertices, Vec<VariableId>) {
+    println!("Remove effectively constant states.");
+    let original_size = set.approx_cardinality();
+    let mut universe = set;
+    let all_variables: Vec<VariableId> = graph.network().variables().collect();
+    let mut variables: Vec<VariableId> = graph.network().variables().collect();
+    let mut processes: Vec<Option<VarProcess>> = graph.network().variables().map(|v| {
+        Some(VarProcess::mk(graph, v, &universe, &variables))
+    }).collect();
+    let mut iter: usize = 0;
+    let mut i_p: usize = 0;
+    loop {
+        let will_never_jump_again = processes[i_p]
+            .as_mut()
+            .and_then(|p| p.make_step());
+        if let Some(will_never_jump_again) = will_never_jump_again {
+            processes[i_p] = None;  // "Stop" current process.
+            if will_never_jump_again.is_empty() {
+                // No more progress can be made for this variable at the moment.
+                let is_constant = graph
+                    .var_can_post(all_variables[i_p], &universe).is_empty();
+                if is_constant {
+                    // Constant variables are removed (and will never be restarted).
+                    let variable = all_variables[i_p];
+                    variables = variables.into_iter().filter(|it| *it != variable).collect();
+                    if variables.len() == 1 { break; }  // TODO: this is a hack for models with a lot of constants
+                }
+                println!("\n Variable {:?} is finished for now (constant {}; active vars {}).", i_p, is_constant, variables.len());
+            } else {
+                // We have eliminated some state space!
+                // Remove it from existing processes
+                println!(
+                    "\n Variable {:?} eliminated {}/{} states.",
+                    i_p,
+                    will_never_jump_again.approx_cardinality(),
+                    universe.approx_cardinality()
+                );
+                universe = universe.minus(&will_never_jump_again);
+                processes.iter_mut().for_each(|p| {
+                    if let Some(p) = p.as_mut() {
+                        p.restrict_universe(&will_never_jump_again);
+                    }
+                });
+                // Restart processes that are not constant - they may need to be recomputed
+                let mut total = 0;
+                for (j_p, p) in processes.iter_mut().enumerate() {
+                    if p.is_none() && variables.contains(&all_variables[j_p]) {
+                        total += 1;
+                        *p = Some(VarProcess::mk(graph, all_variables[j_p], &universe, &variables));
+                    }
+                }
+                println!("Restarted {}.", total);
+            }
+        }
+
+        // Once everything is done, there should be no remaining process
+        if processes.iter().all(|it| it.is_none()) {
+            break;
+        }
+        // Move to next process...
+        i_p += 1;
+        if i_p == processes.len() {
+            i_p = 0;
+            iter += 1;
+            print!("|{}", iter);
+            std::io::stdout().flush().unwrap();
+        }
+    }
+
+    println!("Final active variables: {}", variables.len());
+    println!(
+        "Removed {}/{} {:+e}%; {} nodes.",
+        universe.approx_cardinality(),
+        original_size,
+        (universe.approx_cardinality() / original_size) * 100.0,
+        universe.clone().into_bdd().size()
+    );
+
+    for v in &variables {
+        let vertices_where_var_can_jump = graph.var_can_post(*v, &universe);
+        let reachable_before_jump = reach_saturated_bwd_excluding(
+            graph,
+            &vertices_where_var_can_jump,
+            &universe,
+            &variables,
+        );
+        let reachable_after_jump = reach_saturated_fwd_excluding(
+            graph,
+            &vertices_where_var_can_jump,
+            &universe,
+            &variables,
+        );
+        let components = reachable_before_jump.intersect(&reachable_after_jump);
+        let below = reachable_after_jump.minus(&components);
+        let can_reach_below =
+            reach_saturated_bwd_excluding(graph, &below, &universe, &variables).minus(&below);
+        println!(
+            "({:?}) Below: {} Can reach below: {}",
+            v,
+            below.approx_cardinality(),
+            can_reach_below.approx_cardinality()
+        );
+        universe = universe.minus(&can_reach_below);
+    }
+
+    println!("Final active variables: {}", variables.len());
+    println!(
+        "Removed {}/{} {:+e}%; {} nodes.",
+        universe.approx_cardinality(),
+        original_size,
+        (universe.approx_cardinality() / original_size) * 100.0,
+        universe.clone().into_bdd().size()
+    );
+    return (universe, variables);
+}
 
 /// This routine removes vertices which can never appear in an attractor by detecting parameter values
 /// for which the variable jumps only in one direction.
@@ -9,7 +198,7 @@ use biodivine_lib_param_bn::VariableId;
 ///
 /// Note that this does not mean the variable has to strictly always jump - that is why we need the
 /// backward reachability to detect states that can actually achieve irreversible jump.
-pub fn remove_effectively_constant_states(
+pub fn _old_remove_effectively_constant_states(
     graph: &SymbolicAsyncGraph,
     set: GraphColoredVertices,
 ) -> (GraphColoredVertices, Vec<VariableId>) {
