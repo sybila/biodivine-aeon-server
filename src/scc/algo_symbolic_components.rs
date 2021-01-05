@@ -14,7 +14,7 @@ where
     universe = constrained.clone();
 
     while !universe.is_empty() {
-        println!("Pick a new pivot branch...");
+        println!("Pick a new pivot branch... (Universe: {})", universe.approx_cardinality());
         let pivot = universe.pick_vertex();
 
         let bwd_pivot = reach_saturated_bwd_excluding(graph, &pivot, &universe, &variables);

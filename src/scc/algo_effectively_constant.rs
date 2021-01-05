@@ -19,20 +19,20 @@ impl<'a> VarProcess<'a> {
         universe: &'b GraphColoredVertices,
         active_variables: &'c [VariableId]
     ) -> VarProcess<'a> {
-        let active_variables: Vec<VariableId> = active_variables
+        /*let active_variables: Vec<VariableId> = active_variables
             .iter()
             .cloned()
             .filter(|it| *it != variable)
-            .collect();
-        if active_variables.len() - 1 > active_variables.len() {
+            .collect();*/
+        if active_variables.len() == 0 {
             panic!("No active variables."); // TODO: Should not panic.
         }
         VarProcess {
             graph, variable,
             universe: universe.clone(),
             active_variable: active_variables.len() - 1,
-            reach_fwd: graph.var_post(variable, universe),
-            active_variables,
+            reach_fwd: graph.var_can_post(variable, universe),
+            active_variables: active_variables.to_vec(),
         }
     }
 
@@ -52,11 +52,12 @@ impl<'a> VarProcess<'a> {
         } else {
             if self.active_variable == 0 {
                 // We are done - reach_fwd now has all values reachable after jump.
-                let vertices_where_var_can_jump = self.graph.var_can_post(self.variable, &self.universe);
+                /*let vertices_where_var_can_jump = self.graph.var_can_post(self.variable, &self.universe);
                 let reachable_after_jump = self.reach_fwd.clone();
                 let can_jump_again = reachable_after_jump.intersect(&vertices_where_var_can_jump);
                 let will_never_jump_again = vertices_where_var_can_jump.minus(&can_jump_again);
-                Some(will_never_jump_again)
+                Some(will_never_jump_again)*/
+                Some(self.reach_fwd.clone())
             } else {
                 self.active_variable -= 1;
                 None
@@ -84,12 +85,53 @@ pub fn remove_effectively_constant_states_lockstep(
         Some(VarProcess::mk(graph, v, &universe, &variables))
     }).collect();
     let mut iter: usize = 0;
-    let mut i_p: usize = 0;
+    let mut i_p2: usize = 0;
+    let mut restart = false;
     loop {
+        let (i_p, _) = processes.iter().enumerate().min_by_key(|(_, p)| {
+            p.as_ref().map(|p| p.reach_fwd.as_bdd().size()).unwrap_or(usize::MAX)
+        }).unwrap();
         let will_never_jump_again = processes[i_p]
             .as_mut()
             .and_then(|p| p.make_step());
-        if let Some(will_never_jump_again) = will_never_jump_again {
+        if let Some(reach_fwd) = will_never_jump_again {
+            processes[i_p] = None;
+            let i_var = all_variables[i_p];
+            println!("Finished {}. Computing components.", i_p);
+            let components = reach_saturated_bwd_excluding(
+                graph,
+                &graph.var_can_post(i_var, &universe),
+                &reach_fwd,
+                &variables
+            );
+            let fwd_but_not_component = reach_fwd.minus(&components);
+            println!("Finished component - find backwards reachable.");
+            let can_reach_not_component = reach_saturated_bwd_excluding(
+                graph,
+                &fwd_but_not_component,
+                &universe,
+                &variables
+            );
+            let to_remove = can_reach_not_component.minus(&fwd_but_not_component);
+            println!("Remove: {}/{}", to_remove.approx_cardinality(), universe.approx_cardinality());
+            if !to_remove.is_empty() {
+                universe = universe.minus(&to_remove);
+                processes.iter_mut().for_each(|p| {
+                    if let Some(p) = p.as_mut() {
+                        p.restrict_universe(&to_remove);
+                    }
+                });
+            }
+
+            let is_constant = graph
+                .var_can_post(i_var, &universe).is_empty();
+            if is_constant {
+                // Constant variables are removed (and will never be restarted).
+                variables = variables.into_iter().filter(|it| *it != i_var).collect();
+                //if variables.len() == 1 { break; }  // TODO: this is a hack for models with a lot of constants
+            }
+        }
+        /*if let Some(will_never_jump_again) = will_never_jump_again {
             processes[i_p] = None;  // "Stop" current process.
             if will_never_jump_again.is_empty() {
                 // No more progress can be made for this variable at the moment.
@@ -101,8 +143,10 @@ pub fn remove_effectively_constant_states_lockstep(
                     variables = variables.into_iter().filter(|it| *it != variable).collect();
                     if variables.len() == 1 { break; }  // TODO: this is a hack for models with a lot of constants
                 }
-                println!("\n Variable {:?} is finished for now (constant {}; active vars {}).", i_p, is_constant, variables.len());
+                let remaining = processes.iter().filter(|it| it.is_some()).count();
+                println!("\n Variable {:?} is finished for now (constant {}; active vars {}, remaining {}).", i_p, is_constant, variables.len(), remaining);
             } else {
+                restart = true;
                 // We have eliminated some state space!
                 // Remove it from existing processes
                 println!(
@@ -117,7 +161,16 @@ pub fn remove_effectively_constant_states_lockstep(
                         p.restrict_universe(&will_never_jump_again);
                     }
                 });
+                processes[i_p] = Some(VarProcess::mk(graph, all_variables[i_p], &universe, &variables));
                 // Restart processes that are not constant - they may need to be recomputed
+
+            }
+        }*/
+
+        // Once everything is done, there should be no remaining process
+        if processes.iter().all(|it| it.is_none()) {
+            break;
+            /*if restart {
                 let mut total = 0;
                 for (j_p, p) in processes.iter_mut().enumerate() {
                     if p.is_none() && variables.contains(&all_variables[j_p]) {
@@ -126,17 +179,15 @@ pub fn remove_effectively_constant_states_lockstep(
                     }
                 }
                 println!("Restarted {}.", total);
-            }
-        }
-
-        // Once everything is done, there should be no remaining process
-        if processes.iter().all(|it| it.is_none()) {
-            break;
+                restart = false;
+            } else {
+                break;
+            }*/
         }
         // Move to next process...
-        i_p += 1;
-        if i_p == processes.len() {
-            i_p = 0;
+        i_p2 += 1;
+        if i_p2 == processes.len() {
+            i_p2 = 0;
             iter += 1;
             print!("|{}", iter);
             std::io::stdout().flush().unwrap();
@@ -152,7 +203,7 @@ pub fn remove_effectively_constant_states_lockstep(
         universe.clone().into_bdd().size()
     );
 
-    for v in &variables {
+    /*for v in &variables {
         let vertices_where_var_can_jump = graph.var_can_post(*v, &universe);
         let reachable_before_jump = reach_saturated_bwd_excluding(
             graph,
@@ -177,7 +228,7 @@ pub fn remove_effectively_constant_states_lockstep(
             can_reach_below.approx_cardinality()
         );
         universe = universe.minus(&can_reach_below);
-    }
+    }*/
 
     println!("Final active variables: {}", variables.len());
     println!(
