@@ -1,35 +1,39 @@
-use crate::scc::algo_effectively_constant::{reach_saturated_bwd_excluding, reach_saturated_fwd_excluding, remove_effectively_constant_states_lockstep};
+use crate::scc::algo_effectively_constant::{reach_saturated_bwd_excluding, reach_saturated_fwd_excluding};
 use crate::scc::ProgressTracker;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_std::param_graph::Params;
 use std::sync::atomic::AtomicBool;
+use crate::scc::algo_async::remove_effectively_constant_with_scheduler;
 
 pub fn components_2<F>(graph: &SymbolicAsyncGraph, on_component: F)
 where
     F: Fn(GraphColoredVertices) -> () + Send + Sync,
 {
-    let mut universe = graph.unit_vertices().clone();
+    let universe = graph.unit_vertices().clone();
 
-    let (constrained, variables) = remove_effectively_constant_states_lockstep(graph, universe);
-    universe = constrained.clone();
+    let (constrained, variables) = remove_effectively_constant_with_scheduler(graph, universe);
+    //panic!("SKIP!");
+    //universe = constrained.clone();
+    for mut universe in constrained {
+        println!("Pick universe...");
+        while !universe.is_empty() {
+            println!("Pick a new pivot branch... (Universe: {})", universe.approx_cardinality());
+            let pivot = universe.pick_vertex();
 
-    while !universe.is_empty() {
-        println!("Pick a new pivot branch... (Universe: {})", universe.approx_cardinality());
-        let pivot = universe.pick_vertex();
-
-        let bwd_pivot = reach_saturated_bwd_excluding(graph, &pivot, &universe, &variables);
-        let component_with_pivot =
-            reach_saturated_fwd_excluding(graph, &pivot, &bwd_pivot, &variables);
-        let after_component = graph
-            .post(&component_with_pivot)
-            .minus(&component_with_pivot);
-        let is_candidate = component_with_pivot
-            .colors()
-            .minus(&after_component.colors());
-        if !is_candidate.is_empty() {
-            on_component(component_with_pivot.intersect_colors(&is_candidate));
+            let bwd_pivot = reach_saturated_bwd_excluding(graph, &pivot, &universe, &variables);
+            let component_with_pivot =
+                reach_saturated_fwd_excluding(graph, &pivot, &bwd_pivot, &variables);
+            let after_component = graph
+                .post(&component_with_pivot)
+                .minus(&component_with_pivot);
+            let is_candidate = component_with_pivot
+                .colors()
+                .minus(&after_component.colors());
+            if !is_candidate.is_empty() {
+                on_component(component_with_pivot.intersect_colors(&is_candidate));
+            }
+            universe = universe.minus(&bwd_pivot);
         }
-        universe = universe.minus(&bwd_pivot);
     }
 }
 

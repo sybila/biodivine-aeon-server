@@ -42,9 +42,9 @@ for benchmark in benchmarks:
 			elapsed_times[bench_name] = time
 			csv.write(bench_name + ", " + str(time) + "\n")
 		else:
-			print("Failed: " + status)
-			elapsed_times[bench_name] = status
-			csv.write(bench_name + ", " + status + "\n")
+			print("Failed!")
+			elapsed_times[bench_name] = "Fail"
+			csv.write(bench_name + ", " + "Fail" + "\n")
 		csv.flush()
 
 print "FINISHED"

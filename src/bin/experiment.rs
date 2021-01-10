@@ -1,5 +1,5 @@
 use biodivine_aeon_server::scc::algo_symbolic_components::components_2;
-use biodivine_aeon_server::scc::{Classifier, ProgressTracker};
+use biodivine_aeon_server::scc::{Classifier, ProgressTracker, Behaviour};
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use std::convert::TryFrom;
@@ -41,9 +41,11 @@ fn main() {
         &graph,
         /*&progress, &AtomicBool::new(false), */
         |component| {
-            println!("Found attractor...");
+            println!("Found attractor... {}", component.approx_cardinality());
             println!("Remaining: {}", progress.get_percent_string());
-            classifier.add_component(component, &graph);
+            println!("Unique states: {}", component.vertices().approx_cardinality());
+            println!("Unique colors: {}", component.colors().approx_cardinality());
+            //classifier.add_component(component, &graph);
         },
     );
 
@@ -60,5 +62,32 @@ fn main() {
         "Analysis completed. Classes: {}",
         classifier.export_result().len()
     );
+
+    /*if graph.unit_colors().approx_cardinality() > 1.0 {
+        let mut done = false;
+        for (cls, colors) in classifier.export_result() {
+            if cls.get_vector().contains(&Behaviour::Disorder) {
+                done = true;
+                println!("=============================== WITNESS ===============================");
+                println!("{}", graph.pick_witness(&colors).to_string());
+            }
+        }
+        if !done {
+            for (cls, colors) in classifier.export_result() {
+                if cls.get_vector().contains(&Behaviour::Oscillation) {
+                    done = true;
+                    println!("=============================== WITNESS ===============================");
+                    println!("{}", graph.pick_witness(&colors).to_string());
+                }
+            }
+        }
+        if !done {
+            let (_, colors) = classifier.export_result().into_iter().max_by_key(|(c, _)| c.get_vector().len()).unwrap();
+            println!("=============================== WITNESS ===============================");
+            println!("{}", graph.pick_witness(&colors).to_string());
+        }
+    } else {
+        println!("ALREADY WITNESS.");
+    }*/
     println!("Elapsed time: {}s", (elapsed as f64) / 1000.0);
 }

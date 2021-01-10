@@ -8,7 +8,23 @@ struct VarProcess<'a> {
     active_variables: Vec<VariableId>,  // Variables used for reachability.
     active_variable: usize,             // Variable which will be used for next reachability step.
     universe: GraphColoredVertices,     // Total set of states that we need to explore.
-    reach_fwd: GraphColoredVertices     // So-far reached states.
+    reach_fwd: GraphColoredVertices,     // So-far reached states.
+    components: Option<GraphColoredVertices>,    // Once reach-fwd is done, this will contain the components
+    can_reach_not_component: Option<GraphColoredVertices>, // Last reachability procedure
+}
+
+impl<'a> VarProcess<'a> {
+
+    fn complexity(&self) -> usize {
+        if let Some(a) = self.can_reach_not_component.as_ref() {
+            a.as_bdd().size()
+        } else if let Some(b) = self.components.as_ref() {
+            b.as_bdd().size()
+        } else {
+            self.reach_fwd.as_bdd().size()
+        }
+    }
+
 }
 
 impl<'a> VarProcess<'a> {
@@ -33,46 +49,94 @@ impl<'a> VarProcess<'a> {
             active_variable: active_variables.len() - 1,
             reach_fwd: graph.var_can_post(variable, universe),
             active_variables: active_variables.to_vec(),
+            components: None,
+            can_reach_not_component: None
         }
     }
 
-    /// Makes one reachability step - if reachability is done, returns the set of vertices
-    /// that will never jump again.
     fn make_step(&mut self) -> Option<GraphColoredVertices> {
-        let step_var = self.active_variables[self.active_variable];
-        let post = self.graph
-            .var_post(step_var, &self.reach_fwd)
-            .intersect(&self.universe)
-            .minus(&self.reach_fwd);
+        if let Some(can_reach_not_component) = self.can_reach_not_component.as_mut() {
+            // Finally, this reachability computes the states that can reach the "lower" area of the graph
+            let step_var = self.active_variables[self.active_variable];
+            let pre = self.graph
+                .var_pre(step_var, can_reach_not_component)
+                .intersect(&self.universe)
+                .minus(can_reach_not_component);
 
-        if !post.is_empty() {
-            self.reach_fwd = self.reach_fwd.union(&post);
-            self.active_variable = self.active_variables.len() - 1;
+            if !pre.is_empty() {
+                *can_reach_not_component = can_reach_not_component.union(&pre);
+                self.active_variable = self.active_variables.len() - 1;
+            } else {
+                if self.active_variable == 0 {
+                    // We are done - now we can actually compute the vertices that
+                    let fwd_but_not_component = self.reach_fwd.minus(self.components.as_ref().unwrap());
+                    return Some(can_reach_not_component.minus(&fwd_but_not_component))
+                } else {
+                    self.active_variable -= 1;
+                }
+            }
+            None
+        } else if let Some(components) = self.components.as_mut() {
+            // This is reachability computes the actual SCCs that contain the pivot set
+            let step_var = self.active_variables[self.active_variable];
+            let pre = self.graph
+                .var_pre(step_var, components)
+                .intersect(&self.reach_fwd)
+                .minus(components);
+
+            if !pre.is_empty() {
+                *components = components.union(&pre);
+                self.active_variable = self.active_variables.len() - 1;
+            } else {
+                if self.active_variable == 0 {
+                    // We are done - components are now complete - we can identify border vertices and start bwd reachability
+                    let fwd_but_not_component = self.reach_fwd.minus(&components);
+                    self.can_reach_not_component = Some(fwd_but_not_component);
+                    self.active_variable = self.active_variables.len() - 1;
+                } else {
+                    self.active_variable -= 1;
+                }
+            }
             None
         } else {
-            if self.active_variable == 0 {
-                // We are done - reach_fwd now has all values reachable after jump.
-                /*let vertices_where_var_can_jump = self.graph.var_can_post(self.variable, &self.universe);
-                let reachable_after_jump = self.reach_fwd.clone();
-                let can_jump_again = reachable_after_jump.intersect(&vertices_where_var_can_jump);
-                let will_never_jump_again = vertices_where_var_can_jump.minus(&can_jump_again);
-                Some(will_never_jump_again)*/
-                Some(self.reach_fwd.clone())
+            // This is basic fwd reachability from vertices that can perform a jump in a specific variable
+            let step_var = self.active_variables[self.active_variable];
+            let post = self.graph
+                .var_post(step_var, &self.reach_fwd)
+                .intersect(&self.universe)
+                .minus(&self.reach_fwd);
+
+            if !post.is_empty() {
+                self.reach_fwd = self.reach_fwd.union(&post);
+                self.active_variable = self.active_variables.len() - 1;
             } else {
-                self.active_variable -= 1;
-                None
+                if self.active_variable == 0 {
+                    // We are done - reach_fwd now has all values reachable after jump.
+                    // We can start computing the actual components
+                    self.components = Some(self.graph.var_can_post(self.variable, &self.universe));
+                    self.active_variable = self.active_variables.len() - 1;
+                } else {
+                    self.active_variable -= 1;
+                }
             }
+            None
         }
     }
 
     fn restrict_universe(&mut self, to_remove: &GraphColoredVertices) {
         self.universe = self.universe.minus(to_remove);
         self.reach_fwd = self.reach_fwd.minus(to_remove);
+        if let Some(comp) = self.components.as_mut() {
+            *comp = comp.minus(to_remove);
+        }
+        if let Some(bwd) = self.can_reach_not_component.as_mut() {
+            *bwd = bwd.minus(to_remove);
+        }
     }
 
 }
 
-pub fn remove_effectively_constant_states_lockstep(
+pub fn _remove_effectively_constant_states_lockstep(
     graph: &SymbolicAsyncGraph,
     set: GraphColoredVertices
 ) -> (GraphColoredVertices, Vec<VariableId>) {
@@ -86,19 +150,19 @@ pub fn remove_effectively_constant_states_lockstep(
     }).collect();
     let mut iter: usize = 0;
     let mut i_p2: usize = 0;
-    let mut restart = false;
     loop {
         let (i_p, _) = processes.iter().enumerate().min_by_key(|(_, p)| {
-            p.as_ref().map(|p| p.reach_fwd.as_bdd().size()).unwrap_or(usize::MAX)
+            p.as_ref().map(|p| p.complexity()).unwrap_or(usize::MAX)
         }).unwrap();
         let will_never_jump_again = processes[i_p]
             .as_mut()
             .and_then(|p| p.make_step());
-        if let Some(reach_fwd) = will_never_jump_again {
+        if let Some(to_remove) = will_never_jump_again {
             processes[i_p] = None;
             let i_var = all_variables[i_p];
-            println!("Finished {}. Computing components.", i_p);
-            let components = reach_saturated_bwd_excluding(
+            let remaining = processes.iter().filter(|p| p.is_some()).count();
+            println!("Finished {}. Remaining {}.", i_p, remaining);
+            /*let components = reach_saturated_bwd_excluding(
                 graph,
                 &graph.var_can_post(i_var, &universe),
                 &reach_fwd,
@@ -112,7 +176,7 @@ pub fn remove_effectively_constant_states_lockstep(
                 &universe,
                 &variables
             );
-            let to_remove = can_reach_not_component.minus(&fwd_but_not_component);
+            let to_remove = can_reach_not_component.minus(&fwd_but_not_component);*/
             println!("Remove: {}/{}", to_remove.approx_cardinality(), universe.approx_cardinality());
             if !to_remove.is_empty() {
                 universe = universe.minus(&to_remove);
@@ -275,10 +339,10 @@ pub fn _old_remove_effectively_constant_states(
                 &universe,
                 &active_variables,
             );
-            let can_jump_again = reachable_after_jump.intersect(&vertices_where_var_can_jump);
-            let will_never_jump_again = vertices_where_var_can_jump.minus(&can_jump_again);
+            let will_never_jump_again = vertices_where_var_can_jump.minus(&reachable_after_jump);
             if !will_never_jump_again.is_empty() {
                 stop = false;
+                println!("({:?}) Will never jump again: {}", variable, will_never_jump_again.approx_cardinality());
                 let to_remove_for_var = reach_saturated_bwd_excluding(
                     graph,
                     &will_never_jump_again,
@@ -287,17 +351,18 @@ pub fn _old_remove_effectively_constant_states(
                 );
                 to_remove = to_remove.union(&to_remove_for_var);
                 //universe = universe.minus(&to_remove); THIS IS A BAD IDEA...
-                println!(
+                /*println!(
                     "{:?} will never jump again: {}",
                     variable,
                     will_never_jump_again.approx_cardinality()
-                );
-                println!(
+                );*/
+                println!("({:?}) To remove: {}", variable, to_remove_for_var.approx_cardinality());
+                /*println!(
                     "Eliminated {}/{} {:+e}%",
                     to_remove.approx_cardinality(),
                     universe.approx_cardinality(),
                     (to_remove.approx_cardinality() / universe.approx_cardinality()) * 100.0
-                );
+                );*/
             }
         }
         universe = universe.minus(&to_remove);
@@ -307,8 +372,9 @@ pub fn _old_remove_effectively_constant_states(
             .filter(|v| !graph.var_can_post(*v, &universe).is_empty())
             .collect();
         println!(
-            "Universe now has {} nodes. Eliminated {} variables.",
+            "Universe now has {} nodes and size {}. Eliminated {} variables.",
             universe.clone().into_bdd().size(),
+            universe.approx_cardinality(),
             original_vars - variables.len()
         );
     }
@@ -411,9 +477,9 @@ pub fn reach_saturated_bwd_excluding(
             .var_pre(variable, &result)
             .intersect(guard)
             .minus(&result);
-        result = result.union(&post);
 
         if !post.is_empty() {
+            result = result.union(&post);
             active_variable = last_variable;
         } else {
             if active_variable == 0 {
