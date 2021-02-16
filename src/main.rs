@@ -18,7 +18,7 @@ use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate};
 use regex::Regex;
 use std::convert::TryFrom;
 
-use biodivine_aeon_server::bdt::{AttributeId, BDTNodeId, BDT};
+use biodivine_aeon_server::bdt::{AttributeId, Bdt, BdtNodeId};
 use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
 use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
 use biodivine_aeon_server::util::index_type::IndexType;
@@ -68,7 +68,7 @@ impl Computation {
 lazy_static! {
     static ref COMPUTATION: Arc<RwLock<Option<Computation>>> = Arc::new(RwLock::new(None));
     static ref CHECK_UPDATE_FUNCTION_LOCK: Arc<RwLock<bool>> = Arc::new(RwLock::new(true));
-    static ref TREE: Arc<RwLock<Option<BDT>>> = Arc::new(RwLock::new(None));
+    static ref TREE: Arc<RwLock<Option<Bdt>>> = Arc::new(RwLock::new(None));
 }
 
 /// Decision tree API design:
@@ -100,19 +100,19 @@ lazy_static! {
 fn get_bifurcation_tree() -> BackendResponse {
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
-    return if let Some(tree) = &*tree {
+    if let Some(tree) = &*tree {
         BackendResponse::ok(&tree.to_json().to_string())
     } else {
         BackendResponse::err(&"No tree present. Run computation first.".to_string())
-    };
+    }
 }
 
 #[get("/get_attributes/<node_id>")]
 fn get_attributes(node_id: String) -> BackendResponse {
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
-    return if let Some(tree) = &*tree {
-        let node = BDTNodeId::try_from_str(&node_id, tree);
+    if let Some(tree) = &*tree {
+        let node = BdtNodeId::try_from_str(&node_id, tree);
         let node = if let Some(node) = node {
             node
         } else {
@@ -121,7 +121,7 @@ fn get_attributes(node_id: String) -> BackendResponse {
         BackendResponse::ok(&tree.attribute_gains_json(node).to_string())
     } else {
         BackendResponse::err(&"No tree present. Run computation first.".to_string())
-    };
+    }
 }
 
 #[post("/apply_attribute/<node_id>/<attribute_id>")]
@@ -129,7 +129,7 @@ fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
     let tree = TREE.clone();
     let mut tree = tree.write().unwrap();
     return if let Some(tree) = tree.as_mut() {
-        let node = BDTNodeId::try_from_str(&node_id, tree);
+        let node = BdtNodeId::try_from_str(&node_id, tree);
         let node = if let Some(node) = node {
             node
         } else {
@@ -161,7 +161,7 @@ fn revert_decision(node_id: String) -> BackendResponse {
     let tree = TREE.clone();
     let mut tree = tree.write().unwrap();
     return if let Some(tree) = tree.as_mut() {
-        let node = BDTNodeId::try_from_str(&node_id, tree);
+        let node = BdtNodeId::try_from_str(&node_id, tree);
         let node = if let Some(node) = node {
             node
         } else {
@@ -376,7 +376,7 @@ fn get_tree_witness(node_id: String) -> BackendResponse {
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
     return if let Some(tree) = &*tree {
-        let node = BDTNodeId::try_from_str(&node_id, tree);
+        let node = BdtNodeId::try_from_str(&node_id, tree);
         let node = if let Some(node) = node {
             node
         } else {
@@ -453,10 +453,10 @@ fn get_witness_network(colors: &GraphColors) -> BackendResponse {
             }
             BackendResponse::ok(&object! { "model" => model_string }.to_string())
         } else {
-            return BackendResponse::err(&"No results available.".to_string());
+            BackendResponse::err(&"No results available.".to_string())
         }
     } else {
-        return BackendResponse::err(&"No results available.".to_string());
+        BackendResponse::err(&"No results available.".to_string())
     }
 }
 
@@ -465,7 +465,7 @@ fn get_tree_attractors(node_id: String) -> BackendResponse {
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
     return if let Some(tree) = &*tree {
-        let node = BDTNodeId::try_from_str(&node_id, tree);
+        let node = BdtNodeId::try_from_str(&node_id, tree);
         let node = if let Some(value) = node {
             value
         } else {
@@ -539,11 +539,7 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                         .variables()
                         .map(|id| format!("\"{}\"", witness_network.get_variable_name(id)));
 
-                    let mut all_attractors: Vec<(
-                        Behaviour,
-                        Vec<(ArrayBitVector, ArrayBitVector)>,
-                        HashSet<usize>,
-                    )> = Vec::new();
+                    let mut all_attractors: Vec<(Behaviour, EdgeList, HashSet<usize>)> = Vec::new();
 
                     // Note that the choice of graph/witness_graph is not arbitrary.
                     // The attractor set is from the original graph, but source_set/target_set
@@ -610,7 +606,7 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                             }
                         }
 
-                        all_attractors.push((behaviour.clone(), attractor_graph, not_fixed_vars));
+                        all_attractors.push((*behaviour, attractor_graph, not_fixed_vars));
                     }
 
                     // now the data is stored in `all_attractors`, just convert it to json:
@@ -635,7 +631,7 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                                         result.push(if state.get(i) { '⊤' } else { '⊥' });
                                     }
                                 }
-                                return result;
+                                result
                             }
                             let from: String = state_to_binary(&edge.0, not_fixed);
                             let to: String = state_to_binary(&edge.1, not_fixed);
@@ -661,13 +657,13 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                     );
                     BackendResponse::ok(&(json + "}"))
                 } else {
-                    return BackendResponse::err(&"No results available.".to_string());
+                    BackendResponse::err(&"No results available.".to_string())
                 }
             } else {
-                return BackendResponse::err(&"No results available.".to_string());
+                BackendResponse::err(&"No results available.".to_string())
             }
         } else {
-            return BackendResponse::err(&"No results available.".to_string());
+            BackendResponse::err(&"No results available.".to_string())
         }
     }
 }
@@ -717,7 +713,7 @@ fn start_computation(data: Data) -> BackendResponse {
                         // stuff.
                         let cmp_thread = std::thread::spawn(move || {
                             let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-                            match SymbolicAsyncGraph::new(network.clone()) {
+                            match SymbolicAsyncGraph::new(network) {
                                 Ok(graph) => {
                                     // Now that we have graph, we can create classifier and progress
                                     // and save them into the computation.
@@ -780,7 +776,7 @@ fn start_computation(data: Data) -> BackendResponse {
                                         let result = classifier.export_result();
                                         let tree = TREE.clone();
                                         let mut tree = tree.write().unwrap();
-                                        *tree = Some(BDT::new_from_graph(result, &graph));
+                                        *tree = Some(Bdt::new_from_graph(result, &graph));
                                         println!("Saved decision tree");
                                     }
 

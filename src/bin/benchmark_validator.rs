@@ -107,7 +107,7 @@ fn main() {
                     }
                     let mut inputs = 0;
                     for v in model.variables() {
-                        if model.regulators(v).len() == 0 {
+                        if model.regulators(v).is_empty() {
                             inputs += 1;
                         }
                     }

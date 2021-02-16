@@ -1,9 +1,9 @@
-use crate::bdt::{BDTNode, BDTNodeId, BDT};
+use crate::bdt::{Bdt, BdtNode, BdtNodeId};
 use crate::util::functional::Functional;
 use std::io::Write;
 
 /// Export to .dot format.
-impl BDT {
+impl Bdt {
     /// Convert this tree to a .dot graph string.
     pub fn to_dot(&self) -> String {
         Vec::<u8>::new()
@@ -25,10 +25,10 @@ impl BDT {
     fn format_dot_recursive(
         &self,
         out: &mut dyn Write,
-        node: BDTNodeId,
+        node: BdtNodeId,
     ) -> Result<(), std::io::Error> {
         match &self[node] {
-            BDTNode::Leaf { class, params } => {
+            BdtNode::Leaf { class, params } => {
                 let class = format!("{}", class).replace("\"", "");
                 writeln!(
                     out,
@@ -38,7 +38,7 @@ impl BDT {
                     params.approx_cardinality()
                 )?;
             }
-            BDTNode::Unprocessed { classes } => {
+            BdtNode::Unprocessed { classes } => {
                 let classes: Vec<String> = classes
                     .iter()
                     .map(|(c, p)| format!("({},{})", c, p.approx_cardinality()).replace("\"", ""))
@@ -46,7 +46,7 @@ impl BDT {
                 let classes = format!("{:?}", classes).replace("\"", "");
                 writeln!(out, "{}[label=\"Unprocessed({})\"]", node, classes)?;
             }
-            BDTNode::Decision {
+            BdtNode::Decision {
                 attribute,
                 left,
                 right,

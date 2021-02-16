@@ -1,12 +1,12 @@
-use crate::bdt::{Attribute, BifurcationFunction, BDT};
+use crate::bdt::{Attribute, Bdt, BifurcationFunction};
 use crate::util::functional::Functional;
 use biodivine_lib_bdd::Bdd;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::{FnUpdate, VariableId};
 
-impl BDT {
-    pub fn new_from_graph(classes: BifurcationFunction, graph: &SymbolicAsyncGraph) -> BDT {
+impl Bdt {
+    pub fn new_from_graph(classes: BifurcationFunction, graph: &SymbolicAsyncGraph) -> Bdt {
         let mut attributes = Vec::new();
         attributes_for_network_inputs(graph, &mut attributes);
         attributes_for_constant_parameters(graph, &mut attributes);
@@ -25,7 +25,7 @@ impl BDT {
                 is_not_empty
             })
             .collect();
-        BDT::new(classes, attributes)
+        Bdt::new(classes, attributes)
     }
 }
 
@@ -38,7 +38,7 @@ fn attributes_for_network_inputs(graph: &SymbolicAsyncGraph, out: &mut Vec<Attri
         if is_input {
             let bdd = graph
                 .symbolic_context()
-                .mk_implicit_function_is_true(v, &vec![]);
+                .mk_implicit_function_is_true(v, &[]);
             out.push(Attribute {
                 name: graph.as_network().get_variable_name(v).clone(),
                 negative: graph.empty_colors().copy(bdd.not()),
@@ -55,7 +55,7 @@ fn attributes_for_constant_parameters(graph: &SymbolicAsyncGraph, out: &mut Vec<
             // Parameter is a constant
             let bdd = graph
                 .symbolic_context()
-                .mk_uninterpreted_function_is_true(p, &vec![]);
+                .mk_uninterpreted_function_is_true(p, &[]);
             out.push(Attribute {
                 name: graph.as_network()[p].get_name().clone(),
                 negative: graph.empty_colors().copy(bdd.not()),

@@ -27,15 +27,15 @@ type BifurcationFunction = HashMap<Class, GraphColors>;
 /// set of parametrisations), a decision node with a fixed attribute, or an unprocessed node
 /// with a remaining bifurcation function.
 #[derive(Clone)]
-pub enum BDTNode {
+pub enum BdtNode {
     Leaf {
         class: Class,
         params: GraphColors,
     },
     Decision {
         attribute: AttributeId,
-        left: BDTNodeId,
-        right: BDTNodeId,
+        left: BdtNodeId,
+        right: BdtNodeId,
         classes: BifurcationFunction,
     },
     Unprocessed {
@@ -49,7 +49,7 @@ pub enum BDTNode {
 /// I might want to delete a node - to avoid specifying a full path from root to the deleted node,
 /// I can use the ID which will automatically "jump" to the correct position in the tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BDTNodeId(usize);
+pub struct BdtNodeId(usize);
 
 /// An attribute id is used to identify a specific attribute used in a decision tree.
 ///
@@ -61,13 +61,13 @@ pub struct AttributeId(usize);
 /// A Bifurcation decision tree. It stores the BDT nodes, mapping IDs to actual structures.
 ///
 /// It is the owner of the tree memory, so every addition/deletion in the tree must happen here.
-pub struct BDT {
-    storage: HashMap<usize, BDTNode>,
+pub struct Bdt {
+    storage: HashMap<usize, BdtNode>,
     attributes: Vec<Attribute>,
     next_id: usize,
 }
 
-type BDTNodeIds<'a> = Map<Keys<'a, usize, BDTNode>, fn(&usize) -> BDTNodeId>;
+type BdtNodeIds<'a> = Map<Keys<'a, usize, BdtNode>, fn(&usize) -> BdtNodeId>;
 type AttributeIds<'a> = Map<Range<usize>, fn(usize) -> AttributeId>;
 
 /// Attribute is an abstract property of the boolean network that can be applied to partition
@@ -103,7 +103,7 @@ pub fn entropy(classes: &BifurcationFunction) -> f64 {
         let proportion = *c / total;
         result += -proportion * proportion.log2();
     }
-    return result;
+    result
 }
 
 /// Complete information gain from original and divided dataset cardinality.

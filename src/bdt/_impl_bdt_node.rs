@@ -1,28 +1,28 @@
-use crate::bdt::BDTNode;
+use crate::bdt::BdtNode;
 use crate::scc::Class;
 use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use std::collections::HashMap;
 
-impl BDTNode {
+impl BdtNode {
     /// Computes the cardinality of the parameter set covered by this tree node.
     pub fn approx_cardinality(&self) -> f64 {
         match self {
-            BDTNode::Leaf { params, .. } => params.approx_cardinality(),
-            BDTNode::Decision { classes, .. } => class_list_cardinality(classes),
-            BDTNode::Unprocessed { classes, .. } => class_list_cardinality(classes),
+            BdtNode::Leaf { params, .. } => params.approx_cardinality(),
+            BdtNode::Decision { classes, .. } => class_list_cardinality(classes),
+            BdtNode::Unprocessed { classes, .. } => class_list_cardinality(classes),
         }
     }
 
     pub fn is_leaf(&self) -> bool {
-        matches!(self, BDTNode::Leaf { .. })
+        matches!(self, BdtNode::Leaf { .. })
     }
 
     pub fn is_decision(&self) -> bool {
-        matches!(self, BDTNode::Decision { .. })
+        matches!(self, BdtNode::Decision { .. })
     }
 
     pub fn is_unprocessed(&self) -> bool {
-        matches!(self, BDTNode::Unprocessed { .. })
+        matches!(self, BdtNode::Unprocessed { .. })
     }
 }
 
