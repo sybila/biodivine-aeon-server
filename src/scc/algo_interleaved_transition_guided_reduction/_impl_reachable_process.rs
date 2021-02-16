@@ -39,6 +39,7 @@ impl Process for ReachableProcess {
                 }
             }
 
+            scheduler.get_context().progress.process_finished();
             scheduler.spawn(ExtendedComponentProcess::new(
                 self.variable,
                 fwd_set.clone(),

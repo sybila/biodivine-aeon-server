@@ -14,6 +14,7 @@ pub fn xie_beerel_attractors<F>(
 ) where
     F: Fn(GraphColoredVertices) -> () + Send + Sync,
 {
+    ctx.progress.set_process_count(1);
     let mut universe = universe.clone();
     while !universe.is_empty() {
         // Check cancellation and update remaining progress
@@ -60,4 +61,5 @@ pub fn xie_beerel_attractors<F>(
 
         universe = universe.minus(&pivot_basin);
     }
+    ctx.progress.set_process_count(0);
 }

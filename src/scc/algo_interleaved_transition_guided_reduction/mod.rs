@@ -8,6 +8,7 @@
 use crate::GraphTaskContext;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
+use std::convert::TryFrom;
 
 mod _impl_extended_component_process;
 mod _impl_fwd_bwd_process;
@@ -35,6 +36,8 @@ pub fn interleaved_transition_guided_reduction(
             scheduler.get_universe().clone(),
         ));
     }
+    let process_count = u32::try_from(graph.network().num_vars() * 2).unwrap();
+    ctx.progress.set_process_count(process_count); // * 2 because each will spawn one extra.
 
     while !scheduler.is_done() {
         scheduler.step(graph);

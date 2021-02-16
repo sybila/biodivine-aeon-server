@@ -46,6 +46,7 @@ impl Process for ExtendedComponentProcess {
                 scheduler.discard_variable(self.variable);
             }
 
+            scheduler.get_context().progress.process_finished();
             true
         } else {
             false
