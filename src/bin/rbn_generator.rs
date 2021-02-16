@@ -90,7 +90,10 @@ fn main() {
             let source = random.gen_range(0..V_COUNT);
             let target = random.gen_range(0..V_COUNT);
             if rg
-                .find_regulation(VariableId::from(source), VariableId::from(target))
+                .find_regulation(
+                    VariableId::try_from_usize(&rg, source).unwrap(),
+                    VariableId::try_from_usize(&rg, target).unwrap(),
+                )
                 .is_none()
             {
                 let monotonicity = if random.gen_bool(0.7) {

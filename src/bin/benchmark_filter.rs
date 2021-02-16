@@ -18,7 +18,7 @@ fn main() {
 
         let model_path = bench_dir.path().join("model.sbml");
         let model_string = std::fs::read_to_string(model_path).unwrap();
-        let (sbml_model, _) = BooleanNetwork::from_sbml(&model_string).unwrap();
+        let (sbml_model, _) = BooleanNetwork::try_from_sbml(&model_string).unwrap();
         let model = erase_regulation_bounds(&sbml_model);
 
         let bench_name = bench_dir.file_name().to_str().unwrap().to_string();

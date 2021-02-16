@@ -27,16 +27,16 @@ pub fn interleaved_transition_guided_reduction(
     graph: &SymbolicAsyncGraph,
     initial: GraphColoredVertices,
 ) -> (GraphColoredVertices, Vec<VariableId>) {
-    let variables = graph.network().variables().collect::<Vec<_>>();
+    let variables = graph.as_network().variables().collect::<Vec<_>>();
     let mut scheduler = Scheduler::new(ctx, initial, variables);
-    for variable in graph.network().variables() {
+    for variable in graph.as_network().variables() {
         scheduler.spawn(ReachableProcess::new(
             variable,
             graph,
             scheduler.get_universe().clone(),
         ));
     }
-    let process_count = u32::try_from(graph.network().num_vars() * 2).unwrap();
+    let process_count = u32::try_from(graph.as_network().num_vars() * 2).unwrap();
     ctx.progress.set_process_count(process_count); // * 2 because each will spawn one extra.
 
     while !scheduler.is_done() {

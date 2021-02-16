@@ -32,7 +32,7 @@ fn main() {
         } else {
             // Check that the sbml model is readable:
             let model_string = std::fs::read_to_string(sbml_model_path).unwrap();
-            let model = BooleanNetwork::from_sbml(&model_string);
+            let model = BooleanNetwork::try_from_sbml(&model_string);
             match model {
                 Err(err) => {
                     errors += 1;

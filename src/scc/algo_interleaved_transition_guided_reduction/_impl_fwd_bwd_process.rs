@@ -2,6 +2,7 @@ use crate::scc::algo_interleaved_transition_guided_reduction::{
     BwdProcess, FwdProcess, Process, Scheduler,
 };
 use crate::scc::algo_saturated_reachability::reachability_step;
+use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 
 impl BwdProcess {
