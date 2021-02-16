@@ -1,4 +1,4 @@
-use crate::scc::algo_itgr::{Process, Scheduler};
+use crate::scc::algo_interleaved_transition_guided_reduction::{Process, Scheduler};
 use crate::GraphTaskContext;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;

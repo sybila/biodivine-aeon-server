@@ -13,11 +13,14 @@ use rocket::http::{ContentType, Header};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
-use biodivine_aeon_server::scc::{Behaviour, Class, Classifier, ProgressTracker};
+use biodivine_aeon_server::scc::{Behaviour, Class, Classifier};
 use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate};
 use regex::Regex;
 use std::convert::TryFrom;
 
+use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
+use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
+use biodivine_aeon_server::GraphTaskContext;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
 use biodivine_lib_std::collections::bitvectors::{ArrayBitVector, BitVector};
 use rocket::config::Environment;
@@ -25,7 +28,6 @@ use rocket::{Config, Data};
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,11 +35,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Computation keeps all information
 struct Computation {
     timestamp: SystemTime,
-    is_cancelled: Arc<AtomicBool>, // indicate to the server that the computation should be cancelled
-    input_model: String,           // .aeon string representation of the model
+    input_model: String,    // .aeon string representation of the model
+    task: GraphTaskContext, // A task context which keeps track of progress and cancellation.
     graph: Option<Arc<SymbolicAsyncGraph>>, // Model graph - used to create witnesses
     classifier: Option<Arc<Classifier>>, // Classifier used to store the results of the computation
-    progress: Option<Arc<ProgressTracker>>, // Used to access progress of the computation
     thread: Option<JoinHandle<()>>, // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
     error: Option<String>,          // A string error from the computation
     finished_timestamp: Option<SystemTime>, // A timestamp when the computation was completed (if done)
@@ -149,10 +150,8 @@ fn ping() -> BackendResponse {
         let cmp = cmp.read().unwrap();
         if let Some(computation) = &*cmp {
             response["timestamp"] = (computation.start_timestamp() as u64).into();
-            response["is_cancelled"] = computation.is_cancelled.load(Ordering::SeqCst).into();
-            if let Some(progress) = &computation.progress {
-                response["progress"] = progress.get_percent_string().into();
-            }
+            response["is_cancelled"] = computation.task.is_cancelled().into();
+            response["progress"] = computation.task.get_percent_string().into();
             response["is_running"] = computation.thread.is_some().into();
             if let Some(error) = &computation.error {
                 response["error"] = error.clone().into();
@@ -512,16 +511,14 @@ fn start_computation(data: Data) -> BackendResponse {
                         }
                         let mut new_cmp = Computation {
                             timestamp: SystemTime::now(),
-                            is_cancelled: Arc::new(AtomicBool::new(false)),
+                            task: GraphTaskContext::new(),
                             input_model: aeon_string.clone(),
                             graph: None,
                             classifier: None,
-                            progress: None,
                             thread: None,
                             error: None,
                             finished_timestamp: None,
                         };
-                        let cancelled = new_cmp.is_cancelled.clone();
                         // Prepare thread - not that we have computation locked, so the thread
                         // will have to wait for us to end before writing down the graph and other
                         // stuff.
@@ -532,23 +529,49 @@ fn start_computation(data: Data) -> BackendResponse {
                                     // Now that we have graph, we can create classifier and progress
                                     // and save them into the computation.
                                     let classifier = Arc::new(Classifier::new(&graph));
-                                    let progress = Arc::new(ProgressTracker::new(&graph));
                                     let graph = Arc::new(graph);
                                     {
                                         if let Some(cmp) = cmp.write().unwrap().as_mut() {
                                             cmp.graph = Some(graph.clone());
-                                            cmp.progress = Some(progress.clone());
                                             cmp.classifier = Some(classifier.clone());
                                         } else {
                                             panic!("Cannot save graph. No computation found.")
                                         }
                                     }
 
-                                    // Now we can actually start the computation...
-                                    biodivine_aeon_server::scc::algo_symbolic_components::components(&graph, &progress, &*cancelled, |component| {
-                                        println!("Component {}", component.approx_cardinality());
-                                        classifier.add_component(component, &graph);
-                                    });
+                                    if let Some(cmp) = cmp.read().unwrap().as_ref() {
+                                        // TODO: Note that this holds the read-lock on computation
+                                        // for the  whole time, which is mostly ok because it can be
+                                        // cancelled without write-lock, but we should find a
+                                        // way to avoid this!
+                                        let task_context = &cmp.task;
+                                        task_context.restart(&graph);
+
+                                        // Now we can actually start the computation...
+
+                                        // First, perform ITGR reduction.
+                                        let (universe, active_variables) =
+                                            interleaved_transition_guided_reduction(
+                                                task_context,
+                                                &graph,
+                                                graph.mk_unit_vertices(),
+                                            );
+
+                                        // Then run Xie-Beerel to actually detect the components.
+                                        xie_beerel_attractors(
+                                            task_context,
+                                            &graph,
+                                            &universe,
+                                            &active_variables,
+                                            |component| {
+                                                println!(
+                                                    "Component {}",
+                                                    component.approx_cardinality()
+                                                );
+                                                classifier.add_component(component, &graph);
+                                            },
+                                        );
+                                    }
 
                                     {
                                         if let Some(cmp) = cmp.write().unwrap().as_mut() {
@@ -611,28 +634,28 @@ fn cancel_computation() -> BackendResponse {
                     &"Nothing to cancel. Computation already done.".to_string(),
                 );
             }
-            if cmp.is_cancelled.load(Ordering::SeqCst) {
+            if cmp.task.is_cancelled() {
                 return BackendResponse::err(&"Computation already cancelled.".to_string());
             }
         } else {
             return BackendResponse::err(&"No computation to cancel.".to_string());
         }
     }
-    let cmp = cmp.write().unwrap();
-    if let Some(cmp) = &*cmp {
+    let cmp = cmp.read().unwrap();
+    return if let Some(cmp) = &*cmp {
         if cmp.thread.is_none() {
             return BackendResponse::err(
                 &"Nothing to cancel. Computation already done.".to_string(),
             );
         }
-        if cmp.is_cancelled.swap(true, Ordering::SeqCst) == false {
-            return BackendResponse::ok(&"\"ok\"".to_string());
+        if cmp.task.cancel() {
+            BackendResponse::ok(&"\"ok\"".to_string())
         } else {
-            return BackendResponse::err(&"Computation already cancelled.".to_string());
+            BackendResponse::err(&"Computation already cancelled.".to_string())
         }
     } else {
-        return BackendResponse::err(&"No computation to cancel.".to_string());
-    }
+        BackendResponse::err(&"No computation to cancel.".to_string())
+    };
 }
 
 /// Accept an SBML (XML) file and try to parse it into a `BooleanNetwork`.

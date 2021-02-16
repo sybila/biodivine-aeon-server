@@ -1,4 +1,7 @@
-use crate::scc::algo_itgr::{BwdProcess, ExtendedComponentProcess, Process, Scheduler};
+use crate::scc::algo_interleaved_transition_guided_reduction::{
+    BwdProcess, ExtendedComponentProcess, Process, Scheduler,
+};
+use crate::scc::algo_saturated_reachability::reach_bwd;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
 
@@ -21,17 +24,18 @@ impl ExtendedComponentProcess {
 impl Process for ExtendedComponentProcess {
     fn step(&mut self, scheduler: &mut Scheduler, graph: &SymbolicAsyncGraph) -> bool {
         if self.bwd.step(scheduler, graph) {
-            let extended_component = &self.bwd.bwd;
+            let extended_component = self.bwd.get_reachable_set();
             let bottom = self.fwd_set.minus(extended_component);
 
             if !bottom.is_empty() {
-                let mut bwd = BwdProcess::new(bottom.clone(), scheduler.get_universe().clone());
-                while !bwd.step(scheduler, graph) {
-                    if scheduler.get_context().is_cancelled() {
-                        break;
-                    }
-                }
-                let basin_only = bwd.bwd.minus(&bottom);
+                let basin_only = reach_bwd(
+                    scheduler.get_context(),
+                    graph,
+                    &bottom,
+                    scheduler.get_universe(),
+                    scheduler.get_active_variables(),
+                )
+                .minus(&bottom);
                 if !basin_only.is_empty() {
                     scheduler.discard_vertices(&basin_only);
                 }

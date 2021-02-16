@@ -1,6 +1,7 @@
-use crate::scc::algo_itgr::{
-    BwdProcess, ExtendedComponentProcess, FwdProcess, Process, ReachableProcess, Scheduler,
+use crate::scc::algo_interleaved_transition_guided_reduction::{
+    ExtendedComponentProcess, FwdProcess, Process, ReachableProcess, Scheduler,
 };
+use crate::scc::algo_saturated_reachability::reach_bwd;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
 
@@ -25,13 +26,14 @@ impl Process for ReachableProcess {
 
             // If fwd set is not the whole universe, it probably has a basin.
             if fwd_set != scheduler.get_universe() {
-                let mut bwd = BwdProcess::new(fwd_set.clone(), scheduler.get_universe().clone());
-                while !bwd.step(scheduler, graph) {
-                    if scheduler.get_context().is_cancelled() {
-                        break;
-                    }
-                }
-                let basin_only = bwd.get_reachable_set().minus(fwd_set);
+                let basin_only = reach_bwd(
+                    scheduler.get_context(),
+                    graph,
+                    fwd_set,
+                    scheduler.get_universe(),
+                    scheduler.get_active_variables(),
+                )
+                .minus(fwd_set);
                 if !basin_only.is_empty() {
                     scheduler.discard_vertices(&basin_only);
                 }

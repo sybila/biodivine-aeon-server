@@ -5,11 +5,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 impl GraphTaskContext {
     /// Create a new task context.
-    pub fn new(graph: &SymbolicAsyncGraph) -> GraphTaskContext {
+    pub fn new() -> GraphTaskContext {
         GraphTaskContext {
             is_cancelled: AtomicBool::new(false),
-            progress: ProgressTracker::new(graph),
+            progress: ProgressTracker::new(),
         }
+    }
+
+    /// Re-initialize the task context with a fresh graph.
+    pub fn restart(&self, graph: &SymbolicAsyncGraph) {
+        self.progress.init_from_graph(graph);
+        self.is_cancelled.store(false, Ordering::SeqCst);
     }
 
     /// True if the task is cancelled.
@@ -18,13 +24,20 @@ impl GraphTaskContext {
     }
 
     /// Set the status of this task to cancelled.
-    pub fn cancel(&mut self) {
-        self.is_cancelled.store(true, Ordering::SeqCst);
+    ///
+    /// Return true if the computation was set to cancelled by this call, false if it was
+    /// cancelled previously.
+    pub fn cancel(&self) -> bool {
+        !self.is_cancelled.swap(true, Ordering::SeqCst)
     }
 
     /// Indicate that the given set still needs to be processed by the task.
     pub fn update_remaining(&self, remaining: &GraphColoredVertices) {
-        self.progress
-            .update_remaining(remaining.approx_cardinality());
+        self.progress.update_remaining(remaining);
+    }
+
+    /// Output a string which represent the percentage of remaining state space.
+    pub fn get_percent_string(&self) -> String {
+        self.progress.get_percent_string()
     }
 }

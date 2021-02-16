@@ -1,4 +1,5 @@
 use super::{Behaviour, Class};
+use std::cmp::Ordering;
 use std::fmt::{Display, Error, Formatter};
 
 impl Class {
@@ -33,5 +34,21 @@ impl Display for Class {
                 .map(|c| format!("{:?}", c))
                 .collect::<Vec<_>>()
         );
+    }
+}
+
+/// Classes actually have a special ordering - primarily, they are ordered by the
+/// number of behaviours, secondarily they are ordered by the actual behaviours.
+impl PartialOrd for Class {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        return if self.0.len() != other.0.len() {
+            self.0.len().partial_cmp(&other.0.len())
+        } else {
+            if self.0.len() == 0 {
+                Some(Ordering::Equal)
+            } else {
+                self.0.partial_cmp(&other.0)
+            }
+        };
     }
 }
