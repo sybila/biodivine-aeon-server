@@ -10,44 +10,44 @@ impl Classifier {
     pub fn new(graph: &SymbolicAsyncGraph) -> Classifier {
         let mut map: HashMap<Class, GraphColors> = HashMap::new();
         map.insert(Class::new_empty(), graph.unit_colors().clone());
-        return Classifier {
+        Classifier {
             classes: Mutex::new(map),
             attractors: Mutex::new(Vec::new()),
-        };
+        }
     }
 
     // Try to fetch the current number of discovered classes in a non-blocking manner
     pub fn try_get_num_classes(&self) -> Option<usize> {
-        return match self.classes.try_lock() {
+        match self.classes.try_lock() {
             Ok(data) => Some((*data).len()),
             _ => None,
-        };
+        }
     }
 
     // Try to obtain a copy of data in a non-blocking manner (useful if we want to check
     // results but the computation is still running).
     pub fn try_export_result(&self) -> Option<HashMap<Class, GraphColors>> {
-        return match self.classes.try_lock() {
+        match self.classes.try_lock() {
             Ok(data) => Some((*data).clone()),
             _ => None,
-        };
+        }
     }
 
     pub fn try_get_params(&self, class: &Class) -> Option<Option<GraphColors>> {
-        return match self.classes.try_lock() {
-            Ok(data) => Some((*data).get(class).map(|p| p.clone())),
+        match self.classes.try_lock() {
+            Ok(data) => Some((*data).get(class).cloned()),
             _ => None,
-        };
+        }
     }
 
     pub fn get_params(&self, class: &Class) -> Option<GraphColors> {
         let data = self.classes.lock().unwrap();
-        return (*data).get(class).map(|p| p.clone());
+        (*data).get(class).cloned()
     }
 
     pub fn export_result(&self) -> HashMap<Class, GraphColors> {
         let data = self.classes.lock().unwrap();
-        return (*data).clone();
+        (*data).clone()
     }
 
     /// Static function to classify just one component and immediately obtain results.
@@ -67,13 +67,13 @@ impl Classifier {
                 result.insert(class.0[0], colors);
             }
         }
-        return result;
+        result
     }
 
     /// Find attractor of the given witness colour. The argument set must be a singleton.
     pub fn attractors(&self, witness_colour: &GraphColors) -> Vec<(GraphVertices, Behaviour)> {
-        if witness_colour.approx_cardinality() != 1.0 {
-            eprintln!("WARNING: Computing attractor witnesses for non-singleton set. (This may be just a floating point error in large models).");
+        if witness_colour.as_bdd() != witness_colour.pick_singleton().as_bdd() {
+            eprintln!("WARNING: Computing attractor witnesses for non-singleton color set.");
         }
         let mut result = Vec::new();
         let attractors = self.attractors.lock().unwrap();
@@ -87,11 +87,10 @@ impl Classifier {
                 .iter()
                 .find(|(_, c)| witness_colour.is_subset(c))
                 .unwrap()
-                .0
-                .clone();
-            result.push((attractor_states, attractor_behaviour));
+                .0;
+            result.push((attractor_states, *attractor_behaviour));
         }
-        return result;
+        result
     }
 
     // TODO: Parallelism
@@ -136,7 +135,7 @@ impl Classifier {
 
     fn push(&self, behaviour: Behaviour, params: GraphColors) {
         let mut classes = self.classes.lock().unwrap();
-        let mut original_classes: Vec<Class> = (*classes).keys().map(|c| c.clone()).collect();
+        let mut original_classes: Vec<Class> = (*classes).keys().cloned().collect();
         original_classes.sort();
         original_classes.reverse(); // we need classes from largest to smallest
 
@@ -190,6 +189,6 @@ impl Classifier {
         if !is_sink.is_empty() {
             self.push(Behaviour::Stability, is_sink);
         }
-        return is_not_sink;
+        is_not_sink
     }
 }

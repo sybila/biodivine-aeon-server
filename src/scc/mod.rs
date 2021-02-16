@@ -19,7 +19,7 @@ pub enum Behaviour {
     Disorder,
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Class(Vec<Behaviour>);
 
 pub struct Classifier {

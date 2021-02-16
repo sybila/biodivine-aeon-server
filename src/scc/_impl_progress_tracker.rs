@@ -3,6 +3,12 @@ use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, Symboli
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
+impl Default for ProgressTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProgressTracker {
     /// Create a new uninitialized progress counter.
     pub fn new() -> ProgressTracker {
@@ -47,7 +53,7 @@ impl ProgressTracker {
     pub fn get_remaining_fraction(&self) -> f64 {
         let remaining = { *self.remaining.lock().unwrap() };
         let total = { *self.total.lock().unwrap() };
-        return remaining / total;
+        remaining / total
     }
 
     /// Return a `[0,1]` fraction of the remaining log-state-space. This metric better
@@ -55,7 +61,7 @@ impl ProgressTracker {
     pub fn get_remaining_log_fraction(&self) -> f64 {
         let remaining = { *self.remaining.lock().unwrap() };
         let total = { *self.total.lock().unwrap() };
-        return remaining.log2() / total.log2();
+        remaining.log2() / total.log2()
     }
 
     /// Output a string which represent the percentage of remaining state space.

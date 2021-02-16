@@ -12,7 +12,7 @@ pub fn xie_beerel_attractors<F>(
     active_variables: &[VariableId],
     on_component: F,
 ) where
-    F: Fn(GraphColoredVertices) -> () + Send + Sync,
+    F: Fn(GraphColoredVertices) + Send + Sync,
 {
     ctx.progress.set_process_count(1);
     let mut universe = universe.clone();

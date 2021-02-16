@@ -4,7 +4,7 @@ use std::fmt::{Display, Error, Formatter};
 
 impl Class {
     pub fn new_empty() -> Class {
-        return Class(Vec::new());
+        Class(Vec::new())
     }
 
     pub fn extend(&mut self, behaviour: Behaviour) {
@@ -16,7 +16,7 @@ impl Class {
         let mut vec = self.0.clone();
         vec.push(behaviour);
         vec.sort();
-        return Class(vec);
+        Class(vec)
     }
 
     pub fn get_vector(&self) -> Vec<Behaviour> {
@@ -26,29 +26,33 @@ impl Class {
 
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        return write!(
+        write!(
             f,
             "{:?}",
             self.0
                 .iter()
                 .map(|c| format!("{:?}", c))
                 .collect::<Vec<_>>()
-        );
+        )
+    }
+}
+
+impl PartialOrd for Class {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
 /// Classes actually have a special ordering - primarily, they are ordered by the
 /// number of behaviours, secondarily they are ordered by the actual behaviours.
-impl PartialOrd for Class {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        return if self.0.len() != other.0.len() {
-            self.0.len().partial_cmp(&other.0.len())
+impl Ord for Class {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.0.len() != other.0.len() {
+            self.0.len().cmp(&other.0.len())
+        } else if self.0.is_empty() {
+            Ordering::Equal
         } else {
-            if self.0.len() == 0 {
-                Some(Ordering::Equal)
-            } else {
-                self.0.partial_cmp(&other.0)
-            }
-        };
+            self.0.cmp(&other.0)
+        }
     }
 }

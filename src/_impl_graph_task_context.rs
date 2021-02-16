@@ -3,6 +3,12 @@ use crate::GraphTaskContext;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+impl Default for GraphTaskContext {
+    fn default() -> Self {
+        GraphTaskContext::new()
+    }
+}
+
 impl GraphTaskContext {
     /// Create a new task context.
     pub fn new() -> GraphTaskContext {

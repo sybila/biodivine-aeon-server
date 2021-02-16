@@ -52,7 +52,7 @@ fn erase_regulation_bounds(network: &BooleanNetwork) -> BooleanNetwork {
             .as_graph()
             .find_variable(network.get_variable_name(old_v))
             .unwrap();
-        let is_input = network.regulators(old_v).len() == 0;
+        let is_input = network.regulators(old_v).is_empty();
         if !is_input {
             if let Some(fn_update) = network.get_update_function(old_v).clone() {
                 bn.add_update_function(new_v, fn_update).unwrap();

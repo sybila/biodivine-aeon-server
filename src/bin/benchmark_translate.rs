@@ -28,7 +28,7 @@ fn main() {
 }
 
 fn network_to_bnet(network: &BooleanNetwork) -> String {
-    let mut model = format!("targets,factors\n");
+    let mut model = "targets,factors\n".to_string();
     for v in network.variables() {
         let v_id: usize = v.into();
         let line = format!(
@@ -47,9 +47,9 @@ fn fnupdate_to_bnet_string(fn_update: &FnUpdate) -> String {
         FnUpdate::Const(value) => {
             if *value {
                 // There is always v1
-                format!("v1 | !v1",)
+                "v1 | !v1".to_string()
             } else {
-                format!("v1 & !v1",)
+                "v1 & !v1".to_string()
             }
         }
         FnUpdate::Var(id) => {

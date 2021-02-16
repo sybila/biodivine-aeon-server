@@ -46,19 +46,18 @@ struct Computation {
 
 impl Computation {
     pub fn start_timestamp(&self) -> u128 {
-        return self
-            .timestamp
+        self.timestamp
             .duration_since(UNIX_EPOCH)
             .expect("Time error")
-            .as_millis();
+            .as_millis()
     }
 
     pub fn end_timestamp(&self) -> Option<u128> {
-        return self.finished_timestamp.map(|t| {
+        self.finished_timestamp.map(|t| {
             t.duration_since(UNIX_EPOCH)
                 .expect("Time error")
                 .as_millis()
-        });
+        })
     }
 }
 
@@ -68,7 +67,7 @@ lazy_static! {
 }
 
 fn max_parameter_cardinality(function: &FnUpdate) -> usize {
-    return match function {
+    match function {
         FnUpdate::Const(_) | FnUpdate::Var(_) => 0,
         FnUpdate::Param(_, args) => args.len(),
         FnUpdate::Not(inner) => max_parameter_cardinality(inner),
@@ -76,7 +75,7 @@ fn max_parameter_cardinality(function: &FnUpdate) -> usize {
             max_parameter_cardinality(left),
             max_parameter_cardinality(right),
         ),
-    };
+    }
 }
 
 /// Accept a partial model containing only the necessary regulations and one update function.
@@ -130,7 +129,7 @@ fn check_update_function(data: Data) -> BackendResponse {
     };
 }
 
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[get("/ping")]
 fn ping() -> BackendResponse {
@@ -165,7 +164,7 @@ fn ping() -> BackendResponse {
             }
         }
     }
-    return BackendResponse::ok(&response.to_string());
+    BackendResponse::ok(&response.to_string())
 }
 
 // Try to obtain current class data or none if classifier is busy
@@ -188,7 +187,7 @@ fn try_get_class_params(classifier: &Classifier, class: &Class) -> Option<Option
         // wait a little - maybe the lock will become free
         std::thread::sleep(Duration::new(1, 0));
     }
-    return None;
+    None
 }
 
 #[get("/get_results")]
@@ -242,8 +241,8 @@ fn get_results() -> BackendResponse {
     let elapsed = if let Some(e) = elapsed { e } else { 0 };
 
     let mut json = String::new();
-    for index in 0..lines.len() - 1 {
-        json += &format!("{},", lines[index]);
+    for line in lines.iter().take(lines.len() - 1) {
+        json += &format!("{},", line);
     }
     json = format!(
         "{{ \"isPartial\":{}, \"data\":[{}{}], \"elapsed\":{} }}",
@@ -253,7 +252,7 @@ fn get_results() -> BackendResponse {
         elapsed,
     );
 
-    return BackendResponse::ok(&json);
+    BackendResponse::ok(&json)
 }
 
 #[get("/get_witness/<class_str>")]
@@ -293,27 +292,27 @@ fn get_witness(class_str: String) -> BackendResponse {
                             }
                             BackendResponse::ok(&object! { "model" => model_string }.to_string())
                         } else {
-                            return BackendResponse::err(&"No results available.".to_string());
+                            BackendResponse::err(&"No results available.".to_string())
                         }
                     } else {
-                        return BackendResponse::err(
-                            &"Specified class has no witness.".to_string(),
-                        );
+                        BackendResponse::err(&"Specified class has no witness.".to_string())
                     }
                 } else {
-                    return BackendResponse::err(
+                    BackendResponse::err(
                         &"Classification in progress. Cannot extract witness right now."
                             .to_string(),
-                    );
+                    )
                 }
             } else {
-                return BackendResponse::err(&"No results available.".to_string());
+                BackendResponse::err(&"No results available.".to_string())
             }
         } else {
-            return BackendResponse::err(&"No results available.".to_string());
+            BackendResponse::err(&"No results available.".to_string())
         }
     }
 }
+
+type EdgeList = Vec<(ArrayBitVector, ArrayBitVector)>;
 
 #[get("/get_attractors/<class_str>")]
 fn get_attractors(class_str: String) -> BackendResponse {
@@ -347,11 +346,8 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                 .variables()
                                 .map(|id| format!("\"{}\"", witness_network.get_variable_name(id)));
 
-                            let mut all_attractors: Vec<(
-                                Behaviour,
-                                Vec<(ArrayBitVector, ArrayBitVector)>,
-                                HashSet<usize>,
-                            )> = Vec::new();
+                            let mut all_attractors: Vec<(Behaviour, EdgeList, HashSet<usize>)> =
+                                Vec::new();
 
                             // Note that the choice of graph/witness_graph is not arbitrary.
                             // The attractor set is from the original graph, but source_set/target_set
@@ -427,11 +423,7 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                     }
                                 }
 
-                                all_attractors.push((
-                                    behaviour.clone(),
-                                    attractor_graph,
-                                    not_fixed_vars,
-                                ));
+                                all_attractors.push((*behaviour, attractor_graph, not_fixed_vars));
                             }
 
                             // now the data is stored in `all_attractors`, just convert it to json:
@@ -462,7 +454,7 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                                 });
                                             }
                                         }
-                                        return result;
+                                        result
                                     }
                                     let from: String = state_to_binary(&edge.0, not_fixed);
                                     let to: String = state_to_binary(&edge.1, not_fixed);
@@ -488,24 +480,22 @@ fn get_attractors(class_str: String) -> BackendResponse {
                             );
                             BackendResponse::ok(&(json + "}"))
                         } else {
-                            return BackendResponse::err(&"No results available.".to_string());
+                            BackendResponse::err(&"No results available.".to_string())
                         }
                     } else {
-                        return BackendResponse::err(
-                            &"Specified class has no witness.".to_string(),
-                        );
+                        BackendResponse::err(&"Specified class has no witness.".to_string())
                     }
                 } else {
-                    return BackendResponse::err(
+                    BackendResponse::err(
                         &"Classification still in progress. Cannot explore attractors now."
                             .to_string(),
-                    );
+                    )
                 }
             } else {
-                return BackendResponse::err(&"No results available.".to_string());
+                BackendResponse::err(&"No results available.".to_string())
             }
         } else {
-            return BackendResponse::err(&"No results available.".to_string());
+            BackendResponse::err(&"No results available.".to_string())
         }
     }
 }
@@ -632,9 +622,8 @@ fn start_computation(data: Data) -> BackendResponse {
                                     cmp.thread = None;
                                 } else {
                                     panic!("Cannot finalize thread. No computation found.");
-                                }
+                                };
                             }
-                            return ();
                         });
                         new_cmp.thread = Some(cmp_thread);
 
@@ -673,7 +662,7 @@ fn cancel_computation() -> BackendResponse {
         }
     }
     let cmp = cmp.read().unwrap();
-    return if let Some(cmp) = &*cmp {
+    if let Some(cmp) = &*cmp {
         if cmp.thread.is_none() {
             return BackendResponse::err(
                 &"Nothing to cancel. Computation already done.".to_string(),
@@ -686,7 +675,7 @@ fn cancel_computation() -> BackendResponse {
         }
     } else {
         BackendResponse::err(&"No computation to cancel.".to_string())
-    };
+    }
 }
 
 /// Accept an SBML (XML) file and try to parse it into a `BooleanNetwork`.
@@ -696,7 +685,7 @@ fn cancel_computation() -> BackendResponse {
 fn sbml_to_aeon(data: Data) -> BackendResponse {
     let mut stream = data.open().take(10_000_000); // limit model to 10MB
     let mut sbml_string = String::new();
-    return match stream.read_to_string(&mut sbml_string) {
+    match stream.read_to_string(&mut sbml_string) {
         Ok(_) => {
             match BooleanNetwork::from_sbml(&sbml_string) {
                 Ok((model, layout)) => {
@@ -711,7 +700,7 @@ fn sbml_to_aeon(data: Data) -> BackendResponse {
             }
         }
         Err(error) => BackendResponse::err(&format!("{}", error)),
-    };
+    }
 }
 
 /// Try to read the model layout metadata from the given aeon file.
@@ -729,7 +718,7 @@ fn read_layout(aeon_string: &str) -> HashMap<String, (f64, f64)> {
             layout.insert(var, (x, y));
         }
     }
-    return layout;
+    layout
 }
 
 fn read_metadata(aeon_string: &str) -> (Option<String>, Option<String>) {
@@ -745,7 +734,7 @@ fn read_metadata(aeon_string: &str) -> (Option<String>, Option<String>) {
             model_description = Some(captures["desc"].to_string());
         }
     }
-    return (model_name, model_description);
+    (model_name, model_description)
 }
 
 /// Accept an Aeon file, try to parse it into a `BooleanNetwork`
@@ -755,7 +744,7 @@ fn read_metadata(aeon_string: &str) -> (Option<String>, Option<String>) {
 fn aeon_to_sbml(data: Data) -> BackendResponse {
     let mut stream = data.open().take(10_000_000); // limit model to 10MB
     let mut aeon_string = String::new();
-    return match stream.read_to_string(&mut aeon_string) {
+    match stream.read_to_string(&mut aeon_string) {
         Ok(_) => match BooleanNetwork::try_from(aeon_string.as_str()) {
             Ok(network) => {
                 let layout = read_layout(&aeon_string);
@@ -765,7 +754,7 @@ fn aeon_to_sbml(data: Data) -> BackendResponse {
             Err(error) => BackendResponse::err(&error),
         },
         Err(error) => BackendResponse::err(&format!("{}", error)),
-    };
+    }
 }
 
 /// Accept an Aeon file and create an SBML version with all parameters instantiated (a witness model).
@@ -777,9 +766,7 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
     let mut aeon_string = String::new();
     return match stream.read_to_string(&mut aeon_string) {
         Ok(_) => {
-            match BooleanNetwork::try_from(aeon_string.as_str())
-                .and_then(|bn| SymbolicAsyncGraph::new(bn))
-            {
+            match BooleanNetwork::try_from(aeon_string.as_str()).and_then(SymbolicAsyncGraph::new) {
                 Ok(graph) => {
                     let witness = graph.pick_witness(graph.unit_colors());
                     let layout = read_layout(&aeon_string);
@@ -796,7 +783,7 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
 
 fn main() {
     //test_main::run();
-    let address = std::env::var("AEON_ADDR").unwrap_or("localhost".to_string());
+    let address = std::env::var("AEON_ADDR").unwrap_or_else(|_| "localhost".to_string());
     let port: u16 = std::env::var("AEON_PORT")
         .ok()
         .and_then(|s| s.parse::<u16>().ok())
@@ -830,20 +817,20 @@ struct BackendResponse {
 }
 
 impl BackendResponse {
-    fn ok(message: &String) -> Self {
-        return BackendResponse {
+    fn ok(message: &str) -> Self {
+        BackendResponse {
             message: format!("{{ \"status\": true, \"result\": {} }}", message),
-        };
+        }
     }
 
-    fn err(message: &String) -> Self {
-        return BackendResponse {
+    fn err(message: &str) -> Self {
+        BackendResponse {
             message: object! {
             "status" => false,
-            "message" => message.replace("\n", "<br>").clone(),
+            "message" => message.replace("\n", "<br>"),
             }
             .to_string(),
-        };
+        }
     }
 }
 

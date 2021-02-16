@@ -23,7 +23,7 @@ fn main() {
         let mut remaining_regs = 0;
         // Each variable must have in/out-degree at least one...
         for source in rg.variables() {
-            if rg.regulators(source).len() > 0 || rg.targets(source).len() > 0 {
+            if !rg.regulators(source).is_empty() || !rg.targets(source).is_empty() {
                 continue;
             }
             let source: usize = source.into();

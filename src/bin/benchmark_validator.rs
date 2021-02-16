@@ -121,7 +121,9 @@ fn main() {
                         let graph = SymbolicAsyncGraph::new(model);
                         match graph {
                             Ok(graph) => {
-                                if graph.unit_colors().approx_cardinality() != 1.0 {
+                                if graph.unit_colors().as_bdd()
+                                    != graph.unit_colors().pick_singleton().as_bdd()
+                                {
                                     errors += 1;
                                     eprintln!(
                                         "ERROR: Default model has {} colors in {}.",
