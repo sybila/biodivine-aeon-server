@@ -1,5 +1,8 @@
 name: build
 on: [push]
+
+## At the moment, everything is running on nightly. Once Rocket 0.5 is out, stable/beta can be enabled.
+
 jobs:
   # Check formatting
   fmt:
@@ -12,7 +15,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
       - run: rustup component add rustfmt
       - uses: actions-rs/cargo@v1
@@ -33,49 +36,49 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
       - uses: actions-rs/cargo@v1
         with:
           command: check
 
   # Run all tests
-  test:
-    needs: check
-    name: Test Suite
-    runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: "-D warnings"
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features "shields_up"
+  #test:
+  #  needs: check
+  #  name: Test Suite
+  #  runs-on: ubuntu-latest
+  #  env:
+  #    RUSTFLAGS: "-D warnings"
+  #  steps:
+  #    - uses: actions/checkout@v2
+  #    - uses: actions-rs/toolchain@v1
+  #      with:
+  #        profile: minimal
+  #        toolchain: stable
+  #        override: true
+  #    - uses: actions-rs/cargo@v1
+  #      with:
+  #        command: test
+  #        args: --features "shields_up"
 
   # Run all tests, but with beta
-  test-beta:
-    needs: check
-    name: Test Suite (Beta)
-    runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: "-D warnings"
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: beta
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features "shields_up"
+  #test-beta:
+  #  needs: check
+  #  name: Test Suite (Beta)
+  #  runs-on: ubuntu-latest
+  #  env:
+  #    RUSTFLAGS: "-D warnings"
+  #  steps:
+  #    - uses: actions/checkout@v2
+  #    - uses: actions-rs/toolchain@v1
+  #      with:
+  #        profile: minimal
+  #        toolchain: beta
+  #        override: true
+  #    - uses: actions-rs/cargo@v1
+  #      with:
+  #        command: test
+  #        args: --features "shields_up"
 
   # Run all tests, but with nightly
   test-nightly:
@@ -108,7 +111,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
       - run: rustup component add clippy
       - uses: actions-rs/cargo@v1
