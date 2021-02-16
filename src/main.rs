@@ -357,15 +357,13 @@ fn get_attractors(class_str: String) -> BackendResponse {
                             // The attractor set is from the original graph, but source_set/target_set
                             // are based on the witness_graph. This means they have different number
                             // of BDD variables inside!
+                            let mut has_large_attractors = false;
                             for (attractor, behaviour) in witness_attractors.iter() {
                                 println!(
                                     "Attractor {:?} state count: {}",
                                     behaviour,
                                     attractor.approx_cardinality()
                                 );
-                                if attractor.approx_cardinality() >= 2_000.0 {
-                                    return BackendResponse::err(&format!("Attractor has {} states. Visualisation size limit exceeded.", attractor.approx_cardinality()));
-                                }
                                 let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> =
                                     Vec::new();
                                 let mut not_fixed_vars: HashSet<usize> = HashSet::new();
@@ -379,6 +377,38 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                         // In sink, we mark everything as "not-fixed" because we want to just display it normally.
                                         not_fixed_vars.insert(i);
                                     }
+                                } else if attractor.approx_cardinality() >= 1_000.0 {
+                                    has_large_attractors = true;
+                                    // For large attractors, only show fixed values.
+                                    let mut state_0 =
+                                        ArrayBitVector::from(vec![
+                                            false;
+                                            graph.network().num_vars()
+                                        ]);
+                                    let mut state_1 =
+                                        ArrayBitVector::from(vec![
+                                            true;
+                                            graph.network().num_vars()
+                                        ]);
+                                    for var in graph.network().variables() {
+                                        let var_true = witness_graph
+                                            .fix_network_variable(var, true)
+                                            .vertices();
+                                        let var_false = witness_graph
+                                            .fix_network_variable(var, false)
+                                            .vertices();
+                                        let always_one = attractor.intersect(&var_false).is_empty();
+                                        let always_zero = attractor.intersect(&var_true).is_empty();
+                                        if always_one {
+                                            state_0.set(var.into(), true);
+                                        } else if always_zero {
+                                            state_1.set(var.into(), false);
+                                        } else {
+                                            not_fixed_vars.insert(var.into());
+                                        }
+                                    }
+                                    attractor_graph.push((state_0.clone(), state_1.clone()));
+                                    attractor_graph.push((state_1, state_0));
                                 } else {
                                     for source in attractor.materialize().iter() {
                                         let source_set = witness_graph.vertex(&source);
@@ -452,8 +482,9 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                 json += var.as_str();
                             }
                             json += &format!(
-                                "], \"model\":{}",
-                                &object! { "model" => witness_str }.to_string()
+                                "], \"model\":{}, \"has_large_attractors\": {}",
+                                &object! { "model" => witness_str }.to_string(),
+                                has_large_attractors
                             );
                             BackendResponse::ok(&(json + "}"))
                         } else {
