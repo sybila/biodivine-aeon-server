@@ -1,16 +1,18 @@
-use crate::scc::algo_async::{FindExtendedComponent, GraphScheduler, BwdProcess, Process, DiscardBottomBasin};
+use crate::scc::algo_async::{
+    BwdProcess, DiscardBottomBasin, FindExtendedComponent, GraphScheduler, Process,
+};
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 
 impl FindExtendedComponent {
-    pub fn mk(pivots: GraphColoredVertices, fwd_set: GraphColoredVertices, scheduler: &GraphScheduler) -> FindExtendedComponent {
+    pub fn mk(
+        pivots: GraphColoredVertices,
+        fwd_set: GraphColoredVertices,
+        scheduler: &GraphScheduler,
+    ) -> FindExtendedComponent {
         FindExtendedComponent {
             name: format!("FindExtendedComponent({})", fwd_set.approx_cardinality()),
             fwd_set: fwd_set.clone(),
-            bwd: BwdProcess::mk(
-                pivots,
-                fwd_set,
-                scheduler.get_active_variables().clone()
-            ),
+            bwd: BwdProcess::mk(pivots, fwd_set, scheduler.get_active_variables().clone()),
         }
     }
 }

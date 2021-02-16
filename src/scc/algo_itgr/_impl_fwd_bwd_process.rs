@@ -1,13 +1,17 @@
-use crate::scc::algo_itgr::{Process, BwdProcess, Scheduler, FwdProcess};
-use biodivine_lib_param_bn::symbolic_async_graph::{SymbolicAsyncGraph, GraphColoredVertices};
+use crate::scc::algo_itgr::{BwdProcess, FwdProcess, Process, Scheduler};
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
 
 impl BwdProcess {
     pub fn new(initial: GraphColoredVertices, universe: GraphColoredVertices) -> BwdProcess {
         BwdProcess {
             universe,
-            bwd: initial
+            bwd: initial,
         }
+    }
+
+    pub fn get_reachable_set(&self) -> &GraphColoredVertices {
+        &self.bwd
     }
 }
 
@@ -15,8 +19,12 @@ impl FwdProcess {
     pub fn new(initial: GraphColoredVertices, universe: GraphColoredVertices) -> FwdProcess {
         FwdProcess {
             universe,
-            fwd: initial
+            fwd: initial,
         }
+    }
+
+    pub fn get_reachable_set(&self) -> &GraphColoredVertices {
+        &self.fwd
     }
 }
 
@@ -26,15 +34,14 @@ fn reach<F>(
     universe: &GraphColoredVertices,
     step: F,
 ) -> bool
-    where
-        F: Fn(VariableId, &GraphColoredVertices) -> GraphColoredVertices {
+where
+    F: Fn(VariableId, &GraphColoredVertices) -> GraphColoredVertices,
+{
     if variables.is_empty() {
         return true;
     }
     for var in variables.iter().rev() {
-        let stepped = step(*var, set)
-            .minus(set)
-            .intersect(universe);
+        let stepped = step(*var, set).minus(set).intersect(universe);
 
         if !stepped.is_empty() {
             *set = set.union(&stepped);
@@ -46,8 +53,11 @@ fn reach<F>(
 
 impl Process for BwdProcess {
     fn step(&mut self, scheduler: &mut Scheduler, graph: &SymbolicAsyncGraph) -> bool {
-        reach(scheduler.get_active_variables(),&mut self.bwd, &self.universe,
-              |var, set| graph.var_pre(var, set)
+        reach(
+            scheduler.get_active_variables(),
+            &mut self.bwd,
+            &self.universe,
+            |var, set| graph.var_pre(var, set),
         )
     }
 
@@ -63,8 +73,11 @@ impl Process for BwdProcess {
 
 impl Process for FwdProcess {
     fn step(&mut self, scheduler: &mut Scheduler, graph: &SymbolicAsyncGraph) -> bool {
-        reach(scheduler.get_active_variables(), &mut self.fwd, &self.universe,
-            |var, set| graph.var_post(var, set)
+        reach(
+            scheduler.get_active_variables(),
+            &mut self.fwd,
+            &self.universe,
+            |var, set| graph.var_post(var, set),
         )
     }
 

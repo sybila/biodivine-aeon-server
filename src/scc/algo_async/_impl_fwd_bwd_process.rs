@@ -1,10 +1,13 @@
-use crate::scc::algo_async::{FwdProcess, BwdProcess, GraphScheduler, Process};
+use crate::scc::algo_async::{BwdProcess, FwdProcess, GraphScheduler, Process};
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
 
 impl FwdProcess {
-
-    pub fn mk(initial: GraphColoredVertices, in_universe: GraphColoredVertices, variables: &[VariableId]) -> FwdProcess {
+    pub fn mk(
+        initial: GraphColoredVertices,
+        in_universe: GraphColoredVertices,
+        variables: &[VariableId],
+    ) -> FwdProcess {
         if variables.is_empty() {
             panic!("Cannot compute reachability with no variables.");
         }
@@ -23,8 +26,11 @@ impl FwdProcess {
 }
 
 impl BwdProcess {
-
-    pub fn mk(initial: GraphColoredVertices, in_universe: GraphColoredVertices, variables: &[VariableId]) -> BwdProcess {
+    pub fn mk(
+        initial: GraphColoredVertices,
+        in_universe: GraphColoredVertices,
+        variables: &[VariableId],
+    ) -> BwdProcess {
         if variables.is_empty() {
             panic!("Cannot compute reachability with no variables.");
         }
@@ -43,7 +49,6 @@ impl BwdProcess {
 }
 
 impl Process for FwdProcess {
-
     fn step(&mut self, _: &mut GraphScheduler, graph: &SymbolicAsyncGraph) -> bool {
         let step_var = self.variables[self.active_variable];
         let post = graph
@@ -77,11 +82,9 @@ impl Process for FwdProcess {
     fn name(&self) -> &str {
         &self.name
     }
-
 }
 
 impl Process for BwdProcess {
-
     fn step(&mut self, _: &mut GraphScheduler, graph: &SymbolicAsyncGraph) -> bool {
         let step_var = self.variables[self.active_variable];
         let pre = graph
@@ -115,5 +118,4 @@ impl Process for BwdProcess {
     fn name(&self) -> &str {
         &self.name
     }
-
 }

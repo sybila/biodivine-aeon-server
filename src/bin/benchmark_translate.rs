@@ -1,4 +1,4 @@
-use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate, BinaryOp};
+use biodivine_lib_param_bn::{BinaryOp, BooleanNetwork, FnUpdate};
 use std::convert::TryFrom;
 
 fn main() {
@@ -13,22 +13,29 @@ fn main() {
         let bench_name = bench_dir.file_name().to_str().unwrap().to_string();
         let model_path = bench_dir.path();
         let model_string = std::fs::read_to_string(model_path);
-        if model_string.is_err() { continue; }
+        if model_string.is_err() {
+            continue;
+        }
         let model_string = model_string.unwrap();
         let r = BooleanNetwork::try_from(model_string.as_str());
-        if r.is_err() { continue; }
+        if r.is_err() {
+            continue;
+        }
         let model = r.unwrap();
         let bnet_file = bnet_benchmarks.join(&format!("{}.bnet", bench_name));
         std::fs::write(bnet_file, network_to_bnet(&model)).unwrap();
     }
 }
 
-
 fn network_to_bnet(network: &BooleanNetwork) -> String {
     let mut model = format!("targets,factors\n");
     for v in network.variables() {
         let v_id: usize = v.into();
-        let line = format!("v{}, {}\n", v_id, fnupdate_to_bnet_string(network.get_update_function(v).as_ref().unwrap()));
+        let line = format!(
+            "v{}, {}\n",
+            v_id,
+            fnupdate_to_bnet_string(network.get_update_function(v).as_ref().unwrap())
+        );
         model.push_str(&line);
     }
     model
@@ -38,7 +45,8 @@ fn fnupdate_to_bnet_string(fn_update: &FnUpdate) -> String {
     match fn_update {
         FnUpdate::Param(_, _) => panic!("Parameters not allowed."),
         FnUpdate::Const(value) => {
-            if *value {  // There is always v1
+            if *value {
+                // There is always v1
                 format!("v1 | !v1",)
             } else {
                 format!("v1 & !v1",)
@@ -61,4 +69,3 @@ fn fnupdate_to_bnet_string(fn_update: &FnUpdate) -> String {
         }
     }
 }
-

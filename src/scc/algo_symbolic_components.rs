@@ -1,9 +1,11 @@
-use crate::scc::algo_effectively_constant::{reach_saturated_bwd_excluding, reach_saturated_fwd_excluding};
+use crate::scc::algo_async::remove_effectively_constant_with_scheduler;
+use crate::scc::algo_effectively_constant::{
+    reach_saturated_bwd_excluding, reach_saturated_fwd_excluding,
+};
 use crate::scc::ProgressTracker;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_std::param_graph::Params;
 use std::sync::atomic::AtomicBool;
-use crate::scc::algo_async::remove_effectively_constant_with_scheduler;
 
 pub fn components_2<F>(graph: &SymbolicAsyncGraph, on_component: F)
 where
@@ -17,7 +19,10 @@ where
     for mut universe in constrained {
         println!("Pick universe...");
         while !universe.is_empty() {
-            println!("Pick a new pivot branch... (Universe: {})", universe.approx_cardinality());
+            println!(
+                "Pick a new pivot branch... (Universe: {})",
+                universe.approx_cardinality()
+            );
             let pivot = universe.pick_vertex();
 
             let bwd_pivot = reach_saturated_bwd_excluding(graph, &pivot, &universe, &variables);

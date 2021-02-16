@@ -1,13 +1,19 @@
-use crate::scc::algo_async::{GraphScheduler, FwdProcess, Process, DiscardNeverFiresAgain, ReachAfterVarFired};
+use crate::scc::algo_async::{
+    DiscardNeverFiresAgain, FwdProcess, GraphScheduler, Process, ReachAfterVarFired,
+};
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
-use biodivine_lib_param_bn::symbolic_async_graph::{SymbolicAsyncGraph, GraphColoredVertices};
 
 impl ReachAfterVarFired {
     pub fn name_tmp(variable: VariableId) -> String {
         format!("ReachAfterVarFired({})", variable)
     }
 
-    pub fn mk(variable: VariableId, scheduler: &GraphScheduler, graph: &SymbolicAsyncGraph) -> ReachAfterVarFired {
+    pub fn mk(
+        variable: VariableId,
+        scheduler: &GraphScheduler,
+        graph: &SymbolicAsyncGraph,
+    ) -> ReachAfterVarFired {
         let var_can_fire = graph.var_can_post(variable, scheduler.get_universe());
         let var_fired = graph.var_post(variable, &var_can_fire);
         ReachAfterVarFired {
@@ -18,8 +24,8 @@ impl ReachAfterVarFired {
                 //var_can_fire,
                 scheduler.get_universe().clone(),
                 //graph.mk_unit_vertices(),
-                scheduler.get_active_variables()
-            )
+                scheduler.get_active_variables(),
+            ),
         }
     }
 }
@@ -35,7 +41,8 @@ impl Process for ReachAfterVarFired {
             //scheduler.spawn(Box::new(FindExtendedComponent::mk(var_can_fire, reach_after_var_fired.clone(), scheduler)));
             if !never_fires_again.is_empty() {
                 //scheduler.spawn(Box::new(DiscardNeverFiresAgain::mk(self.variable, never_fires_again, scheduler)));
-                let mut process = DiscardNeverFiresAgain::mk(self.variable, never_fires_again, scheduler);
+                let mut process =
+                    DiscardNeverFiresAgain::mk(self.variable, never_fires_again, scheduler);
                 while !process.step(scheduler, graph) {}
             }
             true

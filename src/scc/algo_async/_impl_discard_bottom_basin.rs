@@ -1,22 +1,24 @@
-use crate::scc::algo_async::{DiscardBottomBasin, GraphScheduler, BwdProcess, Process};
+use crate::scc::algo_async::{BwdProcess, DiscardBottomBasin, GraphScheduler, Process};
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 
 impl DiscardBottomBasin {
-    pub fn mk(bottom_region: GraphColoredVertices, scheduler: &GraphScheduler) -> DiscardBottomBasin {
+    pub fn mk(
+        bottom_region: GraphColoredVertices,
+        scheduler: &GraphScheduler,
+    ) -> DiscardBottomBasin {
         DiscardBottomBasin {
             name: format!("DiscardBottomBasin({})", bottom_region.approx_cardinality()),
             bottom_region: bottom_region.clone(),
             bwd: BwdProcess::mk(
                 bottom_region,
                 scheduler.get_universe().clone(),
-                scheduler.get_active_variables()
+                scheduler.get_active_variables(),
             ),
         }
     }
 }
 
 impl Process for DiscardBottomBasin {
-
     fn step(&mut self, scheduler: &mut GraphScheduler, graph: &SymbolicAsyncGraph) -> bool {
         if self.bwd.step(scheduler, graph) {
             let bottom_basin = self.bwd.get_reach_set();

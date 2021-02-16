@@ -1,25 +1,30 @@
 use biodivine_aeon_server::scc::algo_symbolic_components::components_2;
-use biodivine_aeon_server::scc::{Classifier, ProgressTracker, Behaviour};
+use biodivine_aeon_server::scc::{Classifier, ProgressTracker};
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
-use biodivine_lib_param_bn::{BooleanNetwork, VariableId, FnUpdate};
+use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate, VariableId};
+use rand::prelude::StdRng;
+use rand::{Rng, SeedableRng};
 use std::convert::TryFrom;
 use std::io::Read;
-use rand::prelude::StdRng;
-use rand::{SeedableRng, Rng};
 use std::process::exit;
 
 fn pick_valuation(inputs: &[VariableId], rng: &mut StdRng) -> Vec<(VariableId, bool)> {
     inputs.iter().map(|v| (*v, rng.gen_bool(0.5))).collect()
 }
 
-fn apply_network_inputs(network: &BooleanNetwork, valuation: &[(VariableId, bool)]) -> BooleanNetwork {
+fn apply_network_inputs(
+    network: &BooleanNetwork,
+    valuation: &[(VariableId, bool)],
+) -> BooleanNetwork {
     let mut result = BooleanNetwork::new(network.as_graph().clone());
     for (v, b) in valuation {
         result.add_update_function(*v, FnUpdate::Const(*b)).unwrap();
     }
     for v in result.variables() {
         if result.get_update_function(v).is_none() {
-            result.add_update_function(v, network.get_update_function(v).as_ref().unwrap().clone()).unwrap();
+            result
+                .add_update_function(v, network.get_update_function(v).as_ref().unwrap().clone())
+                .unwrap();
         }
     }
     return result;
@@ -38,7 +43,10 @@ fn main() {
     println!("Model loaded...");
     println!("{} variables: {:?}", model.num_vars(), names);
 
-    let inputs: Vec<_> = model.variables().filter(|v| model.regulators(*v).len() == 0).collect();
+    let inputs: Vec<_> = model
+        .variables()
+        .filter(|v| model.regulators(*v).len() == 0)
+        .collect();
     let mut i = 0;
     while i < 100 {
         let valuation = pick_valuation(&inputs, &mut random);

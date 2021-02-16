@@ -32,19 +32,26 @@ fn main() {
 ///
 /// Also erases any pre-set input constants.
 fn erase_regulation_bounds(network: &BooleanNetwork) -> BooleanNetwork {
-    let variable_names = network.variables().map(|v| network.get_variable_name(v).to_string()).collect();
+    let variable_names = network
+        .variables()
+        .map(|v| network.get_variable_name(v).to_string())
+        .collect();
     let mut rg = RegulatoryGraph::new(variable_names);
     for old_reg in network.as_graph().regulations() {
         rg.add_regulation(
             network.get_variable_name(old_reg.get_regulator()),
             network.get_variable_name(old_reg.get_target()),
             false,
-            None
-        ).unwrap();
+            None,
+        )
+        .unwrap();
     }
     let mut bn = BooleanNetwork::new(rg);
     for old_v in network.variables() {
-        let new_v = bn.as_graph().find_variable(network.get_variable_name(old_v)).unwrap();
+        let new_v = bn
+            .as_graph()
+            .find_variable(network.get_variable_name(old_v))
+            .unwrap();
         let is_input = network.regulators(old_v).len() == 0;
         if !is_input {
             if let Some(fn_update) = network.get_update_function(old_v).clone() {

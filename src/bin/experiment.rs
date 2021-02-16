@@ -1,5 +1,5 @@
 use biodivine_aeon_server::scc::algo_symbolic_components::components_2;
-use biodivine_aeon_server::scc::{Classifier, ProgressTracker, Behaviour};
+use biodivine_aeon_server::scc::{Classifier, ProgressTracker};
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use std::convert::TryFrom;
@@ -43,7 +43,10 @@ fn main() {
         |component| {
             println!("Found attractor... {}", component.approx_cardinality());
             println!("Remaining: {}", progress.get_percent_string());
-            println!("Unique states: {}", component.vertices().approx_cardinality());
+            println!(
+                "Unique states: {}",
+                component.vertices().approx_cardinality()
+            );
             println!("Unique colors: {}", component.colors().approx_cardinality());
             //classifier.add_component(component, &graph);
         },

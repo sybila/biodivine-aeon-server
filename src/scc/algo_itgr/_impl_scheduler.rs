@@ -1,17 +1,21 @@
-use crate::scc::algo_itgr::{Scheduler, Process};
+use crate::scc::algo_itgr::{Process, Scheduler};
+use crate::GraphTaskContext;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
-use crate::TaskContext;
 
 impl Scheduler<'_> {
     /// Create a new `Scheduler` with initial universe and active variables.
-    pub fn new(ctx: &TaskContext, initial: GraphColoredVertices, variables: Vec<VariableId>) -> Scheduler {
+    pub fn new(
+        ctx: &GraphTaskContext,
+        initial: GraphColoredVertices,
+        variables: Vec<VariableId>,
+    ) -> Scheduler {
         Scheduler {
             active_variables: variables,
             universe: initial,
             processes: Vec::new(),
             to_discard: None,
-            ctx
+            ctx,
         }
     }
 
@@ -39,6 +43,9 @@ impl Scheduler<'_> {
         } else {
             self.to_discard = Some(set.clone());
         }
+
+        // Also update remaining set to indicate progress.
+        self.get_context().update_remaining(&self.universe);
     }
 
     /// Add a new process into this scheduler.
@@ -56,8 +63,8 @@ impl Scheduler<'_> {
         &self.active_variables
     }
 
-    /// Get context of this task (meta state, like cancellation or progress).
-    pub fn get_context(&self) -> &TaskContext {
+    /// Get context of this task (meta state, manages cancellation or progress).
+    pub fn get_context(&self) -> &GraphTaskContext {
         &self.ctx
     }
 
@@ -92,5 +99,4 @@ impl Scheduler<'_> {
             }
         }
     }
-
 }

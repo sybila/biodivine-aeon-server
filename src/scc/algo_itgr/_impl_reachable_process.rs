@@ -1,6 +1,8 @@
-use crate::scc::algo_itgr::{ReachableProcess, FwdProcess, Process, Scheduler, BwdProcess, ExtendedComponentProcess};
+use crate::scc::algo_itgr::{
+    BwdProcess, ExtendedComponentProcess, FwdProcess, Process, ReachableProcess, Scheduler,
+};
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
-use biodivine_lib_param_bn::symbolic_async_graph::{SymbolicAsyncGraph, GraphColoredVertices};
 
 impl ReachableProcess {
     pub fn new(
@@ -11,7 +13,7 @@ impl ReachableProcess {
         let var_can_post = graph.var_can_post(var, &universe);
         ReachableProcess {
             variable: var,
-            fwd: FwdProcess::new(var_can_post, universe)
+            fwd: FwdProcess::new(var_can_post, universe),
         }
     }
 }
@@ -19,20 +21,17 @@ impl ReachableProcess {
 impl Process for ReachableProcess {
     fn step(&mut self, scheduler: &mut Scheduler, graph: &SymbolicAsyncGraph) -> bool {
         if self.fwd.step(scheduler, graph) {
-            let fwd_set = &self.fwd.fwd;
+            let fwd_set = self.fwd.get_reachable_set();
 
             // If fwd set is not the whole universe, it probably has a basin.
             if fwd_set != scheduler.get_universe() {
-                let mut bwd = BwdProcess::new(
-                    fwd_set.clone(),
-                    scheduler.get_universe().clone()
-                );
+                let mut bwd = BwdProcess::new(fwd_set.clone(), scheduler.get_universe().clone());
                 while !bwd.step(scheduler, graph) {
                     if scheduler.get_context().is_cancelled() {
                         break;
                     }
                 }
-                let basin_only = bwd.bwd.minus(fwd_set);
+                let basin_only = bwd.get_reachable_set().minus(fwd_set);
                 if !basin_only.is_empty() {
                     scheduler.discard_vertices(&basin_only);
                 }
@@ -42,7 +41,7 @@ impl Process for ReachableProcess {
                 self.variable,
                 fwd_set.clone(),
                 scheduler.get_universe().clone(),
-                graph
+                graph,
             ));
             true
         } else {

@@ -1,30 +1,28 @@
 //! Interleaved transition guided reduction algorithm.
 //!
 //! Implements interleaved transition guided reduction. This technique does not remove
-//! all non-attractor states, but can very significantly reduce prune the state space in
+//! all non-attractor states, but can very significantly prune the state space in
 //! a very reasonable amount of time.
 //!
 
-use biodivine_lib_param_bn::symbolic_async_graph::{SymbolicAsyncGraph, GraphColoredVertices};
-use std::sync::atomic::{AtomicBool, Ordering};
-use crate::scc::ProgressTracker;
+use crate::GraphTaskContext;
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
-use crate::TaskContext;
 
-mod _impl_scheduler;
+mod _impl_extended_component_process;
 mod _impl_fwd_bwd_process;
 mod _impl_reachable_process;
-mod _impl_extended_component_process;
+mod _impl_scheduler;
 
 /// Removes from `initial` as many non-attractor states as possible
 /// using interleaved transition guided reduction.
 ///
 /// It also returns a list of system variables for which there are still
-/// transitions in the graph.
+/// transitions in the graph (other variables are effectively constant).
 ///
 /// If cancelled, the result is still valid, but not necessarily complete.
 pub fn interleaved_transition_guided_reduction(
-    ctx: &TaskContext,
+    ctx: &GraphTaskContext,
     graph: &SymbolicAsyncGraph,
     initial: GraphColoredVertices,
 ) -> (GraphColoredVertices, Vec<VariableId>) {
@@ -32,7 +30,9 @@ pub fn interleaved_transition_guided_reduction(
     let mut scheduler = Scheduler::new(ctx, initial, variables);
     for variable in graph.network().variables() {
         scheduler.spawn(ReachableProcess::new(
-            variable, graph, scheduler.get_universe().clone()
+            variable,
+            graph,
+            scheduler.get_universe().clone(),
         ));
     }
 
@@ -53,11 +53,16 @@ trait Process {
     /// Perform one step in the process. This can perform multiple symbolic operations,
     /// but should be fairly simple (i.e. does not need interrupting).
     ///
+    /// If you still need to run a complex operation, you should check `GraphTaskContext`
+    /// provided by `Scheduler` for cancellation.
+    ///
     /// Returns true if the process cannot perform more steps.
     fn step(&mut self, scheduler: &mut Scheduler, graph: &SymbolicAsyncGraph) -> bool;
+
     /// Approximate symbolic complexity of the process.
     fn weight(&self) -> usize;
-    /// Mark the given set of states as eliminated - i.e. they no longer need processing.
+
+    /// Mark the given set of states as eliminated - i.e. they can be disregarded by this process.
     fn discard_states(&mut self, set: &GraphColoredVertices);
 }
 
@@ -68,19 +73,19 @@ struct Scheduler<'a> {
     universe: GraphColoredVertices,
     processes: Vec<(usize, Box<dyn Process>)>,
     to_discard: Option<GraphColoredVertices>,
-    ctx: &'a TaskContext,
+    ctx: &'a GraphTaskContext,
 }
 
 /// **(internal)** Basic backward reachability process.
 struct BwdProcess {
     bwd: GraphColoredVertices,
-    universe: GraphColoredVertices
+    universe: GraphColoredVertices,
 }
 
 /// **(internal)** Basic forward reachability process.
 struct FwdProcess {
     fwd: GraphColoredVertices,
-    universe: GraphColoredVertices
+    universe: GraphColoredVertices,
 }
 
 /// **(internal)** Computes the set of vertices reachable from states that can perform `var_post`.
@@ -91,7 +96,7 @@ struct ReachableProcess {
     fwd: FwdProcess,
 }
 
-// **(internal)** Computes the extended component of a forward-reachable set.
+/// **(internal)** Computes the extended component of a forward-reachable set.
 struct ExtendedComponentProcess {
     variable: VariableId,
     fwd_set: GraphColoredVertices,

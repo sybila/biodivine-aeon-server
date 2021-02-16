@@ -1,7 +1,6 @@
-use crate::scc::algo_itgr::{ExtendedComponentProcess, BwdProcess, Process, Scheduler};
+use crate::scc::algo_itgr::{BwdProcess, ExtendedComponentProcess, Process, Scheduler};
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
-use biodivine_lib_param_bn::symbolic_async_graph::{SymbolicAsyncGraph, GraphColoredVertices};
-use std::sync::atomic::Ordering;
 
 impl ExtendedComponentProcess {
     pub fn new(
@@ -26,10 +25,7 @@ impl Process for ExtendedComponentProcess {
             let bottom = self.fwd_set.minus(extended_component);
 
             if !bottom.is_empty() {
-                let mut bwd = BwdProcess::new(
-                    bottom.clone(),
-                    scheduler.get_universe().clone(),
-                );
+                let mut bwd = BwdProcess::new(bottom.clone(), scheduler.get_universe().clone());
                 while !bwd.step(scheduler, graph) {
                     if scheduler.get_context().is_cancelled() {
                         break;

@@ -9,10 +9,10 @@ use std::vec::IntoIter;
 mod _impl_class;
 /// **(internal)** Implementation of `Behaviour` classification in `Classifier`.
 mod _impl_classifier;
-pub mod algo_effectively_constant;
-pub mod algo_symbolic_components;
 pub mod algo_async;
+pub mod algo_effectively_constant;
 pub mod algo_itgr;
+pub mod algo_symbolic_components;
 pub mod algo_xie_beerel;
 mod impl_progress_tracker;
 mod impl_state_set_iterator;
