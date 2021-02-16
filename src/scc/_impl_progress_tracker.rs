@@ -21,7 +21,7 @@ impl ProgressTracker {
 
     /// Restart progress counter with given graph.
     pub fn init_from_graph(&self, graph: &SymbolicAsyncGraph) {
-        let all_states = graph.unit_vertices().approx_cardinality();
+        let all_states = graph.unit_colored_vertices().approx_cardinality();
         let mut total = self.total.lock().unwrap();
         *total = all_states;
         let mut remaining = self.remaining.lock().unwrap();

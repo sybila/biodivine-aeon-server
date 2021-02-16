@@ -21,8 +21,9 @@ use std::convert::TryFrom;
 use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
 use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
 use biodivine_aeon_server::GraphTaskContext;
+use biodivine_lib_param_bn::biodivine_std::bitvector::{ArrayBitVector, BitVector};
+use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
-use biodivine_lib_std::collections::bitvectors::{ArrayBitVector, BitVector};
 use rocket::config::Environment;
 use rocket::{Config, Data};
 use std::cmp::max;
@@ -379,14 +380,14 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                     let mut state_0 =
                                         ArrayBitVector::from(vec![
                                             false;
-                                            graph.network().num_vars()
+                                            graph.as_network().num_vars()
                                         ]);
                                     let mut state_1 =
                                         ArrayBitVector::from(vec![
                                             true;
-                                            graph.network().num_vars()
+                                            graph.as_network().num_vars()
                                         ]);
-                                    for var in graph.network().variables() {
+                                    for var in graph.as_network().variables() {
                                         let var_true = witness_graph
                                             .fix_network_variable(var, true)
                                             .vertices();
@@ -409,7 +410,7 @@ fn get_attractors(class_str: String) -> BackendResponse {
                                     for source in attractor.materialize().iter() {
                                         let source_set = witness_graph.vertex(&source);
                                         let mut target_set = witness_graph.mk_empty_vertices();
-                                        for v in witness_graph.network().variables() {
+                                        for v in witness_graph.as_network().variables() {
                                             let post = witness_graph.var_post(v, &source_set);
                                             if !post.is_empty() {
                                                 not_fixed_vars.insert(v.into());
@@ -575,7 +576,7 @@ fn start_computation(data: Data) -> BackendResponse {
                                             interleaved_transition_guided_reduction(
                                                 task_context,
                                                 &graph,
-                                                graph.mk_unit_vertices(),
+                                                graph.mk_unit_colored_vertices(),
                                             );
 
                                         // Then run Xie-Beerel to actually detect the components.
@@ -687,7 +688,7 @@ fn sbml_to_aeon(data: Data) -> BackendResponse {
     let mut sbml_string = String::new();
     match stream.read_to_string(&mut sbml_string) {
         Ok(_) => {
-            match BooleanNetwork::from_sbml(&sbml_string) {
+            match BooleanNetwork::try_from_sbml(&sbml_string) {
                 Ok((model, layout)) => {
                     let mut model_string = format!("{}", model); // convert back to aeon
                     model_string += "\n";
@@ -748,7 +749,7 @@ fn aeon_to_sbml(data: Data) -> BackendResponse {
         Ok(_) => match BooleanNetwork::try_from(aeon_string.as_str()) {
             Ok(network) => {
                 let layout = read_layout(&aeon_string);
-                let sbml_string = network.to_sbml(&layout);
+                let sbml_string = network.to_sbml(Some(&layout));
                 BackendResponse::ok(&object! { "model" => sbml_string }.to_string())
             }
             Err(error) => BackendResponse::err(&error),
@@ -771,7 +772,7 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
                     let witness = graph.pick_witness(graph.unit_colors());
                     let layout = read_layout(&aeon_string);
                     BackendResponse::ok(
-                        &object! { "model" => witness.to_sbml(&layout) }.to_string(),
+                        &object! { "model" => witness.to_sbml(Some(&layout)) }.to_string(),
                     )
                 }
                 Err(error) => BackendResponse::err(&error),

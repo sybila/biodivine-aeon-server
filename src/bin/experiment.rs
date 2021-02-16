@@ -34,7 +34,7 @@ fn main() {
     );
     println!(
         "State space: {}",
-        graph.unit_vertices().approx_cardinality()
+        graph.unit_colored_vertices().approx_cardinality()
     );
 
     let classifier = Classifier::new(&graph);
@@ -44,8 +44,11 @@ fn main() {
     // Now we can actually start the computation...
 
     // First, perform ITGR reduction.
-    let (universe, active_variables) =
-        interleaved_transition_guided_reduction(&task_context, &graph, graph.mk_unit_vertices());
+    let (universe, active_variables) = interleaved_transition_guided_reduction(
+        &task_context,
+        &graph,
+        graph.mk_unit_colored_vertices(),
+    );
 
     // Then run Xie-Beerel to actually detect the components.
     xie_beerel_attractors(

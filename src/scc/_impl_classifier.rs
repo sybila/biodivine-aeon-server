@@ -1,8 +1,8 @@
 use super::{Behaviour, Class, Classifier};
+use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{
     GraphColoredVertices, GraphColors, GraphVertices, SymbolicAsyncGraph,
 };
-use biodivine_lib_std::param_graph::Params;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -104,9 +104,9 @@ impl Classifier {
         }
         if !not_sink_params.is_empty() {
             let mut disorder = graph.mk_empty_colors();
-            for variable in graph.network().variables() {
+            for variable in graph.as_network().variables() {
                 let found_first_successor = &graph.var_can_post(variable, &without_sinks);
-                for next_variable in graph.network().variables() {
+                for next_variable in graph.as_network().variables() {
                     if next_variable == variable {
                         continue;
                     }
@@ -179,7 +179,7 @@ impl Classifier {
         graph: &SymbolicAsyncGraph,
     ) -> GraphColoredVertices {
         let mut is_not_sink = graph.empty_vertices().clone();
-        for variable in graph.network().variables() {
+        for variable in graph.as_network().variables() {
             let has_successor = &graph.var_can_post(variable, &component);
             if !has_successor.is_empty() {
                 is_not_sink = is_not_sink.union(has_successor);
