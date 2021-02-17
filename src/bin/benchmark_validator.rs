@@ -32,7 +32,7 @@ fn main() {
         } else {
             // Check that the sbml model is readable:
             let model_string = std::fs::read_to_string(sbml_model_path).unwrap();
-            let model = BooleanNetwork::from_sbml(&model_string);
+            let model = BooleanNetwork::try_from_sbml(&model_string);
             match model {
                 Err(err) => {
                     errors += 1;
@@ -107,7 +107,7 @@ fn main() {
                     }
                     let mut inputs = 0;
                     for v in model.variables() {
-                        if model.regulators(v).len() == 0 {
+                        if model.regulators(v).is_empty() {
                             inputs += 1;
                         }
                     }
@@ -134,7 +134,9 @@ fn main() {
                         let graph = SymbolicAsyncGraph::new(model);
                         match graph {
                             Ok(graph) => {
-                                if graph.unit_colors().approx_cardinality() != 1.0 {
+                                if graph.unit_colors().as_bdd()
+                                    != graph.unit_colors().pick_singleton().as_bdd()
+                                {
                                     errors += 1;
                                     eprintln!(
                                         "ERROR: Default model has {} colors in {}.",

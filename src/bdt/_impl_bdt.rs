@@ -1,17 +1,19 @@
 use crate::bdt::{
-    entropy, information_gain, AppliedAttribute, Attribute, AttributeId, AttributeIds, BDTNode,
-    BDTNodeId, BDTNodeIds, BifurcationFunction, BDT,
+    entropy, information_gain, AppliedAttribute, Attribute, AttributeId, AttributeIds, Bdt,
+    BdtNode, BdtNodeId, BdtNodeIds, BifurcationFunction,
 };
 use crate::scc::Class;
 use crate::util::functional::Functional;
 use crate::util::index_type::IndexType;
+use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use std::collections::{HashMap, HashSet};
+use std::option::Option::Some;
 
-impl BDT {
+impl Bdt {
     /// Create a new single-node tree for given classification and attributes.
-    pub fn new(classes: BifurcationFunction, attributes: Vec<Attribute>) -> BDT {
-        BDT {
+    pub fn new(classes: BifurcationFunction, attributes: Vec<Attribute>) -> Bdt {
+        Bdt {
             attributes,
             storage: HashMap::new(),
             next_id: 0,
@@ -20,43 +22,61 @@ impl BDT {
     }
 
     /// Node ID of the tree root.
-    pub fn root_id(&self) -> BDTNodeId {
-        BDTNodeId(0)
+    pub fn root_id(&self) -> BdtNodeId {
+        BdtNodeId(0)
     }
 
     /// Iterator over all valid node ids in this tree.
-    pub fn nodes(&self) -> BDTNodeIds {
-        self.storage.keys().map(|x| BDTNodeId(*x))
+    pub fn nodes(&self) -> BdtNodeIds {
+        self.storage.keys().map(|x| BdtNodeId(*x))
     }
 
     /// Iterator over all attribute ids in this tree.
     pub fn attributes(&self) -> AttributeIds {
-        (0..self.attributes.len()).map(|x| AttributeId(x))
+        (0..self.attributes.len()).map(AttributeId)
     }
 
     /// Get leaf parameter set if the given node is a leaf.
-    pub fn params_for_leaf(&self, node: BDTNodeId) -> Option<&GraphColors> {
-        if let BDTNode::Leaf { params, .. } = &self[node] {
+    pub fn params_for_leaf(&self, node: BdtNodeId) -> Option<&GraphColors> {
+        if let BdtNode::Leaf { params, .. } = &self[node] {
             Some(params)
         } else {
             None
         }
     }
 
+    /// Compute all parameters that are stored in the given tree node.
+    pub fn all_node_params(&self, node: BdtNodeId) -> GraphColors {
+        match &self[node] {
+            BdtNode::Leaf { params, .. } => params.clone(),
+            BdtNode::Unprocessed { classes, .. } => Self::class_union(classes),
+            BdtNode::Decision { classes, .. } => Self::class_union(classes),
+        }
+    }
+
+    fn class_union(classes: &BifurcationFunction) -> GraphColors {
+        let mut iterator = classes.values();
+        let mut result = iterator.next().unwrap().clone();
+        for value in iterator {
+            result = result.union(value)
+        }
+        result
+    }
+
     /// **(internal)** Get next available node id in this tree.
-    fn next_id(&mut self) -> BDTNodeId {
-        BDTNodeId(self.next_id).also(|_| self.next_id += 1)
+    fn next_id(&mut self) -> BdtNodeId {
+        BdtNodeId(self.next_id).also(|_| self.next_id += 1)
     }
 
     /// **(internal)** Replace an EXISTING node in this tree.
-    pub(super) fn replace_node(&mut self, id: BDTNodeId, node: BDTNode) {
+    pub(super) fn replace_node(&mut self, id: BdtNodeId, node: BdtNode) {
         if self.storage.insert(id.0, node).is_none() {
             panic!("Replaced a non-existing node.");
         }
     }
 
     /// **(internal)** Save the given node in this tree and assign it a node id.
-    pub(super) fn insert_node(&mut self, node: BDTNode) -> BDTNodeId {
+    pub(super) fn insert_node(&mut self, node: BdtNode) -> BdtNodeId {
         self.next_id().also(|id| {
             if self.storage.insert(id.0, node).is_some() {
                 panic!("Inserted a duplicate node.");
@@ -65,22 +85,22 @@ impl BDT {
     }
 
     /// **(internal)** Create a leaf/unprocessed node for the given class list.
-    pub(super) fn insert_node_with_classes(&mut self, classes: BifurcationFunction) -> BDTNodeId {
+    pub(super) fn insert_node_with_classes(&mut self, classes: BifurcationFunction) -> BdtNodeId {
         assert!(!classes.is_empty(), "Inserting empty node.");
-        return if classes.len() == 1 {
+        if classes.len() == 1 {
             let (class, params) = classes.into_iter().next().unwrap();
-            self.insert_node(BDTNode::Leaf { class, params })
+            self.insert_node(BdtNode::Leaf { class, params })
         } else {
-            self.insert_node(BDTNode::Unprocessed { classes })
-        };
+            self.insert_node(BdtNode::Unprocessed { classes })
+        }
     }
 
     /// Compute the list of applied attributes (sorted by information gain) for a given node.
-    pub fn applied_attributes(&self, node: BDTNodeId) -> Vec<AppliedAttribute> {
+    pub fn applied_attributes(&self, node: BdtNodeId) -> Vec<AppliedAttribute> {
         let classes: HashMap<Class, GraphColors> = match &self[node] {
-            BDTNode::Leaf { .. } => HashMap::new(),
-            BDTNode::Decision { classes, .. } => classes.clone(),
-            BDTNode::Unprocessed { classes, .. } => classes.clone(),
+            BdtNode::Leaf { .. } => HashMap::new(),
+            BdtNode::Decision { classes, .. } => classes.clone(),
+            BdtNode::Unprocessed { classes, .. } => classes.clone(),
         };
         if classes.is_empty() {
             return Vec::new();
@@ -109,27 +129,27 @@ impl BDT {
     /// Replace an unprocessed node with a decision node using the given attribute.
     pub fn make_decision(
         &mut self,
-        node: BDTNodeId,
+        node: BdtNodeId,
         attribute: AttributeId,
-    ) -> Result<(BDTNodeId, BDTNodeId), String> {
+    ) -> Result<(BdtNodeId, BdtNodeId), String> {
         if !self.storage.contains_key(&node.to_index()) {
-            return Err(format!("Node not found."));
+            return Err("Node not found.".to_string());
         }
         if attribute.to_index() >= self.attributes.len() {
-            return Err(format!("Attribute not found"));
+            return Err("Attribute not found".to_string());
         }
-        if let BDTNode::Unprocessed { classes } = &self[node] {
+        if let BdtNode::Unprocessed { classes } = &self[node] {
             let attr = &self[attribute];
             let (left, right) = attr.split_function(classes);
             if left.is_empty() || right.is_empty() {
-                return Err(format!("No decision based on given attribute."));
+                return Err("No decision based on given attribute.".to_string());
             }
             let classes = classes.clone();
             let left_node = self.insert_node_with_classes(left);
             let right_node = self.insert_node_with_classes(right);
             self.replace_node(
                 node,
-                BDTNode::Decision {
+                BdtNode::Decision {
                     classes,
                     attribute,
                     left: left_node,
@@ -138,19 +158,19 @@ impl BDT {
             );
             Ok((left_node, right_node))
         } else {
-            Err(format!("Cannot make decision on a resolved node."))
+            Err("Cannot make decision on a resolved node.".to_string())
         }
     }
 
     /// Replace given decision node with an unprocessed node and delete all child nodes.
     ///
     /// Returns list of deleted nodes.
-    pub fn revert_decision(&mut self, node: BDTNodeId) -> Vec<BDTNodeId> {
+    pub fn revert_decision(&mut self, node: BdtNodeId) -> Vec<BdtNodeId> {
         let mut deleted = vec![];
-        if let BDTNode::Decision { classes, .. } = self[node].clone() {
+        if let BdtNode::Decision { classes, .. } = self[node].clone() {
             let mut dfs = vec![node];
             while let Some(expand) = dfs.pop() {
-                if let BDTNode::Decision { left, right, .. } = &self[expand] {
+                if let BdtNode::Decision { left, right, .. } = &self[expand] {
                     deleted.push(*left);
                     deleted.push(*right);
                     dfs.push(*left);
@@ -160,7 +180,7 @@ impl BDT {
             deleted.iter().for_each(|n| {
                 self.storage.remove(&n.to_index());
             });
-            self.replace_node(node, BDTNode::Unprocessed { classes });
+            self.replace_node(node, BdtNode::Unprocessed { classes });
         }
         deleted
     }
@@ -169,7 +189,7 @@ impl BDT {
     /// up to the given `depth`.
     ///
     /// Returns the list of changed node ids.
-    pub fn auto_expand(&mut self, node: BDTNodeId, depth: usize) -> Vec<BDTNodeId> {
+    pub fn auto_expand(&mut self, node: BdtNodeId, depth: usize) -> Vec<BdtNodeId> {
         let mut changed = HashSet::new();
         self.auto_expand_recursive(&mut changed, node, depth);
         changed.into_iter().collect()
@@ -177,8 +197,8 @@ impl BDT {
 
     fn auto_expand_recursive(
         &mut self,
-        changed: &mut HashSet<BDTNodeId>,
-        node: BDTNodeId,
+        changed: &mut HashSet<BdtNodeId>,
+        node: BdtNodeId,
         depth: usize,
     ) {
         if depth == 0 {
@@ -199,7 +219,7 @@ impl BDT {
             }
         }
         // For expanded nodes, just follow.
-        if let BDTNode::Decision { left, right, .. } = &self[node] {
+        if let BdtNode::Decision { left, right, .. } = &self[node] {
             let (left, right) = (*left, *right);
             self.auto_expand_recursive(changed, left, depth - 1);
             self.auto_expand_recursive(changed, right, depth - 1);

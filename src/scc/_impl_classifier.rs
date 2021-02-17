@@ -1,8 +1,8 @@
 use super::{Behaviour, Class, Classifier};
+use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{
     GraphColoredVertices, GraphColors, GraphVertices, SymbolicAsyncGraph,
 };
-use biodivine_lib_std::param_graph::Params;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -10,51 +10,51 @@ impl Classifier {
     pub fn new(graph: &SymbolicAsyncGraph) -> Classifier {
         let mut map: HashMap<Class, GraphColors> = HashMap::new();
         map.insert(Class::new_empty(), graph.unit_colors().clone());
-        return Classifier {
+        Classifier {
             classes: Mutex::new(map),
             attractors: Mutex::new(Vec::new()),
-        };
+        }
     }
 
     // Try to fetch the current number of discovered classes in a non-blocking manner
     pub fn try_get_num_classes(&self) -> Option<usize> {
-        return match self.classes.try_lock() {
+        match self.classes.try_lock() {
             Ok(data) => Some((*data).len()),
             _ => None,
-        };
+        }
     }
 
     // Try to obtain a copy of data in a non-blocking manner (useful if we want to check
     // results but the computation is still running).
     pub fn try_export_result(&self) -> Option<HashMap<Class, GraphColors>> {
-        return match self.classes.try_lock() {
+        match self.classes.try_lock() {
             Ok(data) => Some((*data).clone()),
             _ => None,
-        };
+        }
     }
 
     pub fn try_get_params(&self, class: &Class) -> Option<Option<GraphColors>> {
-        return match self.classes.try_lock() {
-            Ok(data) => Some((*data).get(class).map(|p| p.clone())),
+        match self.classes.try_lock() {
+            Ok(data) => Some((*data).get(class).cloned()),
             _ => None,
-        };
+        }
     }
 
     pub fn get_params(&self, class: &Class) -> Option<GraphColors> {
         let data = self.classes.lock().unwrap();
-        return (*data).get(class).map(|p| p.clone());
+        (*data).get(class).cloned()
     }
 
     pub fn export_result(&self) -> HashMap<Class, GraphColors> {
         let data = self.classes.lock().unwrap();
-        return (*data).clone();
+        (*data).clone()
     }
 
     pub fn export_components(
         &self,
     ) -> Vec<(GraphColoredVertices, HashMap<Behaviour, GraphColors>)> {
         let data = self.attractors.lock().unwrap();
-        return (*data).clone();
+        (*data).clone()
     }
 
     /// Static function to classify just one component and immediately obtain results.
@@ -74,13 +74,13 @@ impl Classifier {
                 result.insert(class.0[0], colors);
             }
         }
-        return result;
+        result
     }
 
     /// Find attractor of the given witness colour. The argument set must be a singleton.
     pub fn attractors(&self, witness_colour: &GraphColors) -> Vec<(GraphVertices, Behaviour)> {
-        if witness_colour.approx_cardinality() != 1.0 {
-            eprintln!("WARNING: Computing attractor witnesses for non-singleton set. (This may be just a floating point error in large models).");
+        if witness_colour.as_bdd() != witness_colour.pick_singleton().as_bdd() {
+            eprintln!("WARNING: Computing attractor witnesses for non-singleton color set.");
         }
         let mut result = Vec::new();
         let attractors = self.attractors.lock().unwrap();
@@ -94,31 +94,31 @@ impl Classifier {
                 .iter()
                 .find(|(_, c)| witness_colour.is_subset(c))
                 .unwrap()
-                .0
-                .clone();
-            result.push((attractor_states, attractor_behaviour));
+                .0;
+            result.push((attractor_states, *attractor_behaviour));
         }
-        return result;
+        result
     }
 
+    // TODO: Parallelism
     pub fn add_component(&self, component: GraphColoredVertices, graph: &SymbolicAsyncGraph) {
-        let mut attractor_behaviour: HashMap<Behaviour, GraphColors> = HashMap::new();
+        let mut component_classification = HashMap::new();
         let without_sinks = self.filter_sinks(component.clone(), graph);
         let not_sink_params = without_sinks.colors();
         let sink_params = component.colors().minus(&not_sink_params);
         if !sink_params.is_empty() {
-            attractor_behaviour.insert(Behaviour::Stability, sink_params);
+            component_classification.insert(Behaviour::Stability, sink_params);
         }
         if not_sink_params.is_empty() {
             let mut attractors = self.attractors.lock().unwrap();
-            (*attractors).push((component, attractor_behaviour));
+            (*attractors).push((component, component_classification));
             return;
         }
         if !not_sink_params.is_empty() {
             let mut disorder = graph.mk_empty_colors();
-            for variable in graph.network().variables() {
+            for variable in graph.as_network().variables() {
                 let found_first_successor = &graph.var_can_post(variable, &without_sinks);
-                for next_variable in graph.network().variables() {
+                for next_variable in graph.as_network().variables() {
                     if next_variable == variable {
                         continue;
                     }
@@ -130,22 +130,22 @@ impl Classifier {
             let cycle = without_sinks.colors().minus(&disorder);
             if !cycle.is_empty() {
                 println!("Found cycle: {}", cycle.approx_cardinality());
-                attractor_behaviour.insert(Behaviour::Oscillation, cycle.clone());
+                component_classification.insert(Behaviour::Oscillation, cycle.clone());
                 self.push(Behaviour::Oscillation, cycle);
             }
             if !disorder.is_empty() {
                 println!("Found disorder: {}", disorder.approx_cardinality());
-                attractor_behaviour.insert(Behaviour::Disorder, disorder.clone());
+                component_classification.insert(Behaviour::Disorder, disorder.clone());
                 self.push(Behaviour::Disorder, disorder);
             }
             let mut attractors = self.attractors.lock().unwrap();
-            (*attractors).push((component, attractor_behaviour));
+            (*attractors).push((component, component_classification));
         }
     }
 
     fn push(&self, behaviour: Behaviour, params: GraphColors) {
         let mut classes = self.classes.lock().unwrap();
-        let mut original_classes: Vec<Class> = (*classes).keys().map(|c| c.clone()).collect();
+        let mut original_classes: Vec<Class> = (*classes).keys().cloned().collect();
         original_classes.sort();
         original_classes.reverse(); // we need classes from largest to smallest
 
@@ -189,7 +189,7 @@ impl Classifier {
         graph: &SymbolicAsyncGraph,
     ) -> GraphColoredVertices {
         let mut is_not_sink = graph.empty_vertices().clone();
-        for variable in graph.network().variables() {
+        for variable in graph.as_network().variables() {
             let has_successor = &graph.var_can_post(variable, &component);
             if !has_successor.is_empty() {
                 is_not_sink = is_not_sink.union(has_successor);
@@ -199,6 +199,6 @@ impl Classifier {
         if !is_sink.is_empty() {
             self.push(Behaviour::Stability, is_sink);
         }
-        return is_not_sink;
+        is_not_sink
     }
 }

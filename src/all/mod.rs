@@ -29,7 +29,7 @@ pub enum AttractorAtom {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ALLAtom {
+pub enum AllAtom {
     AllAttractors(AttractorFormula),
     SomeAttractor(AttractorFormula),
 }
@@ -38,7 +38,7 @@ pub type StateFormula = BooleanFormula<StateAtom>;
 
 pub type AttractorFormula = BooleanFormula<AttractorAtom>;
 
-pub type ALLFormula = BooleanFormula<ALLAtom>;
+pub type AllFormula = BooleanFormula<AllAtom>;
 /*
 impl ALLFormula {
     pub fn eval(

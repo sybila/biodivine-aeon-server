@@ -1,7 +1,7 @@
 use crate::bdt::{Attribute, BifurcationFunction};
 use crate::util::functional::Functional;
+use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
-use biodivine_lib_std::param_graph::Params;
 use std::collections::HashMap;
 
 impl Attribute {

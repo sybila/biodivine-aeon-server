@@ -1,5 +1,5 @@
 use crate::bdt::_impl_bdt_node::class_list_cardinality;
-use crate::bdt::{AttributeId, BDTNode, BDTNodeId, BDT};
+use crate::bdt::{AttributeId, Bdt, BdtNode, BdtNodeId};
 use crate::scc::Class;
 use crate::util::functional::Functional;
 use crate::util::index_type::IndexType;
@@ -7,27 +7,27 @@ use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use json::JsonValue;
 use std::collections::HashMap;
 
-impl BDTNode {
+impl BdtNode {
     /// Convert this BDT node to json value with all available information stored in the node.
     pub fn to_json(&self) -> JsonValue {
         match self {
-            BDTNode::Leaf { class, params } => object! {
-                "type" => format!("leaf"),
+            BdtNode::Leaf { class, params } => object! {
+                "type" => "leaf".to_string(),
                 "cardinality" => params.approx_cardinality(),
                 "class" => format!("{}", class),
             },
-            BDTNode::Unprocessed { classes } => object! {
-                "type" => format!("unprocessed"),
+            BdtNode::Unprocessed { classes } => object! {
+                "type" => "unprocessed".to_string(),
                 "cardinality" => class_list_cardinality(classes),
                 "classes" => class_list_to_json(classes),
             },
-            BDTNode::Decision {
+            BdtNode::Decision {
                 attribute,
                 left,
                 right,
                 classes,
             } => object! {
-                "type" => format!("decision"),
+                "type" => "decision".to_string(),
                 "cardinality" => class_list_cardinality(classes),
                 "classes" => class_list_to_json(classes),
                 "attribute_id" => attribute.0,
@@ -38,7 +38,7 @@ impl BDTNode {
     }
 }
 
-impl BDT {
+impl Bdt {
     /// Convert the whole tree into one json array.
     pub fn to_json(&self) -> JsonValue {
         JsonValue::from(
@@ -51,7 +51,7 @@ impl BDT {
     /// Convert a BDT node to json, including extra info compared to `BDTNode::to_json`.
     ///
     /// The extra info covers the node id as well as attribute name for decision nodes.
-    pub fn node_to_json(&self, id: BDTNodeId) -> JsonValue {
+    pub fn node_to_json(&self, id: BdtNodeId) -> JsonValue {
         self[id].to_json().apply(|result| {
             result.insert("id", id.0).unwrap();
             if result.has_key("attribute_id") {
@@ -67,7 +67,7 @@ impl BDT {
     }
 
     /// Compute attribute gains for the given tree node.
-    pub fn attribute_gains_json(&self, id: BDTNodeId) -> JsonValue {
+    pub fn attribute_gains_json(&self, id: BdtNodeId) -> JsonValue {
         self.applied_attributes(id)
             .into_iter()
             .map(|it| {
@@ -80,7 +80,7 @@ impl BDT {
                 }
             })
             .collect::<Vec<_>>()
-            .and_then(|it| JsonValue::from(it))
+            .and_then(JsonValue::from)
     }
 }
 
