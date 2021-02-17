@@ -5,8 +5,10 @@ use crate::bdt::{
 use crate::scc::Class;
 use crate::util::functional::Functional;
 use crate::util::index_type::IndexType;
+use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use std::collections::{HashMap, HashSet};
+use std::option::Option::Some;
 
 impl Bdt {
     /// Create a new single-node tree for given classification and attributes.
@@ -41,6 +43,24 @@ impl Bdt {
         } else {
             None
         }
+    }
+
+    /// Compute all parameters that are stored in the given tree node.
+    pub fn all_node_params(&self, node: BdtNodeId) -> GraphColors {
+        match &self[node] {
+            BdtNode::Leaf { params, .. } => params.clone(),
+            BdtNode::Unprocessed { classes, .. } => Self::class_union(classes),
+            BdtNode::Decision { classes, .. } => Self::class_union(classes),
+        }
+    }
+
+    fn class_union(classes: &BifurcationFunction) -> GraphColors {
+        let mut iterator = classes.values();
+        let mut result = iterator.next().unwrap().clone();
+        for value in iterator {
+            result = result.union(value)
+        }
+        result
     }
 
     /// **(internal)** Get next available node id in this tree.

@@ -21,6 +21,7 @@ use std::convert::TryFrom;
 use biodivine_aeon_server::bdt::{AttributeId, Bdt, BdtNodeId};
 use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
 use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
+use biodivine_aeon_server::scc::Behaviour::Stability;
 use biodivine_aeon_server::util::index_type::IndexType;
 use biodivine_aeon_server::GraphTaskContext;
 use biodivine_lib_param_bn::biodivine_std::bitvector::{ArrayBitVector, BitVector};
@@ -121,6 +122,85 @@ fn get_attributes(node_id: String) -> BackendResponse {
         BackendResponse::ok(&tree.attribute_gains_json(node).to_string())
     } else {
         BackendResponse::err(&"No tree present. Run computation first.".to_string())
+    }
+}
+
+#[get("/get_stability_data/<node_id>")]
+fn get_stability_data(node_id: String) -> BackendResponse {
+    // First, extract all colors in that tree node.
+    let node_params = {
+        let tree = TREE.clone();
+        let tree = tree.read().unwrap();
+        if let Some(tree) = &*tree {
+            let node = BdtNodeId::try_from_str(&node_id, tree);
+            let node = if let Some(n) = node {
+                n
+            } else {
+                return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+            };
+            tree.all_node_params(node)
+        } else {
+            return BackendResponse::err("No bifurcation tree found.");
+        }
+    };
+    // Then find all attractors of the graph
+    let cmp = COMPUTATION.read().unwrap();
+    if let Some(cmp) = &*cmp {
+        let components = if let Some(classifier) = &cmp.classifier {
+            classifier.export_components()
+        } else {
+            return BackendResponse::err("No attractor data found.");
+        };
+        if let Some(graph) = &cmp.graph {
+            // Now compute which attractors are actually relevant for the node colors
+            let mut all_attractor_states = graph.mk_empty_vertices();
+            let mut all_sink_states = graph.mk_empty_vertices().vertices();
+            for (attractor, behaviour) in components {
+                let attractor = attractor.intersect_colors(&node_params);
+                if attractor.is_empty() {
+                    continue;
+                }
+                all_attractor_states = all_attractor_states.union(&attractor);
+                for (b, c) in behaviour {
+                    if b == Stability {
+                        let sink_states = attractor.intersect_colors(&c).vertices();
+                        all_sink_states = all_sink_states.union(&sink_states);
+                    }
+                }
+            }
+            let sink_count = all_sink_states.materialize().iter().take(101).count();
+            let sink_count = if sink_count == 101 {
+                "100+".to_string()
+            } else {
+                format!("{}", sink_count)
+            };
+            let mut always_true = Vec::new();
+            let mut always_false = Vec::new();
+            let mut effectively_constant = Vec::new();
+            for v in graph.as_network().variables() {
+                let name = graph.as_network().get_variable_name(v);
+                let v_is_true = graph.fix_network_variable(v, true);
+                let v_is_false = graph.fix_network_variable(v, false);
+                if all_attractor_states.intersect(&v_is_true).is_empty() {
+                    always_false.push(name.clone());
+                } else if all_attractor_states.intersect(&v_is_false).is_empty() {
+                    always_true.push(name.clone());
+                } else if graph.var_can_post(v, &all_attractor_states).is_empty() {
+                    effectively_constant.push(name.clone());
+                }
+            }
+            let response = object! {
+                "sink_count": sink_count,
+                "always_true": always_true,
+                "always_false": always_false,
+                "constant": effectively_constant,
+            };
+            BackendResponse::ok(&response.to_string())
+        } else {
+            BackendResponse::err(&"No attractor data found.")
+        }
+    } else {
+        BackendResponse::err(&"No attractor data found.")
     }
 }
 
@@ -981,6 +1061,7 @@ fn main() {
                 get_tree_witness,
                 get_attractors,
                 get_tree_attractors,
+                get_stability_data,
                 check_update_function,
                 sbml_to_aeon,
                 aeon_to_sbml,
