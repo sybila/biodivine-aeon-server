@@ -20,6 +20,7 @@ use std::convert::TryFrom;
 
 use biodivine_aeon_server::bdt::{AttributeId, Bdt, BdtNodeId};
 use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
+use biodivine_aeon_server::scc::algo_stability_analysis::stability_analysis;
 use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
 use biodivine_aeon_server::scc::Behaviour::Stability;
 use biodivine_aeon_server::util::index_type::IndexType;
@@ -154,7 +155,7 @@ fn get_stability_data(node_id: String) -> BackendResponse {
         if let Some(graph) = &cmp.graph {
             // Now compute which attractors are actually relevant for the node colors
             let mut all_attractor_states = graph.mk_empty_vertices();
-            let mut all_sink_states = graph.mk_empty_vertices().vertices();
+            let mut all_sink_states = graph.mk_empty_vertices();
             for (attractor, behaviour) in components {
                 let attractor = attractor.intersect_colors(&node_params);
                 if attractor.is_empty() {
@@ -163,12 +164,17 @@ fn get_stability_data(node_id: String) -> BackendResponse {
                 all_attractor_states = all_attractor_states.union(&attractor);
                 for (b, c) in behaviour {
                     if b == Stability {
-                        let sink_states = attractor.intersect_colors(&c).vertices();
+                        let sink_states = attractor.intersect_colors(&c);
                         all_sink_states = all_sink_states.union(&sink_states);
                     }
                 }
             }
-            let sink_count = all_sink_states.materialize().iter().take(101).count();
+            let sink_count = all_sink_states
+                .vertices()
+                .materialize()
+                .iter()
+                .take(101)
+                .count();
             let sink_count = if sink_count == 101 {
                 "100+".to_string()
             } else {
@@ -189,11 +195,21 @@ fn get_stability_data(node_id: String) -> BackendResponse {
                     effectively_constant.push(name.clone());
                 }
             }
+            let var_stability: Vec<JsonValue> = if all_sink_states.is_empty() {
+                Vec::new()
+            } else {
+                graph
+                    .as_network()
+                    .variables()
+                    .map(|v| stability_analysis(graph, &all_sink_states, v))
+                    .collect()
+            };
             let response = object! {
                 "sink_count": sink_count,
                 "always_true": always_true,
                 "always_false": always_false,
                 "constant": effectively_constant,
+                "var_stability": var_stability,
             };
             BackendResponse::ok(&response.to_string())
         } else {
@@ -473,6 +489,78 @@ fn get_tree_witness(node_id: String) -> BackendResponse {
     };
 }
 
+#[get("/get_stability_witness/<node_id>/<variable>/<value>")]
+fn get_stability_witness(node_id: String, variable: String, value: String) -> BackendResponse {
+    // First, extract all colors in that tree node.
+    let node_params = {
+        let tree = TREE.clone();
+        let tree = tree.read().unwrap();
+        if let Some(tree) = &*tree {
+            let node = BdtNodeId::try_from_str(&node_id, tree);
+            let node = if let Some(n) = node {
+                n
+            } else {
+                return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+            };
+            tree.all_node_params(node)
+        } else {
+            return BackendResponse::err("No bifurcation tree found.");
+        }
+    };
+    // Then find all attractors of the graph
+    let cmp = COMPUTATION.read().unwrap();
+    if let Some(cmp) = &*cmp {
+        let components = if let Some(classifier) = &cmp.classifier {
+            classifier.export_components()
+        } else {
+            return BackendResponse::err("No attractor data found.");
+        };
+        if let Some(graph) = &cmp.graph {
+            // Now compute which attractors are actually relevant for the node colors
+            let mut sinks = graph.mk_empty_vertices();
+            for (attractor, behaviour) in components {
+                let attractor = attractor.intersect_colors(&node_params);
+                if attractor.is_empty() {
+                    continue;
+                }
+                for (b, c) in behaviour {
+                    if b == Stability {
+                        let sink_states = attractor.intersect_colors(&c);
+                        sinks = sinks.union(&sink_states);
+                    }
+                }
+            }
+            let variable = if let Some(id) = graph.as_network().as_graph().find_variable(&variable)
+            {
+                id
+            } else {
+                return BackendResponse::err(&format!("Unknown variable {}.", variable));
+            };
+            let all_colors = sinks.colors();
+            let var_is_true = graph.fix_network_variable(variable, true);
+            let var_is_false = graph.fix_network_variable(variable, false);
+            let colors_where_true = sinks.intersect(&var_is_true).colors();
+            let colors_where_false = sinks.intersect(&var_is_false).colors();
+            let only_true_colors = all_colors.minus(&colors_where_false);
+            let only_false_colors = all_colors.minus(&colors_where_true);
+            let mixed_colors = colors_where_true.intersect(&colors_where_false);
+            let colors = match value.as_str() {
+                "true" => only_true_colors,
+                "false" => only_false_colors,
+                "mixed" => mixed_colors,
+                _ => {
+                    return BackendResponse::err(&format!("Unrecognized var value {}.", value));
+                }
+            };
+            get_witness_network(&colors)
+        } else {
+            BackendResponse::err(&"No attractor data found.")
+        }
+    } else {
+        BackendResponse::err(&"No attractor data found.")
+    }
+}
+
 #[get("/get_witness/<class_str>")]
 fn get_witness(class_str: String) -> BackendResponse {
     let mut class = Class::new_empty();
@@ -560,6 +648,78 @@ fn get_tree_attractors(node_id: String) -> BackendResponse {
     } else {
         BackendResponse::err(&"No tree present. Run computation first.".to_string())
     };
+}
+
+#[get("/get_stability_attractors/<node_id>/<variable>/<value>")]
+fn get_stability_attractors(node_id: String, variable: String, value: String) -> BackendResponse {
+    // First, extract all colors in that tree node.
+    let node_params = {
+        let tree = TREE.clone();
+        let tree = tree.read().unwrap();
+        if let Some(tree) = &*tree {
+            let node = BdtNodeId::try_from_str(&node_id, tree);
+            let node = if let Some(n) = node {
+                n
+            } else {
+                return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+            };
+            tree.all_node_params(node)
+        } else {
+            return BackendResponse::err("No bifurcation tree found.");
+        }
+    };
+    // Then find all attractors of the graph
+    let cmp = COMPUTATION.read().unwrap();
+    if let Some(cmp) = &*cmp {
+        let components = if let Some(classifier) = &cmp.classifier {
+            classifier.export_components()
+        } else {
+            return BackendResponse::err("No attractor data found.");
+        };
+        if let Some(graph) = &cmp.graph {
+            // Now compute which attractors are actually relevant for the node colors
+            let mut sinks = graph.mk_empty_vertices();
+            for (attractor, behaviour) in components {
+                let attractor = attractor.intersect_colors(&node_params);
+                if attractor.is_empty() {
+                    continue;
+                }
+                for (b, c) in behaviour {
+                    if b == Stability {
+                        let sink_states = attractor.intersect_colors(&c);
+                        sinks = sinks.union(&sink_states);
+                    }
+                }
+            }
+            let variable = if let Some(id) = graph.as_network().as_graph().find_variable(&variable)
+            {
+                id
+            } else {
+                return BackendResponse::err(&format!("Unknown variable {}.", variable));
+            };
+            let all_colors = sinks.colors();
+            let var_is_true = graph.fix_network_variable(variable, true);
+            let var_is_false = graph.fix_network_variable(variable, false);
+            let colors_where_true = sinks.intersect(&var_is_true).colors();
+            let colors_where_false = sinks.intersect(&var_is_false).colors();
+            let only_true_colors = all_colors.minus(&colors_where_false);
+            let only_false_colors = all_colors.minus(&colors_where_true);
+            let mixed_colors = colors_where_true.intersect(&colors_where_false);
+            let colors = match value.as_str() {
+                "true" => only_true_colors,
+                "false" => only_false_colors,
+                "mixed" => mixed_colors,
+                _ => {
+                    return BackendResponse::err(&format!("Unrecognized var value {}.", value));
+                }
+            };
+            get_witness_attractors(&colors)
+        } else {
+            BackendResponse::err(&"No attractor data found.")
+        }
+    } else {
+        BackendResponse::err(&"No attractor data found.")
+    }
 }
 
 type EdgeList = Vec<(ArrayBitVector, ArrayBitVector)>;
@@ -1062,6 +1222,8 @@ fn main() {
                 get_attractors,
                 get_tree_attractors,
                 get_stability_data,
+                get_stability_attractors,
+                get_stability_witness,
                 check_update_function,
                 sbml_to_aeon,
                 aeon_to_sbml,
