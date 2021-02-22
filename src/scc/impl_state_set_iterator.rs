@@ -1,7 +1,7 @@
 use super::StateSetIterator;
 use crate::scc::StateSetIntoIterator;
 use biodivine_lib_param_bn::bdd_params::BddParams;
-use biodivine_lib_std::IdState;
+use biodivine_lib_param_bn::biodivine_std::structs::IdState;
 
 impl<'a> Iterator for StateSetIterator<'a> {
     type Item = (IdState, &'a BddParams);

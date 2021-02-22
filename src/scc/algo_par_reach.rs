@@ -1,7 +1,9 @@
 use crate::scc::{ProgressTracker, StateSet};
 use biodivine_lib_param_bn::bdd_params::BddParams;
-use biodivine_lib_std::param_graph::{EvolutionOperator, InvertibleEvolutionOperator, Params};
-use biodivine_lib_std::IdState;
+use biodivine_lib_param_bn::biodivine_std::structs::IdState;
+use biodivine_lib_param_bn::biodivine_std::traits::{
+    EvolutionOperator, InvertibleEvolutionOperator, Set,
+};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};

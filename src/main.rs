@@ -14,7 +14,7 @@ use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
 use biodivine_aeon_server::scc::{Behaviour, Class, Classifier, ProgressTracker};
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
+use biodivine_lib_param_bn::async_graph::{AsyncGraph, DefaultEdgeParams};
 use biodivine_lib_param_bn::BooleanNetwork;
 use regex::Regex;
 use std::convert::TryFrom;
@@ -37,7 +37,7 @@ struct Computation {
     timestamp: SystemTime,
     is_cancelled: Arc<AtomicBool>, // indicate to the server that the computation should be cancelled
     input_model: String,           // .aeon string representation of the model
-    graph: Option<Arc<AsyncGraph>>, // Model graph - used to create witnesses
+    graph: Option<Arc<AsyncGraph<DefaultEdgeParams>>>, // Model graph - used to create witnesses
     classifier: Option<Arc<Classifier>>, // Classifier used to store the results of the computation
     progress: Option<Arc<ProgressTracker>>, // Used to access progress of the computation
     thread: Option<JoinHandle<()>>, // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
@@ -78,7 +78,7 @@ fn check_update_function(data: Data) -> BackendResponse {
     return match stream.read_to_string(&mut model_string) {
         Ok(_) => {
             let graph = BooleanNetwork::try_from(model_string.as_str()).and_then(|model| {
-                if model.graph().num_vars() <= 5 {
+                if model.as_graph().num_vars() <= 5 {
                     AsyncGraph::new(model)
                 } else {
                     Err("Function too large for on-the-fly analysis.".to_string())
@@ -134,7 +134,7 @@ fn ping() -> BackendResponse {
 }
 
 // Try to obtain current class data or none if classifier is busy
-fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> {
+/*fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> {
     for _ in 0..5 {
         if let Some(data) = classifier.try_export_result() {
             return Some(data);
@@ -143,7 +143,7 @@ fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> 
         std::thread::sleep(Duration::new(1, 0));
     }
     return None;
-}
+}*/
 
 fn try_get_class_params(classifier: &Classifier, class: &Class) -> Option<Option<BddParams>> {
     for _ in 0..5 {
@@ -439,7 +439,7 @@ fn sbml_to_aeon(data: Data) -> BackendResponse {
     let mut sbml_string = String::new();
     return match stream.read_to_string(&mut sbml_string) {
         Ok(_) => {
-            match BooleanNetwork::from_sbml(&sbml_string) {
+            match BooleanNetwork::try_from_sbml(&sbml_string) {
                 Ok((model, layout)) => {
                     let mut model_string = format!("{}", model); // convert back to aeon
                     model_string += "\n";
@@ -500,7 +500,7 @@ fn aeon_to_sbml(data: Data) -> BackendResponse {
         Ok(_) => match BooleanNetwork::try_from(aeon_string.as_str()) {
             Ok(network) => {
                 let layout = read_layout(&aeon_string);
-                let sbml_string = network.to_sbml(&layout);
+                let sbml_string = network.to_sbml(Some(&layout));
                 BackendResponse::ok(&object! { "model" => sbml_string }.to_string())
             }
             Err(error) => BackendResponse::err(&error),
@@ -524,7 +524,7 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
                     let witness = graph.make_witness(graph.unit_params());
                     let layout = read_layout(&aeon_string);
                     BackendResponse::ok(
-                        &object! { "model" => witness.to_sbml(&layout) }.to_string(),
+                        &object! { "model" => witness.to_sbml(Some(&layout)) }.to_string(),
                     )
                 }
                 Err(error) => BackendResponse::err(&error),

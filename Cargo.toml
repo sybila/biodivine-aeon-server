@@ -15,9 +15,7 @@ debug = true
 #lto = true
 
 [dependencies]
-biodivine-lib-bdd = { git = "https://github.com/sybila/biodivine-lib-bdd.git" }
-biodivine-lib-std = { git = "https://github.com/sybila/biodivine-lib-std.git" }
-biodivine-lib-param-bn = { git = "https://github.com/sybila/biodivine-lib-param-bn.git" }
+biodivine-lib-param-bn = "0.1.0"
 rocket = "0.4.2"
 rayon = "1.3.0"
 crossbeam = "0.7.3"

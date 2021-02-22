@@ -1,9 +1,9 @@
 use crate::scc::ProgressTracker;
-use biodivine_lib_param_bn::async_graph::AsyncGraph;
+use biodivine_lib_param_bn::async_graph::{AsyncGraph, DefaultEdgeParams};
 use std::sync::Mutex;
 
 impl ProgressTracker {
-    pub fn new(graph: &AsyncGraph) -> ProgressTracker {
+    pub fn new(graph: &AsyncGraph<DefaultEdgeParams>) -> ProgressTracker {
         let unit_cardinality = graph.unit_params().cardinality();
         let num_states = graph.num_states() as f64;
         let graph_size = unit_cardinality * num_states;
