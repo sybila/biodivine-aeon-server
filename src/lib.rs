@@ -7,10 +7,6 @@ extern crate json;
 use crate::scc::{Classifier, ProgressTracker};
 use biodivine_lib_param_bn::async_graph::{AsyncGraph, DefaultEdgeParams};
 use json::JsonValue;
-use rocket::http::hyper::header::AccessControlAllowOrigin;
-use rocket::http::{ContentType, Header};
-use rocket::response::Responder;
-use rocket::{response, Request, Response};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
@@ -92,22 +88,5 @@ impl BackendResponse {
 
     pub fn json(self) -> JsonValue {
         self.response
-    }
-}
-
-impl<'r> Responder<'r> for BackendResponse {
-    fn respond_to(self, _: &Request) -> response::Result<'r> {
-        use std::io::Cursor;
-
-        let cursor = Cursor::new(json::stringify(self.response));
-        Response::build()
-            .header(ContentType::Plain)
-            .header(AccessControlAllowOrigin::Any)
-            // This magic set of headers might fix some CROS issues, but we are not sure yet...
-            .header(Header::new("Allow", "GET, POST, OPTIONS, PUT, DELETE"))
-            .header(Header::new("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE"))
-            .header(Header::new("Access-Control-Allow-Headers", "X-API-KEY, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method"))
-            .sized_body(cursor)
-            .ok()
     }
 }

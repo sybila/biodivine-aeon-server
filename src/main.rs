@@ -1,7 +1,3 @@
-#![feature(proc_macro_hygiene, decl_macro)]
-#[macro_use]
-extern crate rocket;
-
 #[macro_use]
 extern crate json;
 
@@ -32,7 +28,7 @@ fn try_get_class_params(classifier: &Classifier, class: &Class) -> Option<Option
     return None;
 }
 
-#[get("/get_witness/<class_str>")]
+//#[get("/get_witness/<class_str>")]
 fn get_witness(class_str: String) -> BackendResponse {
     let mut class = Class::new_empty();
     for char in class_str.chars() {

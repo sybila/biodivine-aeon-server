@@ -18,7 +18,6 @@ debug = true
 web-view = "0.7.2"
 tinyfiledialogs = "3.0"
 biodivine-lib-param-bn = "0.1.0"
-rocket = "0.4.2"
 rayon = "1.3.0"
 crossbeam = "0.7.3"
 lazy_static = "1.4.0"
