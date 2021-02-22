@@ -14,7 +14,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tfd::MessageBoxIcon;
+use tfd::{MessageBoxIcon, YesNo};
 use web_view::{Content, WVResult, WebView};
 
 pub mod scc;
@@ -113,6 +113,32 @@ pub fn handle_bridge_request(web_view: &mut WebView<ArcComputation>, arg: &str) 
             if path == "log" {
                 println!("{}", json["message"]);
                 Ok(())
+            } else if path == "alert" {
+                let message: String = json["message"].as_str().map(|i| i.to_string()).unwrap_or(String::new());
+                let message_type: &str = json["type"].as_str().unwrap();
+                let icon = match message_type {
+                    "error" => MessageBoxIcon::Error,
+                    "warning" => MessageBoxIcon::Warning,
+                    "question" => MessageBoxIcon::Question,
+                    _ => MessageBoxIcon::Info
+                };
+                tfd::message_box_ok("Aeon", &message, icon);
+                Ok(())
+            } else if path == "confirm" {
+                println!("Confirm");
+                let message: &str = json["message"].as_str().unwrap();
+                let result = match tfd::message_box_yes_no("Aeon", message, MessageBoxIcon::Warning, YesNo::No) {
+                    YesNo::No => false,
+                    YesNo::Yes => true
+                };
+                let command = format!("NativeBridge.handleResponse({})", json::stringify(object! {
+                    "status": true,
+                    "result": object! {
+                        "yes": result,
+                    },
+                    "requestId": id,
+                }));
+                web_view.eval(&command)
             } else if path == "save_file" {
                 let suggested_name: &str = json["name"].as_str().unwrap();
                 let content: &str = json["content"].as_str().unwrap();
