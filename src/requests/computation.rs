@@ -1,6 +1,6 @@
 use crate::scc::algo_components::components;
 use crate::scc::{Classifier, ProgressTracker};
-use crate::{BackendResponse, Computation, COMPUTATION};
+use crate::{ArcComputation, BackendResponse, Computation};
 use biodivine_lib_param_bn::async_graph::AsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use json::JsonValue;
@@ -10,12 +10,12 @@ use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 
 /// Accept an Aeon model, parse it and start a new computation (if there is no computation running).
-pub fn start_computation(aeon_string: &str) -> BackendResponse {
+pub fn start_computation(session: ArcComputation, aeon_string: &str) -> BackendResponse {
     // First, try to parse the network so that the user can at least verify it is correct...
     match BooleanNetwork::try_from(aeon_string) {
         Ok(network) => {
             // Now we can try to start the computation...
-            let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+            let cmp: Arc<RwLock<Option<Computation>>> = session.clone();
             {
                 // First, just try to read the computation, if there is something
                 // there, we just want to quit fast...
@@ -50,7 +50,7 @@ pub fn start_computation(aeon_string: &str) -> BackendResponse {
                 // will have to wait for us to end before writing down the graph and other
                 // stuff.
                 let cmp_thread = std::thread::spawn(move || {
-                    let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+                    let cmp: Arc<RwLock<Option<Computation>>> = session.clone();
                     match AsyncGraph::new(network) {
                         Ok(graph) => {
                             // Now that we have graph, we can create classifier and progress
@@ -117,8 +117,7 @@ pub fn start_computation(aeon_string: &str) -> BackendResponse {
     }
 }
 
-pub fn cancel_computation() -> BackendResponse {
-    let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+pub fn cancel_computation(cmp: ArcComputation) -> BackendResponse {
     {
         // first just check there is something to cancel
         let cmp = cmp.read().unwrap();

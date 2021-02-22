@@ -1,8 +1,7 @@
-use crate::{BackendResponse, Computation, COMPUTATION};
+use crate::{ArcComputation, BackendResponse};
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, RwLock};
 
-pub fn ping() -> BackendResponse {
+pub fn ping(cmp: ArcComputation) -> BackendResponse {
     let mut response = object! {
         "timestamp" => json::Null,          // if there is some computation (not necessarily running, this is the time when it started
         "is_cancelled" => false,            // true if the computation has been canceled
@@ -13,7 +12,6 @@ pub fn ping() -> BackendResponse {
     };
     {
         // Read data from current computation if available...
-        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
         let cmp = cmp.read().unwrap();
         if let Some(computation) = &*cmp {
             response["timestamp"] = (computation.start_timestamp() as u64).into();

@@ -1,13 +1,11 @@
-use crate::{BackendResponse, Computation, COMPUTATION};
+use crate::{ArcComputation, BackendResponse};
 use json::JsonValue;
 use std::convert::TryFrom;
-use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-pub fn get_results() -> BackendResponse {
+pub fn get_results(cmp: ArcComputation) -> BackendResponse {
     let is_partial;
     let (data, elapsed) = {
-        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
         let cmp = cmp.read().unwrap();
         if let Some(cmp) = &*cmp {
             is_partial = cmp.thread.is_some();
