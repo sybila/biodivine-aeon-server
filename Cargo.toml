@@ -1,6 +1,6 @@
 [package]
 name = "biodivine-aeon-server"
-version = "0.1.2"
+version = "0.1.2-edition.2019.1"
 authors = ["Samuel Pastva <daemontus@gmail.com>"]
 edition = "2018"
 
@@ -10,9 +10,9 @@ rustdoc-args = ["--html-in-header", "docs-head.html"]
 
 [profile.release]
 # This is important for profiling - otherwise we would get unreadable traces.
-debug = true
+#debug = true
 # This gives a marginally better runtime, but a much much longer compile times, so disabled by default.
-#lto = true
+lto = true
 
 [dependencies]
 web-view = { git = "https://github.com/daemontus/web-view.git", branch = "master" }

@@ -105,7 +105,8 @@ impl AeonSession {
 }
 
 pub fn handle_bridge_request(web_view: &mut WebView<ArcComputation>, arg: &str) -> WVResult {
-    println!("Request: {}", arg);
+    // TODO: This print should be enabled/disabled based on some env. property.
+    //println!("Request: {}", arg);
     match json::parse(arg) {
         Ok(json) => {
             let id: u64 = json["requestId"].as_u64().unwrap();
@@ -125,7 +126,6 @@ pub fn handle_bridge_request(web_view: &mut WebView<ArcComputation>, arg: &str) 
                 tfd::message_box_ok("Aeon", &message, icon);
                 Ok(())
             } else if path == "confirm" {
-                println!("Confirm");
                 let message: &str = json["message"].as_str().unwrap();
                 let result = match tfd::message_box_yes_no("Aeon", message, MessageBoxIcon::Warning, YesNo::No) {
                     YesNo::No => false,
@@ -161,7 +161,7 @@ pub fn handle_bridge_request(web_view: &mut WebView<ArcComputation>, arg: &str) 
                     process_request(web_view.user_data().clone(), path, &json).json();
                 response["requestId"] = id.into();
                 let command = format!("NativeBridge.handleResponse({})", json::stringify(response));
-                println!("Command: {}", command);
+                //println!("Command: {}", command);
                 web_view.eval(&command)
             }
         }
