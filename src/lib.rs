@@ -154,6 +154,13 @@ pub fn handle_bridge_request(web_view: &mut WebView<ArcComputation>, arg: &str) 
                     .show_save_single_file()
                     .unwrap();
                 if let Some(path) = path {
+                    // On MacOS this sometimes happens...
+                    let path = path.display().to_string();
+                    let path = if path.starts_with("file://") {
+                        &path[7..]
+                    } else {
+                        &path
+                    };
                     match std::fs::write(&path, &content) {
                         Ok(()) => (),
                         Err(e) => {
