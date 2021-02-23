@@ -1,5 +1,3 @@
-extern crate tinyfiledialogs as tfd;
-
 use biodivine_aeon_server::{AeonSession, OPEN_MODEL};
 mod test_main;
 use std::sync::mpsc::channel;

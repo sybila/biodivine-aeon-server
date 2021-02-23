@@ -3,7 +3,7 @@ extern crate lazy_static;
 #[macro_use]
 extern crate json;
 extern crate html_escape;
-extern crate tinyfiledialogs as tfd;
+extern crate native_dialog;
 
 use crate::requests::process_request;
 use crate::scc::{Classifier, ProgressTracker};
@@ -14,8 +14,8 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tfd::{MessageBoxIcon, YesNo};
 use web_view::{Content, WVResult, WebView};
+use native_dialog::{MessageDialog, MessageType, FileDialog};
 
 pub mod scc;
 
@@ -118,19 +118,25 @@ pub fn handle_bridge_request(web_view: &mut WebView<ArcComputation>, arg: &str) 
                 let message: String = json["message"].as_str().map(|i| i.to_string()).unwrap_or(String::new());
                 let message_type: &str = json["type"].as_str().unwrap();
                 let icon = match message_type {
-                    "error" => MessageBoxIcon::Error,
-                    "warning" => MessageBoxIcon::Warning,
-                    "question" => MessageBoxIcon::Question,
-                    _ => MessageBoxIcon::Info
+                    "error" => MessageType::Error,
+                    "warning" => MessageType::Warning,
+                    "question" => MessageType::Warning,
+                    _ => MessageType::Info
                 };
-                tfd::message_box_ok("Aeon", &message, icon);
+                MessageDialog::new()
+                    .set_type(icon)
+                    .set_text(&message)
+                    .set_title("Aeon")
+                    .show_alert()
+                    .unwrap();
                 Ok(())
             } else if path == "confirm" {
                 let message: &str = json["message"].as_str().unwrap();
-                let result = match tfd::message_box_yes_no("Aeon", message, MessageBoxIcon::Warning, YesNo::No) {
-                    YesNo::No => false,
-                    YesNo::Yes => true
-                };
+                let result = MessageDialog::new()
+                    .set_text(message)
+                    .set_title("Aeon")
+                    .show_confirm()
+                    .unwrap();
                 let command = format!("NativeBridge.handleResponse({})", json::stringify(object! {
                     "status": true,
                     "result": object! {
@@ -142,20 +148,25 @@ pub fn handle_bridge_request(web_view: &mut WebView<ArcComputation>, arg: &str) 
             } else if path == "save_file" {
                 let suggested_name: &str = json["name"].as_str().unwrap();
                 let content: &str = json["content"].as_str().unwrap();
-                match tfd::save_file_dialog("Save file...", suggested_name) {
-                    Some(path) => match std::fs::write(&path, &content) {
-                        Ok(()) => Ok(()),
+                let path = FileDialog::new()
+                    .set_location("~")
+                    .set_filename(suggested_name)
+                    .show_save_single_file()
+                    .unwrap();
+                if let Some(path) = path {
+                    match std::fs::write(&path, &content) {
+                        Ok(()) => (),
                         Err(e) => {
-                            tfd::message_box_ok(
-                                "File Error",
-                                &format!("Cannot save file: {}", e),
-                                MessageBoxIcon::Error,
-                            );
-                            Ok(())
+                            MessageDialog::new()
+                                .set_type(MessageType::Error)
+                                .set_title("File Error")
+                                .set_text(&format!("Cannot save file: {}", e))
+                                .show_alert()
+                                .unwrap();
                         }
-                    },
-                    None => Ok(()),
+                    };
                 }
+                Ok(())
             } else {
                 let mut response =
                     process_request(web_view.user_data().clone(), path, &json).json();
