@@ -22,7 +22,7 @@ pub mod scc;
 /// Module for handling different types of Aeon API requests.
 pub mod requests;
 
-const INDEX: &str = include_str!("../index.dev.bundle.html");
+const INDEX: &str = include_str!("../assets/index.bundle.html");
 
 lazy_static! {
     /// Used to open new windows. The string contains aeon model which is supposed to be open.
