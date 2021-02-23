@@ -34,3 +34,12 @@ args = ["build", "--release", "--no-default-features"]
 [tasks.experiment]
 command = "cargo"
 args = ["run", "--release", "--bin", "experiment"]
+
+[tasks.bundle]
+command = "cargo"
+args = ["bundle"]	# https://github.com/burtonageo/cargo-bundle
+
+[tasks.dmg]
+dependencies = ["bundle"]
+command = "create-dmg" # https://github.com/sindresorhus/create-dmg
+args = ["target/release/bundle/osx/Aeon 2019.app"]

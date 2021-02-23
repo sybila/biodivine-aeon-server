@@ -2,12 +2,22 @@
 name = "biodivine-aeon-server"
 version = "0.1.2-edition.2019.1"
 authors = ["Samuel Pastva <daemontus@gmail.com>"]
+description = "A Boolean network analysis toobox."
 edition = "2018"
 build = "build.rs"
 
 # Enable rich docs for some online docs autogen services.
 [package.metadata.docs.rs]
 rustdoc-args = ["--html-in-header", "docs-head.html"]
+
+[package.metadata.bundle]
+name = "Aeon 2019"
+identifier = "cz.muni.fi.biodivine.Aeon"
+icon = ["./assets/icon.png", "./assets/icon.ico", "./assets/icon.icns"]
+version = "0.1.2-edition.2019.1"
+category = "public.app-category.productivity"
+short_description = "A Boolean network analysis toobox."
+deb_depends = ["webkit2gtk-4.0"]
 
 [profile.release]
 # This is important for profiling - otherwise we would get unreadable traces.
