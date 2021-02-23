@@ -37,7 +37,7 @@ args = ["run", "--release", "--bin", "experiment"]
 
 [tasks.bundle]
 command = "cargo"
-args = ["bundle"]	# https://github.com/burtonageo/cargo-bundle
+args = ["bundle", "--release"]	# https://github.com/burtonageo/cargo-bundle
 
 [tasks.dmg]
 dependencies = ["bundle"]
