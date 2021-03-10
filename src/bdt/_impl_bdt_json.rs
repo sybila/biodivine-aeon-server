@@ -1,5 +1,5 @@
 use crate::bdt::_impl_bdt_node::class_list_cardinality;
-use crate::bdt::{AttributeId, Bdt, BdtNode, BdtNodeId};
+use crate::bdt::{AttributeId, Bdt, BdtNode, BdtNodeId, BifurcationFunction};
 use crate::scc::Class;
 use crate::util::functional::Functional;
 use crate::util::index_type::IndexType;
@@ -9,31 +9,56 @@ use std::collections::HashMap;
 
 impl BdtNode {
     /// Convert this BDT node to json value with all available information stored in the node.
-    pub fn to_json(&self) -> JsonValue {
+    ///
+    /// The conversion accepts a precision attribute (see `Bdt` documentation) which can turn
+    /// a mixed/decision node into a leaf node during conversion.
+    pub fn to_json(&self, precision: Option<u32>) -> JsonValue {
         match self {
             BdtNode::Leaf { class, params } => object! {
                 "type" => "leaf".to_string(),
                 "cardinality" => params.approx_cardinality(),
                 "class" => format!("{}", class),
             },
-            BdtNode::Unprocessed { classes } => object! {
-                "type" => "unprocessed".to_string(),
-                "cardinality" => class_list_cardinality(classes),
-                "classes" => class_list_to_json(classes),
-            },
+            BdtNode::Unprocessed { classes } => {
+                if let Some((major_class, major_params)) = get_majority_class(classes, precision) {
+                    object! {
+                        "type" => "leaf".to_string(),
+                        "cardinality" => major_params.approx_cardinality(),
+                        "class" => major_class.to_string(),
+                        "all_classes" => class_list_to_json(classes),
+                    }
+                } else {
+                    object! {
+                        "type" => "unprocessed".to_string(),
+                        "cardinality" => class_list_cardinality(classes),
+                        "classes" => class_list_to_json(classes),
+                    }
+                }
+            }
             BdtNode::Decision {
                 attribute,
                 left,
                 right,
                 classes,
-            } => object! {
-                "type" => "decision".to_string(),
-                "cardinality" => class_list_cardinality(classes),
-                "classes" => class_list_to_json(classes),
-                "attribute_id" => attribute.0,
-                "left" => left.0,
-                "right" => right.0,
-            },
+            } => {
+                if let Some((major_class, major_params)) = get_majority_class(classes, precision) {
+                    object! {
+                        "type" => "leaf".to_string(),
+                        "cardinality" => major_params.approx_cardinality(),
+                        "class" => major_class.to_string(),
+                        "all_classes" => class_list_to_json(classes),
+                    }
+                } else {
+                    object! {
+                        "type" => "decision".to_string(),
+                        "cardinality" => class_list_cardinality(classes),
+                        "classes" => class_list_to_json(classes),
+                        "attribute_id" => attribute.0,
+                        "left" => left.0,
+                        "right" => right.0,
+                    }
+                }
+            }
         }
     }
 }
@@ -41,18 +66,34 @@ impl BdtNode {
 impl Bdt {
     /// Convert the whole tree into one json array.
     pub fn to_json(&self) -> JsonValue {
-        JsonValue::from(
-            self.nodes()
-                .map(|id| self.node_to_json(id))
-                .collect::<Vec<_>>(),
-        )
+        // The order of nodes is irrelevant, but we only want to include nodes that are relevant
+        // with the selected precision.
+        let mut json_array = JsonValue::Array(vec![]);
+        let mut stack = vec![self.root_id()];
+        while let Some(top) = stack.pop() {
+            let node_json = self.node_to_json(top);
+            if node_json.has_key("left") {
+                let left = node_json["left"].as_usize().unwrap();
+                let left_id = BdtNodeId::try_from(left, &self).unwrap();
+                stack.push(left_id);
+            }
+            if node_json.has_key("right") {
+                let right = node_json["right"].as_usize().unwrap();
+                let right_id = BdtNodeId::try_from(right, &self).unwrap();
+                stack.push(right_id);
+            }
+            json_array.push(node_json).unwrap();
+        }
+        json_array
     }
 
     /// Convert a BDT node to json, including extra info compared to `BDTNode::to_json`.
     ///
     /// The extra info covers the node id as well as attribute name for decision nodes.
     pub fn node_to_json(&self, id: BdtNodeId) -> JsonValue {
-        self[id].to_json().apply(|result| {
+        self[id].to_json(self.precision).apply(|result| {
+            // Node conversion has no idea about node ids or attribute names, so we need to add
+            // them after the fact.
             result.insert("id", id.0).unwrap();
             if result.has_key("attribute_id") {
                 let attr_id: AttributeId = result["attribute_id"]
@@ -92,5 +133,23 @@ pub(super) fn class_to_json((class, params): (&Class, &GraphColors)) -> JsonValu
     object! {
         "cardinality" => params.approx_cardinality(),
         "class" => format!("{}", class),
+    }
+}
+
+pub(super) fn get_majority_class(
+    classes: &BifurcationFunction,
+    precision: Option<u32>,
+) -> Option<(&Class, &GraphColors)> {
+    if let Some(precision) = precision {
+        let total_node_cardinality = class_list_cardinality(classes);
+        let return_when = total_node_cardinality * (f64::from(precision) / 10000.0);
+        for (class, params) in classes {
+            if params.approx_cardinality() >= return_when {
+                return Some((class, params));
+            }
+        }
+        None
+    } else {
+        None
     }
 }

@@ -278,6 +278,22 @@ fn revert_decision(node_id: String) -> BackendResponse {
     };
 }
 
+#[post("/apply_tree_precision/<precision>")]
+fn apply_tree_precision(precision: String) -> BackendResponse {
+    if let Ok(precision) = precision.parse::<u32>() {
+        let tree = TREE.clone();
+        let mut tree = tree.write().unwrap();
+        if let Some(tree) = tree.as_mut() {
+            tree.set_precision(precision);
+            BackendResponse::ok("\"ok\"")
+        } else {
+            BackendResponse::err(&"Cannot modify decision tree.".to_string())
+        }
+    } else {
+        BackendResponse::err(&"Given precision is not a number.".to_string())
+    }
+}
+
 fn max_parameter_cardinality(function: &FnUpdate) -> usize {
     match function {
         FnUpdate::Const(_) | FnUpdate::Var(_) => 0,
@@ -1230,7 +1246,8 @@ fn main() {
                 get_bifurcation_tree,
                 get_attributes,
                 apply_attribute,
-                revert_decision
+                revert_decision,
+                apply_tree_precision,
             ],
         )
         .launch();

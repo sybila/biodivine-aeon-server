@@ -17,8 +17,33 @@ impl Bdt {
             attributes,
             storage: HashMap::new(),
             next_id: 0,
+            precision: None,
         }
         .apply(|t| t.insert_node_with_classes(classes))
+    }
+
+    /// Sets the precision of this tree in the hundreds of percent (i.e. 9753 becomes 97.53%).
+    ///
+    /// If the value truncated to 50-100%.
+    ///
+    /// Note that while here, precision is exact, the final process involves floating point
+    /// math and can be therefore inexact.
+    pub fn set_precision(&mut self, precision: u32) {
+        if precision < 5001 {
+            self.precision = Some(5001);
+        } else if precision >= 10000 {
+            self.precision = None;
+        } else {
+            self.precision = Some(precision);
+        }
+    }
+
+    pub fn get_precision(&self) -> u32 {
+        if let Some(precision) = self.precision {
+            precision
+        } else {
+            5000
+        }
     }
 
     /// Node ID of the tree root.

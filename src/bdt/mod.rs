@@ -61,10 +61,19 @@ pub struct AttributeId(usize);
 /// A Bifurcation decision tree. It stores the BDT nodes, mapping IDs to actual structures.
 ///
 /// It is the owner of the tree memory, so every addition/deletion in the tree must happen here.
+///
+/// To implement precisions, we do not actually modify the tree. Instead, we set a precision
+/// value in the tree attributes, and then we only display the tree with the specified precision.
+/// This means the editor is not losing any information when precision is applied and by disabling
+/// precision, the original state is restored.
 pub struct Bdt {
     storage: HashMap<usize, BdtNode>,
     attributes: Vec<Attribute>,
     next_id: usize,
+    // Represents a hundreds of a percent threshold (So 9350 means 95.30%) at which a mixed node
+    // is assumed to be a leaf, or `None` is the tree is exact. We assume that this number is
+    // always >50% to make sure the decision is unique.
+    precision: Option<u32>,
 }
 
 type BdtNodeIds<'a> = Map<Keys<'a, usize, BdtNode>, fn(&usize) -> BdtNodeId>;
