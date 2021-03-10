@@ -1121,18 +1121,15 @@ fn sbml_to_aeon(data: Data) -> BackendResponse {
 
 /// Try to read the model layout metadata from the given aeon file.
 fn read_layout(aeon_string: &str) -> HashMap<String, (f64, f64)> {
-    let re = Regex::new(
-        r"^\s*#position:(?P<var>[a-zA-Z0-9_]+):(?P<x>.+?),(?P<y>.+?)\s*$",
-    )
-    .unwrap();
+    let re = Regex::new(r"^\s*#position:(?P<var>[a-zA-Z0-9_]+):(?P<x>.+?),(?P<y>.+?)\s*$").unwrap();
     let mut layout = HashMap::new();
     for line in aeon_string.lines() {
         if let Some(captures) = re.captures(line) {
             let var = captures["var"].to_string();
             let x = captures["x"].parse::<f64>();
             let y = captures["y"].parse::<f64>();
-            if x.is_ok() && y.is_ok() {
-                layout.insert(var, (x.unwrap(), y.unwrap()));
+            if let (Ok(x), Ok(y)) = (x, y) {
+                layout.insert(var, (x, y));
             }
         }
     }
