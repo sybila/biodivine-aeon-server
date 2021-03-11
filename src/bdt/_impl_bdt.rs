@@ -131,7 +131,8 @@ impl Bdt {
             return Vec::new();
         }
         let original_entropy = entropy(&classes);
-        self.attributes()
+        let attributes = self
+            .attributes()
             .filter_map(|id| {
                 let attribute = &self[id];
                 let (left, right) = attribute.split_function(&classes);
@@ -148,7 +149,23 @@ impl Bdt {
             .apply(|it| {
                 it.sort_by(|l, r| l.information_gain.partial_cmp(&r.information_gain).unwrap());
                 it.reverse();
-            })
+            });
+
+        Vec::new().apply(|result| {
+            for a in &attributes {
+                let attr_a = &self[a.attribute];
+                let mut skip = false;
+                for b in &attributes {
+                    let attr_b = &self[b.attribute];
+                    if attr_b.is_specification_of(attr_a) {
+                        skip |= a.left == b.left && a.right == b.right;
+                    }
+                }
+                if !skip {
+                    result.push(a.clone());
+                }
+            }
+        })
     }
 
     /// Replace an unprocessed node with a decision node using the given attribute.

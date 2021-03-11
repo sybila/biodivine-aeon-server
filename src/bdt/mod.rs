@@ -1,5 +1,6 @@
 use crate::scc::Class;
 use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
+use biodivine_lib_param_bn::VariableId;
 use std::collections::hash_map::Keys;
 use std::collections::HashMap;
 use std::iter::Map;
@@ -86,6 +87,16 @@ pub struct Attribute {
     name: String,
     positive: GraphColors,
     negative: GraphColors,
+    context: Option<AttributeContext>,
+}
+
+/// A property of essential attributes that allows us to say when a certain attribute is
+/// superseded by its more specific version.
+#[derive(Clone)]
+struct AttributeContext {
+    target: VariableId,
+    regulator: VariableId,
+    context: Vec<String>,
 }
 
 /// A small helper struct that represents the data produced when an attribute is applied to
@@ -93,6 +104,7 @@ pub struct Attribute {
 ///
 /// (Right now, there are almost big picture plans for the API of this thing, so it is left
 /// public with almost no support, but maybe we'll come up with something later)
+#[derive(Clone)]
 pub struct AppliedAttribute {
     pub attribute: AttributeId,
     pub left: BifurcationFunction,

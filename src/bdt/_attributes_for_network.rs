@@ -1,4 +1,4 @@
-use crate::bdt::{Attribute, Bdt, BifurcationFunction};
+use crate::bdt::{Attribute, AttributeContext, Bdt, BifurcationFunction};
 use crate::util::functional::Functional;
 use biodivine_lib_bdd::Bdd;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
@@ -43,6 +43,7 @@ fn attributes_for_network_inputs(graph: &SymbolicAsyncGraph, out: &mut Vec<Attri
                 name: graph.as_network().get_variable_name(v).clone(),
                 negative: graph.empty_colors().copy(bdd.not()),
                 positive: graph.empty_colors().copy(bdd),
+                context: None,
             })
         }
     }
@@ -60,6 +61,7 @@ fn attributes_for_constant_parameters(graph: &SymbolicAsyncGraph, out: &mut Vec<
                 name: graph.as_network()[p].get_name().clone(),
                 negative: graph.empty_colors().copy(bdd.not()),
                 positive: graph.empty_colors().copy(bdd),
+                context: None,
             })
         }
     }
@@ -101,6 +103,11 @@ fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<
                 ),
                 negative: graph.empty_colors().copy(observability.not()),
                 positive: graph.empty_colors().copy(observability),
+                context: Some(AttributeContext {
+                    regulator: reg.get_regulator(),
+                    target: reg.get_target(),
+                    context: vec![],
+                }),
             });
         }
 
@@ -125,6 +132,11 @@ fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<
                 ),
                 positive: graph.empty_colors().copy(non_activation.not()),
                 negative: graph.empty_colors().copy(non_activation),
+                context: Some(AttributeContext {
+                    regulator: reg.get_regulator(),
+                    target: reg.get_target(),
+                    context: vec![],
+                }),
             });
 
             out.push(Attribute {
@@ -135,6 +147,11 @@ fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<
                 ),
                 positive: graph.empty_colors().copy(non_inhibition.not()),
                 negative: graph.empty_colors().copy(non_inhibition),
+                context: Some(AttributeContext {
+                    regulator: reg.get_regulator(),
+                    target: reg.get_target(),
+                    context: vec![],
+                }),
             });
         }
     }
@@ -167,6 +184,7 @@ fn attributes_for_implicit_function_tables(graph: &SymbolicAsyncGraph, out: &mut
                     name: name.replace("\"", ""),
                     negative: graph.mk_empty_colors().copy(bdd.not()),
                     positive: graph.mk_empty_colors().copy(bdd),
+                    context: None,
                 });
             }
         }
@@ -194,6 +212,7 @@ fn attributes_for_explicit_function_tables(graph: &SymbolicAsyncGraph, out: &mut
                     name: name.replace("\"", ""),
                     negative: graph.mk_empty_colors().copy(bdd.not()),
                     positive: graph.mk_empty_colors().copy(bdd),
+                    context: None,
                 });
             }
         }
@@ -246,7 +265,7 @@ fn attributes_for_conditional_observability(graph: &SymbolicAsyncGraph, out: &mu
                 let regulator_is_false = context.mk_state_variable_is_true(r).not();
 
                 // Unconditional observability is already covered above, so we don't handle it here
-                for (condition_name, condition_bdd) in contexts {
+                for (condition_name, condition_list, condition_bdd) in contexts {
                     // Restrict to values that satisfy conditions
                     let fn_is_true = fn_is_true.and(&condition_bdd);
                     let fn_x1_to_1 = fn_is_true.and(&regulator_is_true).var_project(r_var);
@@ -264,6 +283,11 @@ fn attributes_for_conditional_observability(graph: &SymbolicAsyncGraph, out: &mu
                         ),
                         negative: graph.empty_colors().copy(observability.not()),
                         positive: graph.empty_colors().copy(observability),
+                        context: Some(AttributeContext {
+                            target: v,
+                            regulator: r,
+                            context: condition_list,
+                        }),
                     });
                 }
             }
@@ -293,22 +317,23 @@ fn variable_contexts(function: &FnUpdate) -> Vec<Vec<VariableId>> {
 ///
 /// This should also automatically filter out empty results, so you can
 /// include A and !A in the conditions without problems.
-fn make_contexts(conditions: &[(String, Bdd)]) -> Vec<(String, Bdd)> {
+fn make_contexts(conditions: &[(String, Bdd)]) -> Vec<(String, Vec<String>, Bdd)> {
     fn recursion(
         conditions: &[(String, Bdd)],
-        partial_condition: &(String, Bdd),
-        out: &mut Vec<(String, Bdd)>,
+        partial_condition: &(String, Vec<String>, Bdd),
+        out: &mut Vec<(String, Vec<String>, Bdd)>,
     ) {
         if conditions.is_empty() {
             return;
         }
         for (i, c) in conditions.iter().enumerate() {
             let updated_name = format!("{}, {}", partial_condition.0, c.0);
-            let updated_colors = partial_condition.1.and(&c.1);
+            let updated_colors = partial_condition.2.and(&c.1);
             if updated_colors.is_false() {
                 continue;
             }
-            let updated = (updated_name, updated_colors);
+            let update_condition_list = partial_condition.1.clone().apply(|i| i.push(c.0.clone()));
+            let updated = (updated_name, update_condition_list, updated_colors);
             if i != conditions.len() - 1 {
                 recursion(&conditions[(i + 1)..], &updated, out);
             }
@@ -318,12 +343,12 @@ fn make_contexts(conditions: &[(String, Bdd)]) -> Vec<(String, Bdd)> {
     if conditions.is_empty() {
         return vec![];
     }
-    let mut result: Vec<(String, Bdd)> = Vec::new();
+    let mut result: Vec<(String, Vec<String>, Bdd)> = Vec::new();
     for (i, c) in conditions.iter().enumerate() {
         if c.1.is_false() {
             continue;
         }
-        let pair = c.clone();
+        let pair = (c.0.clone(), vec![c.0.clone()], c.1.clone());
         if i != conditions.len() - 1 {
             recursion(&conditions[(i + 1)..], &pair, &mut result);
         }
