@@ -294,6 +294,17 @@ fn apply_tree_precision(precision: String) -> BackendResponse {
     }
 }
 
+#[get("/get_tree_precision")]
+fn get_tree_precision() -> BackendResponse {
+    let tree = TREE.clone();
+    let tree = tree.read().unwrap();
+    if let Some(tree) = tree.as_ref() {
+        BackendResponse::ok(&format!("{}", tree.get_precision()))
+    } else {
+        BackendResponse::err(&"Cannot modify decision tree.".to_string())
+    }
+}
+
 fn max_parameter_cardinality(function: &FnUpdate) -> usize {
     match function {
         FnUpdate::Const(_) | FnUpdate::Var(_) => 0,
@@ -1248,6 +1259,7 @@ fn main() {
                 apply_attribute,
                 revert_decision,
                 apply_tree_precision,
+                get_tree_precision,
             ],
         )
         .launch();

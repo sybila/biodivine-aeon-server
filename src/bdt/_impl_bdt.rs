@@ -42,7 +42,7 @@ impl Bdt {
         if let Some(precision) = self.precision {
             precision
         } else {
-            5000
+            10000
         }
     }
 
