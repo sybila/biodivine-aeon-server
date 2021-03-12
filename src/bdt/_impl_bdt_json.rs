@@ -5,7 +5,7 @@ use crate::util::functional::Functional;
 use crate::util::index_type::IndexType;
 use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use json::JsonValue;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 impl BdtNode {
     /// Convert this BDT node to json value with all available information stored in the node.
@@ -66,6 +66,17 @@ impl BdtNode {
 impl Bdt {
     /// Convert the whole tree into one json array.
     pub fn to_json(&self) -> JsonValue {
+        let ids = self
+            .storage
+            .keys()
+            .map(|id| BdtNodeId(*id))
+            .collect::<HashSet<_>>();
+        self.to_json_partial(&ids)
+    }
+
+    /// A variant of `to_json` which allows to specify a subset of IDs that are considered during
+    /// export. Other nodes are not included in the result.
+    pub fn to_json_partial(&self, ids: &HashSet<BdtNodeId>) -> JsonValue {
         // The order of nodes is irrelevant, but we only want to include nodes that are relevant
         // with the selected precision.
         let mut json_array = JsonValue::Array(vec![]);
@@ -82,7 +93,9 @@ impl Bdt {
                 let right_id = BdtNodeId::try_from(right, &self).unwrap();
                 stack.push(right_id);
             }
-            json_array.push(node_json).unwrap();
+            if ids.contains(&top) {
+                json_array.push(node_json).unwrap();
+            }
         }
         json_array
     }

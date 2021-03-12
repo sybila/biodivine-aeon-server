@@ -231,17 +231,17 @@ impl Bdt {
     /// up to the given `depth`.
     ///
     /// Returns the list of changed node ids.
-    pub fn auto_expand(&mut self, node: BdtNodeId, depth: usize) -> Vec<BdtNodeId> {
+    pub fn auto_expand(&mut self, node: BdtNodeId, depth: u32) -> HashSet<BdtNodeId> {
         let mut changed = HashSet::new();
         self.auto_expand_recursive(&mut changed, node, depth);
-        changed.into_iter().collect()
+        changed
     }
 
     fn auto_expand_recursive(
         &mut self,
         changed: &mut HashSet<BdtNodeId>,
         node: BdtNodeId,
-        depth: usize,
+        depth: u32,
     ) {
         if depth == 0 {
             return;

@@ -278,6 +278,34 @@ fn revert_decision(node_id: String) -> BackendResponse {
     };
 }
 
+#[post("/auto_expand/<node_id>/<depth>")]
+fn auto_expand(node_id: String, depth: String) -> BackendResponse {
+    let depth: u32 = {
+        let parsed = depth.parse::<u32>();
+        if let Ok(depth) = parsed {
+            depth
+        } else {
+            return BackendResponse::err(&format!("Invalid tree depth: {}", depth));
+        }
+    };
+    if depth > 10 {
+        return BackendResponse::err(&"Maximum allowed depth is 10.".to_string());
+    }
+    let tree = TREE.clone();
+    let mut tree = tree.write().unwrap();
+    if let Some(tree) = tree.as_mut() {
+        let node_id: BdtNodeId = if let Some(node_id) = BdtNodeId::try_from_str(&node_id, tree) {
+            node_id
+        } else {
+            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+        };
+        let changed = tree.auto_expand(node_id, depth);
+        BackendResponse::ok(&tree.to_json_partial(&changed).to_string())
+    } else {
+        BackendResponse::err(&"Cannot modify decision tree.".to_string())
+    }
+}
+
 #[post("/apply_tree_precision/<precision>")]
 fn apply_tree_precision(precision: String) -> BackendResponse {
     if let Ok(precision) = precision.parse::<u32>() {
@@ -1260,6 +1288,7 @@ fn main() {
                 revert_decision,
                 apply_tree_precision,
                 get_tree_precision,
+                auto_expand,
             ],
         )
         .launch();
