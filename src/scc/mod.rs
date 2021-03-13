@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Mutex;
 
+mod _impl_behaviour;
 /// **(internal)** Utility methods for the behaviour `Class`.
 mod _impl_class;
 /// **(internal)** Implementation of `Behaviour` classification in `Classifier`.

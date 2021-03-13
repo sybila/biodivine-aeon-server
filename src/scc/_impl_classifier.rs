@@ -57,6 +57,18 @@ impl Classifier {
         (*data).clone()
     }
 
+    /// Export only components that have the specified behaviour.
+    pub fn export_components_with_class(&self, class: Behaviour) -> Vec<GraphColoredVertices> {
+        let data = self.attractors.lock().unwrap().clone();
+        data.into_iter()
+            .filter_map(|(attractor, behaviour)| {
+                behaviour
+                    .get(&class)
+                    .map(|colors| attractor.intersect_colors(colors))
+            })
+            .collect()
+    }
+
     /// Static function to classify just one component and immediately obtain results.
     pub fn classify_component(
         component: &GraphColoredVertices,
