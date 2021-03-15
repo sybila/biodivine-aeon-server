@@ -50,6 +50,25 @@ impl Classifier {
         (*data).clone()
     }
 
+    pub fn export_components(
+        &self,
+    ) -> Vec<(GraphColoredVertices, HashMap<Behaviour, GraphColors>)> {
+        let data = self.attractors.lock().unwrap();
+        (*data).clone()
+    }
+
+    /// Export only components that have the specified behaviour.
+    pub fn export_components_with_class(&self, class: Behaviour) -> Vec<GraphColoredVertices> {
+        let data = self.attractors.lock().unwrap().clone();
+        data.into_iter()
+            .filter_map(|(attractor, behaviour)| {
+                behaviour
+                    .get(&class)
+                    .map(|colors| attractor.intersect_colors(colors))
+            })
+            .collect()
+    }
+
     /// Static function to classify just one component and immediately obtain results.
     pub fn classify_component(
         component: &GraphColoredVertices,
@@ -102,6 +121,11 @@ impl Classifier {
         if !sink_params.is_empty() {
             component_classification.insert(Behaviour::Stability, sink_params);
         }
+        if not_sink_params.is_empty() {
+            let mut attractors = self.attractors.lock().unwrap();
+            (*attractors).push((component, component_classification));
+            return;
+        }
         if !not_sink_params.is_empty() {
             let mut disorder = graph.mk_empty_colors();
             for variable in graph.as_network().variables() {
@@ -126,10 +150,8 @@ impl Classifier {
                 component_classification.insert(Behaviour::Disorder, disorder.clone());
                 self.push(Behaviour::Disorder, disorder);
             }
-        }
-        {
             let mut attractors = self.attractors.lock().unwrap();
-            attractors.push((component, component_classification));
+            (*attractors).push((component, component_classification));
         }
     }
 

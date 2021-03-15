@@ -81,32 +81,5 @@ fn main() {
         "Analysis completed. Classes: {}",
         classifier.export_result().len()
     );
-
-    /*if graph.unit_colors().approx_cardinality() > 1.0 {
-        let mut done = false;
-        for (cls, colors) in classifier.export_result() {
-            if cls.get_vector().contains(&Behaviour::Disorder) {
-                done = true;
-                println!("=============================== WITNESS ===============================");
-                println!("{}", graph.pick_witness(&colors).to_string());
-            }
-        }
-        if !done {
-            for (cls, colors) in classifier.export_result() {
-                if cls.get_vector().contains(&Behaviour::Oscillation) {
-                    done = true;
-                    println!("=============================== WITNESS ===============================");
-                    println!("{}", graph.pick_witness(&colors).to_string());
-                }
-            }
-        }
-        if !done {
-            let (_, colors) = classifier.export_result().into_iter().max_by_key(|(c, _)| c.get_vector().len()).unwrap();
-            println!("=============================== WITNESS ===============================");
-            println!("{}", graph.pick_witness(&colors).to_string());
-        }
-    } else {
-        println!("ALREADY WITNESS.");
-    }*/
     println!("Elapsed time: {}s", (elapsed as f64) / 1000.0);
 }

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Mutex;
 
+mod _impl_behaviour;
 /// **(internal)** Utility methods for the behaviour `Class`.
 mod _impl_class;
 /// **(internal)** Implementation of `Behaviour` classification in `Classifier`.
@@ -10,6 +11,7 @@ mod _impl_classifier;
 mod _impl_progress_tracker;
 pub mod algo_interleaved_transition_guided_reduction;
 pub mod algo_saturated_reachability;
+pub mod algo_stability_analysis;
 pub mod algo_xie_beerel;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
