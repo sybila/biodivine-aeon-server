@@ -3,8 +3,8 @@
 
 use super::StateSet;
 use biodivine_lib_param_bn::bdd_params::BddParams;
-use biodivine_lib_std::param_graph::{EvolutionOperator, Params};
-use biodivine_lib_std::IdState;
+use biodivine_lib_param_bn::biodivine_std::structs::IdState;
+use biodivine_lib_param_bn::biodivine_std::traits::{EvolutionOperator, Set};
 
 pub fn guarded_reach<G>(fwd: &G, initial: &StateSet, guard: &StateSet) -> StateSet
 where

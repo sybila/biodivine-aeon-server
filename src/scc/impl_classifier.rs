@@ -1,8 +1,6 @@
 use super::{Behaviour, Class, Classifier, StateSet};
 use biodivine_lib_param_bn::async_graph::{AsyncGraph, DefaultEdgeParams};
 use biodivine_lib_param_bn::bdd_params::BddParams;
-use biodivine_lib_std::param_graph::{EvolutionOperator, Graph, Params};
-use biodivine_lib_std::IdState;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -11,6 +9,8 @@ use std::sync::Mutex;
 use crate::scc::algo_components::find_pivots_basic;
 #[cfg(feature = "extended_oscillation")]
 use crate::scc::algo_par_reach::next_step;
+use biodivine_lib_param_bn::biodivine_std::structs::IdState;
+use biodivine_lib_param_bn::biodivine_std::traits::{EvolutionOperator, Graph, Set};
 
 impl Classifier {
     pub fn new(graph: &AsyncGraph<DefaultEdgeParams>) -> Classifier {
@@ -161,5 +161,4 @@ impl Classifier {
 
         return result;
     }
-
 }

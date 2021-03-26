@@ -16,7 +16,6 @@ use rocket::response::{self, Responder, Response};
 use biodivine_aeon_server::scc::{Behaviour, Class, Classifier, ProgressTracker};
 use biodivine_lib_param_bn::async_graph::{AsyncGraph, DefaultEdgeParams};
 use biodivine_lib_param_bn::BooleanNetwork;
-use biodivine_lib_std::param_graph::{EvolutionOperator, Graph};
 use regex::Regex;
 use std::convert::TryFrom;
 
@@ -24,6 +23,7 @@ mod test_main;
 
 use biodivine_aeon_server::scc::algo_components::components;
 use biodivine_lib_param_bn::bdd_params::BddParams;
+use biodivine_lib_param_bn::biodivine_std::traits::{EvolutionOperator, Graph};
 use rocket::config::Environment;
 use rocket::{Config, Data};
 use std::collections::HashMap;
@@ -79,7 +79,7 @@ fn check_update_function(data: Data) -> BackendResponse {
     return match stream.read_to_string(&mut model_string) {
         Ok(_) => {
             let graph = BooleanNetwork::try_from(model_string.as_str()).and_then(|model| {
-                if model.graph().num_vars() <= 5 {
+                if model.as_graph().num_vars() <= 5 {
                     AsyncGraph::new(model)
                 } else {
                     Err("Function too large for on-the-fly analysis.".to_string())
@@ -299,10 +299,10 @@ fn get_attractors(class_str: String) -> BackendResponse {
                             let witness: BooleanNetwork = graph.make_witness(&class);
                             let witness_str = format!("{}", witness);
                             let mut all_variables = vec![];
-                            for id in witness.graph().variable_ids() {
+                            for id in witness.as_graph().variables() {
                                 all_variables.push(format!(
                                     "{:?}",
-                                    witness.graph().get_variable(id).to_string()
+                                    witness.as_graph().get_variable(id).to_string()
                                 ));
                             }
                             let var_count = all_variables.len();
@@ -607,7 +607,7 @@ fn sbml_to_aeon(data: Data) -> BackendResponse {
     let mut sbml_string = String::new();
     return match stream.read_to_string(&mut sbml_string) {
         Ok(_) => {
-            match BooleanNetwork::from_sbml(&sbml_string) {
+            match BooleanNetwork::try_from_sbml(&sbml_string) {
                 Ok((model, layout)) => {
                     let mut model_string = format!("{}", model); // convert back to aeon
                     model_string += "\n";
@@ -668,7 +668,7 @@ fn aeon_to_sbml(data: Data) -> BackendResponse {
         Ok(_) => match BooleanNetwork::try_from(aeon_string.as_str()) {
             Ok(network) => {
                 let layout = read_layout(&aeon_string);
-                let sbml_string = network.to_sbml(&layout);
+                let sbml_string = network.to_sbml(Some(&layout));
                 BackendResponse::ok(&object! { "model" => sbml_string }.to_string())
             }
             Err(error) => BackendResponse::err(&error),
@@ -692,7 +692,7 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
                     let witness = graph.make_witness(graph.unit_params());
                     let layout = read_layout(&aeon_string);
                     BackendResponse::ok(
-                        &object! { "model" => witness.to_sbml(&layout) }.to_string(),
+                        &object! { "model" => witness.to_sbml(Some(&layout)) }.to_string(),
                     )
                 }
                 Err(error) => BackendResponse::err(&error),

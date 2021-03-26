@@ -18,12 +18,12 @@ fn main() {
 
     let model = BooleanNetwork::try_from(buffer.as_str()).unwrap();
     let names: Vec<_> = model
-        .graph()
-        .variable_ids()
-        .map(|id| model.graph().get_variable(id).clone())
+        .as_graph()
+        .variables()
+        .map(|id| model.as_graph().get_variable(id).clone())
         .collect();
     println!("Model loaded...");
-    println!("{} variables: {:?}", model.graph().num_vars(), names);
+    println!("{} variables: {:?}", model.as_graph().num_vars(), names);
 
     let graph = AsyncGraph::new(model).unwrap();
 
