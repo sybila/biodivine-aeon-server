@@ -1,8 +1,10 @@
 #[macro_use]
 extern crate json;
 
-use crate::scc::ProgressTracker;
+use crate::scc::{ProgressTracker};
 use std::sync::atomic::AtomicBool;
+
+pub mod control;
 
 pub mod all;
 pub mod bdt;
