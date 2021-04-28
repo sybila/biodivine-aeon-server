@@ -1,0 +1,6 @@
+[book]
+authors = ["Samuel Pastva"]
+language = "en"
+multilingual = false
+src = "src"
+title = "AEON 2021: Manual"
