@@ -33,7 +33,7 @@ impl Attribute {
                 if my_ctx.regulator == their_ctx.regulator && my_ctx.target == their_ctx.target {
                     if my_ctx.context.len() > their_ctx.context.len() {
                         for v in &their_ctx.context {
-                            if my_ctx.context.iter().find(|it| *it == v).is_none() {
+                            if !my_ctx.context.iter().any(|it| it == v) {
                                 return false;
                             }
                         }

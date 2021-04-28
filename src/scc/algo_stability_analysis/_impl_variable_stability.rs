@@ -95,7 +95,7 @@ impl VariableStability {
             for (vector, colors) in self.to_vec() {
                 array
                     .push(object! {
-                        "vector": vector.to_json(),
+                        "vector": vector.export_json(),
                         "colors": colors.approx_cardinality(),
                     })
                     .unwrap();
