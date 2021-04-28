@@ -106,7 +106,7 @@ impl StabilityVector {
     ///
     /// If the value is already present, current vector is only copied.
     pub fn add(&self, stability: Stability) -> StabilityVector {
-        self.clone().apply(|out| match stability {
+        (*self).apply(|out| match stability {
             Stability::True => out.has_true = true,
             Stability::False => out.has_false = true,
             Stability::Unstable => out.has_unstable = true,
@@ -117,7 +117,7 @@ impl StabilityVector {
         !(self.has_unstable || self.has_false || self.has_true)
     }
 
-    pub fn to_json(&self) -> JsonValue {
+    pub fn export_json(&self) -> JsonValue {
         JsonValue::new_array().apply(|array| {
             if self.has_true {
                 array.push("true").unwrap();
