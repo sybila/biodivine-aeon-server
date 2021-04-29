@@ -13,4 +13,4 @@
   - [State space explorer](./attractor_bifurcation/state_space.md)
   - [Bifurcation decision trees](./attractor_bifurcation/decision_trees.md)
   - [Stability analysis](./attractor_bifurcation/stability_analysis.md)
-- [Building Aeon](./build.md)
+- [Building AEON](./build.md)

@@ -8,15 +8,15 @@ In this document, you can find information on how to use AEON to:
  - Create a Boolean network or import it from an existing `.sbml` or `.aeon` file.
  - Create a partially unknown Boolean network with logical parameters.
  - Check that the network is consistent with its regulatory graph.  
- - Compute asynchronous attractors of such a Boolean network.
+ - Compute asynchronous attractors of a Boolean network.
  - Visualize the state space of the computed attractors.
  - Construct a *bifurcation decision tree*: A visual representation of the dependence between network parameters and attractors.
- - Perform stability analysis of the attractors in different conditions.
+ - Perform stability analysis of the attractors for different conditions.
 
 AEON is a constantly evolving academic project. If you have any problem or run into some unexpected behaviour, please contact us at `sybila@fi.muni.cz`. We will be happy to help you and make AEON a more useful tool for you. Finally, if you found AEON useful in your research, please cite it using the following publication:
 
 ```
 Beneš, N., Brim, L., Kadlecaj, J., Pastva, S., & Šafránek, D. (2020, July). 
-AEON: attractor bifurcation analysis of parametrised boolean networks. 
+AEON: Attractor Bifurcation Analysis of Parametrised Boolean Networks. 
 In International Conference on Computer Aided Verification (pp. 569-581).
 ```
