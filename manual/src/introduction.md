@@ -3,6 +3,7 @@
 AEON is available as an online tool at [https://biodivine.fi.muni.cz/aeon/](https://biodivine.fi.muni.cz/aeon/). On this website, you can pick the version of AEON you want to use (naturally, we recommend the latest version), and you will be redirected to its online interface, which should look similar to this:
 
 ![AEON Screenshot](assets/ui_screenshot.png)
+*AEON User interface.*
 
 In the middle, there is a quick help message, which disappears when you load a Boolean network, but you can always bring it back by holding down **H**. On the left, there is a main menu which you can use to import existing networks, manage the details of your model, or start attractor analysis.
 

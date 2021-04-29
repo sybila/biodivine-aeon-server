@@ -3,6 +3,7 @@
 To download the compute engine for the version of AEON you are using, pick `Compute Engine` in the left menu, and download a pre-compiled binary for your operating system. Compute engine binaries for different versions of AEON are in general not compatible, and you should be therefore always using the compute engine of your current version: 
 
 ![Download Compute Enging](assets/download_compute_engine.gif)
+*Downloading AEON compute engine.*
 
 Once the download is finished, you can unzip the file. Inside, you should find a `compute-engine` binary that you need to execute.
 
@@ -33,6 +34,7 @@ The compute engine automatically starts a local webserver on port `8000` through
 Once compute engine is running, you can go back to the AEON website and either (a) refresh the website, if running correctly, the compute engine should connect automatically, or (b) press `Connect` in the `Compute Engine` panel to manually retry the connection. You should see the status change from *disconnected* to *connected*, and the dot next to the `Compute Engine` should change its color to green.
 
 ![Open Connection](assets/open_connection.gif)
+*Connecting to a running compute engine.*
 
 > If you changed the `AEON_PORT` value, you need to also update the engine address in the `Compute Engine` panel — click the default address `http://localhost:8000` to edit it.
 
