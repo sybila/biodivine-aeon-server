@@ -27,6 +27,9 @@ where
 
         if !stepped.is_empty() {
             *set = set.union(&stepped);
+            if set.as_bdd().size() > 10_000 {
+                println!("Reachability: {} used to represent {}/{}.", set.as_bdd().size(), set.approx_cardinality(), universe.approx_cardinality());
+            }
             return false;
         }
     }

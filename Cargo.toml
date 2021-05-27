@@ -17,7 +17,7 @@ lto = true
 
 [dependencies]
 biodivine-lib-bdd = "0.2.1"
-biodivine-lib-param-bn = "0.1.0"
+biodivine-lib-param-bn = { git="https://github.com/sybila/biodivine-lib-param-bn.git", rev="dbbe74475b8b439c24b436ff4486aea05cbea8ff" }
 rocket = "0.4.6"
 lazy_static = "1.4.0"
 json = "0.12.4"
