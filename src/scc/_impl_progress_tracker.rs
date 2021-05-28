@@ -36,7 +36,7 @@ impl ProgressTracker {
     /// Subtract one from the number of running processes.
     pub fn process_finished(&self) {
         self.processes.fetch_sub(1, Ordering::SeqCst);
-        println!("Progress: {}", self.get_percent_string());
+        eprintln!("Progress: {}", self.get_percent_string());
     }
 
     /// Update the number of remaining states.
@@ -46,7 +46,7 @@ impl ProgressTracker {
             let mut remaining = self.remaining.lock().unwrap();
             *remaining = value;
         }
-        println!("Progress: {}", self.get_percent_string());
+        eprintln!("Progress: {}", self.get_percent_string());
     }
 
     /// Return a `[0,1]` fraction of the remaining state space.
