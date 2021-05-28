@@ -28,7 +28,12 @@ where
         if !stepped.is_empty() {
             *set = set.union(&stepped);
             if set.as_bdd().size() > 10_000 {
-                eprintln!("BDD size: {}; Task progress: {}/{}.", set.as_bdd().size(), set.approx_cardinality(), universe.approx_cardinality());
+                eprintln!(
+                    "BDD size: {}; Task progress: {}/{}.",
+                    set.as_bdd().size(),
+                    set.approx_cardinality(),
+                    universe.approx_cardinality()
+                );
             }
             return false;
         }

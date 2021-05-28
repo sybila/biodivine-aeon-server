@@ -1,11 +1,11 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-use biodivine_lib_param_bn::symbolic_async_graph::{SymbolicAsyncGraph, GraphColoredVertices};
-use biodivine_aeon_server::GraphTaskContext;
 use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
 use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
-use std::io::Read;
+use biodivine_aeon_server::GraphTaskContext;
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::BooleanNetwork;
+use std::io::Read;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     let mut buffer = String::new();
@@ -74,13 +74,17 @@ fn main() {
     let elapsed = end - start;
 
     let attractors = attractors.lock().unwrap();
-    println!("Analysis completed. Unique attractors: {}", attractors.len());
+    println!(
+        "Analysis completed. Unique attractors: {}",
+        attractors.len()
+    );
 
     for (i, attr) in attractors.iter().enumerate() {
-        println!("Attractor #{}:", i+1);
-        println!("Unique states: {}; Parametrisations: {}",
-                    attr.vertices().approx_cardinality(),
-                    attr.colors().approx_cardinality()
+        println!("Attractor #{}:", i + 1);
+        println!(
+            "Unique states: {}; Parametrisations: {}",
+            attr.vertices().approx_cardinality(),
+            attr.colors().approx_cardinality()
         );
     }
     println!("Elapsed time: {}s", (elapsed as f64) / 1000.0);
