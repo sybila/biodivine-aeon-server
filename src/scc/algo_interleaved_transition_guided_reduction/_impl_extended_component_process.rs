@@ -62,4 +62,8 @@ impl Process for ExtendedComponentProcess {
         self.bwd.discard_states(set);
         self.fwd_set = self.fwd_set.minus(set);
     }
+
+    fn name(&self) -> String {
+        format!("ExtendedComponentProcess({:?})", self.variable)
+    }
 }

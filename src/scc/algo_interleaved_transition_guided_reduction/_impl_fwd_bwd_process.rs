@@ -49,6 +49,10 @@ impl Process for BwdProcess {
         self.universe = self.universe.minus(set);
         self.bwd = self.bwd.minus(set);
     }
+
+    fn name(&self) -> String {
+        "BwdProcess".to_string()
+    }
 }
 
 impl Process for FwdProcess {
@@ -68,5 +72,9 @@ impl Process for FwdProcess {
     fn discard_states(&mut self, set: &GraphColoredVertices) {
         self.universe = self.universe.minus(set);
         self.fwd = self.fwd.minus(set);
+    }
+
+    fn name(&self) -> String {
+        "FwdProcess".to_string()
     }
 }

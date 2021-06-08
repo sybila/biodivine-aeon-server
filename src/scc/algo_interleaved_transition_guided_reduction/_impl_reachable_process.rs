@@ -61,4 +61,8 @@ impl Process for ReachableProcess {
     fn discard_states(&mut self, set: &GraphColoredVertices) {
         self.fwd.discard_states(set)
     }
+
+    fn name(&self) -> String {
+        format!("ReachableProcess({:?})", self.variable)
+    }
 }

@@ -84,6 +84,9 @@ trait Process {
 
     /// Mark the given set of states as eliminated - i.e. they can be disregarded by this process.
     fn discard_states(&mut self, set: &GraphColoredVertices);
+
+    /// Used for debugging.
+    fn name(&self) -> String;
 }
 
 /// **(internal)** Scheduler manages work divided into `Processes`. It keeps a `universe`
