@@ -3,6 +3,7 @@ use crate::GraphTaskContext;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
+use std::cmp::Ordering;
 
 impl Scheduler<'_> {
     /// Create a new `Scheduler` with initial universe and active variables.
@@ -51,7 +52,8 @@ impl Scheduler<'_> {
 
     /// Add a new process into this scheduler.
     pub fn spawn<P: 'static + Process>(&mut self, process: P) {
-        self.processes.push((process.weight(), Box::new(process)));
+        self.processes
+            .push((process.symbolic_size(), Box::new(process)));
     }
 
     /// Get the current universe set of the scheduler.
@@ -84,12 +86,30 @@ impl Scheduler<'_> {
         if let Some(to_discard) = self.to_discard.as_ref() {
             for (w, process) in self.processes.iter_mut() {
                 process.discard_states(to_discard);
-                *w = process.weight();
+                *w = process.symbolic_size();
             }
             self.to_discard = None;
         }
 
-        // Second, put the best process in the last place
+        // Second, put the best process in the last place. However, try to do so in a
+        // deterministic manner, because otherwise we get a weird discrepancy between
+        // running times on different machines.
+        self.processes.sort_by(|(s1, p1), (s2, p2)| {
+            if *s1 == *s2 {
+                // If the size are the same, compare cardinalities (prefer larger cardinality)
+                let cmp = p1
+                    .symbolic_cardinality()
+                    .partial_cmp(&p2.symbolic_cardinality());
+
+                match cmp {
+                    Some(Ordering::Equal) | None => p1.unique_key().cmp(&p2.unique_key()),
+                    Some(cmp) => cmp,
+                }
+            } else {
+                // If they have different sizes, make sure they are sorted in descending order.
+                s1.cmp(s2).reverse()
+            }
+        });
         self.processes.sort_by_key(|(w, _)| usize::MAX - (*w));
 
         // Perform one step in a process
@@ -101,7 +121,7 @@ impl Scheduler<'_> {
             );
             let is_done = process.step(self, graph);
             if !is_done {
-                self.processes.push((process.weight(), process))
+                self.processes.push((process.symbolic_size(), process))
             }
         }
     }

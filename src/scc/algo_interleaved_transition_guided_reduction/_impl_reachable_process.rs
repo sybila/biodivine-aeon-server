@@ -54,8 +54,16 @@ impl Process for ReachableProcess {
         }
     }
 
-    fn weight(&self) -> usize {
-        self.fwd.weight()
+    fn symbolic_size(&self) -> usize {
+        self.fwd.symbolic_size()
+    }
+
+    fn symbolic_cardinality(&self) -> f64 {
+        self.fwd.symbolic_cardinality()
+    }
+
+    fn unique_key(&self) -> usize {
+        self.variable.into()
     }
 
     fn discard_states(&mut self, set: &GraphColoredVertices) {

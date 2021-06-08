@@ -54,8 +54,16 @@ impl Process for ExtendedComponentProcess {
         }
     }
 
-    fn weight(&self) -> usize {
-        self.bwd.weight()
+    fn symbolic_size(&self) -> usize {
+        self.bwd.symbolic_size()
+    }
+
+    fn symbolic_cardinality(&self) -> f64 {
+        self.bwd.symbolic_cardinality()
+    }
+
+    fn unique_key(&self) -> usize {
+        self.variable.into()
     }
 
     fn discard_states(&mut self, set: &GraphColoredVertices) {

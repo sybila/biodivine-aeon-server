@@ -41,8 +41,16 @@ impl Process for BwdProcess {
         )
     }
 
-    fn weight(&self) -> usize {
+    fn symbolic_size(&self) -> usize {
         self.bwd.symbolic_size()
+    }
+
+    fn symbolic_cardinality(&self) -> f64 {
+        self.bwd.approx_cardinality()
+    }
+
+    fn unique_key(&self) -> usize {
+        unimplemented!("BWD process has no unique key!");
     }
 
     fn discard_states(&mut self, set: &GraphColoredVertices) {
@@ -65,8 +73,16 @@ impl Process for FwdProcess {
         )
     }
 
-    fn weight(&self) -> usize {
+    fn symbolic_size(&self) -> usize {
         self.fwd.symbolic_size()
+    }
+
+    fn symbolic_cardinality(&self) -> f64 {
+        self.fwd.approx_cardinality()
+    }
+
+    fn unique_key(&self) -> usize {
+        unimplemented!("FWD process has no unique key!");
     }
 
     fn discard_states(&mut self, set: &GraphColoredVertices) {

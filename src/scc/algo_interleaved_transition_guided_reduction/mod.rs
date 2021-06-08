@@ -79,8 +79,14 @@ trait Process {
     /// Returns true if the process cannot perform more steps.
     fn step(&mut self, scheduler: &mut Scheduler, graph: &SymbolicAsyncGraph) -> bool;
 
-    /// Approximate symbolic complexity of the process.
-    fn weight(&self) -> usize;
+    /// The amount of memory necessary to maintain the symbolic set owned by this process.
+    fn symbolic_size(&self) -> usize;
+
+    /// An amount of states currently "explored" by this process.
+    fn symbolic_cardinality(&self) -> f64;
+
+    /// A unique key used to decide ambiguities when sorting processes.
+    fn unique_key(&self) -> usize;
 
     /// Mark the given set of states as eliminated - i.e. they can be disregarded by this process.
     fn discard_states(&mut self, set: &GraphColoredVertices);
