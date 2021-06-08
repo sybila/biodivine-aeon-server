@@ -35,7 +35,7 @@ pub fn interleaved_transition_guided_reduction_with_variables(
             *variable,
             graph,
             scheduler.get_universe().clone(),
-            pivots
+            pivots,
         ));
     }
     let process_count = u32::try_from(graph.as_network().num_vars() * 2).unwrap();
@@ -57,7 +57,13 @@ pub fn interleaved_transition_guided_reduction(
     initial: GraphColoredVertices,
 ) -> (GraphColoredVertices, Vec<VariableId>) {
     let pivots = initial.clone();
-    interleaved_transition_guided_reduction_with_variables(ctx, graph, initial, graph.as_network().variables().collect(), &pivots)
+    interleaved_transition_guided_reduction_with_variables(
+        ctx,
+        graph,
+        initial,
+        graph.as_network().variables().collect(),
+        &pivots,
+    )
 }
 
 /// **(internal)** A process trait is a unit of work that is managed by a `Scheduler`.

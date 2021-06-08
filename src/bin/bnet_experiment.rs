@@ -1,10 +1,10 @@
 use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
 use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
+use biodivine_aeon_server::scc::Classifier;
 use biodivine_aeon_server::GraphTaskContext;
-use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
+use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use std::io::Read;
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
@@ -40,6 +40,7 @@ fn main() {
         graph.unit_colored_vertices().approx_cardinality()
     );
 
+    let classifier = Classifier::new(&graph);
     let task_context = GraphTaskContext::new();
     task_context.restart(&graph);
 
@@ -53,7 +54,6 @@ fn main() {
     );
     //let (universe, active_variables) = (graph.mk_unit_colored_vertices(), graph.as_network().variables().collect::<Vec<_>>());
 
-    let attractors: Mutex<Vec<GraphColoredVertices>> = Mutex::new(Vec::new());
     // Then run Xie-Beerel to actually detect the components.
     xie_beerel_attractors(
         &task_context,
@@ -61,10 +61,18 @@ fn main() {
         &universe,
         &active_variables,
         |component| {
-            let mut attractors = attractors.lock().unwrap();
-            attractors.push(component);
+            println!("Found attractor... {}", component.approx_cardinality());
+            println!("Remaining: {}", task_context.get_percent_string());
+            println!(
+                "Unique states: {}",
+                component.vertices().approx_cardinality()
+            );
+            println!("Unique colors: {}", component.colors().approx_cardinality());
+            classifier.add_component(component, &graph);
         },
     );
+
+    classifier.print();
 
     let end = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -73,19 +81,9 @@ fn main() {
 
     let elapsed = end - start;
 
-    let attractors = attractors.lock().unwrap();
     println!(
-        "Analysis completed. Unique attractors: {}",
-        attractors.len()
+        "Analysis completed. Classes: {}",
+        classifier.export_result().len()
     );
-
-    for (i, attr) in attractors.iter().enumerate() {
-        println!("Attractor #{}:", i + 1);
-        println!(
-            "Unique states: {}; Parametrisations: {}",
-            attr.vertices().approx_cardinality(),
-            attr.colors().approx_cardinality()
-        );
-    }
     println!("Elapsed time: {}s", (elapsed as f64) / 1000.0);
 }

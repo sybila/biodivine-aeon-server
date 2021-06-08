@@ -28,8 +28,8 @@ where
         if !stepped.is_empty() {
             *set = set.union(&stepped);
             if set.as_bdd().size() > 10_000 {
-                eprintln!(
-                    "BDD size: {}; Task progress: {}/{}.",
+                println!(
+                    "Reachability: {} used to represent {}/{}.",
                     set.as_bdd().size(),
                     set.approx_cardinality(),
                     universe.approx_cardinality()
