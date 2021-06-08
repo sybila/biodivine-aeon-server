@@ -11,8 +11,9 @@ impl ReachableProcess {
         var: VariableId,
         graph: &SymbolicAsyncGraph,
         universe: GraphColoredVertices,
+        pivots: &GraphColoredVertices
     ) -> ReachableProcess {
-        let var_can_post = graph.var_can_post(var, &universe);
+        let var_can_post = graph.var_can_post(var, pivots);
         ReachableProcess {
             variable: var,
             fwd: FwdProcess::new(var_can_post, universe),

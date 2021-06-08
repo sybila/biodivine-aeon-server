@@ -22,18 +22,20 @@ mod _impl_scheduler;
 /// transitions in the graph (other variables are effectively constant).
 ///
 /// If cancelled, the result is still valid, but not necessarily complete.
-pub fn interleaved_transition_guided_reduction(
+pub fn interleaved_transition_guided_reduction_with_variables(
     ctx: &GraphTaskContext,
     graph: &SymbolicAsyncGraph,
     initial: GraphColoredVertices,
+    variables: Vec<VariableId>,
+    pivots: &GraphColoredVertices,
 ) -> (GraphColoredVertices, Vec<VariableId>) {
-    let variables = graph.as_network().variables().collect::<Vec<_>>();
-    let mut scheduler = Scheduler::new(ctx, initial, variables);
-    for variable in graph.as_network().variables() {
+    let mut scheduler = Scheduler::new(ctx, initial, variables.clone());
+    for variable in &variables {
         scheduler.spawn(ReachableProcess::new(
-            variable,
+            *variable,
             graph,
             scheduler.get_universe().clone(),
+            pivots
         ));
     }
     let process_count = u32::try_from(graph.as_network().num_vars() * 2).unwrap();
@@ -47,6 +49,15 @@ pub fn interleaved_transition_guided_reduction(
     }
 
     scheduler.finalize()
+}
+
+pub fn interleaved_transition_guided_reduction(
+    ctx: &GraphTaskContext,
+    graph: &SymbolicAsyncGraph,
+    initial: GraphColoredVertices,
+) -> (GraphColoredVertices, Vec<VariableId>) {
+    let pivots = initial.clone();
+    interleaved_transition_guided_reduction_with_variables(ctx, graph, initial, graph.as_network().variables().collect(), &pivots)
 }
 
 /// **(internal)** A process trait is a unit of work that is managed by a `Scheduler`.
