@@ -200,10 +200,10 @@ fn get_stability_data(node_id: String, behaviour_str: String) -> BackendResponse
             }
             BackendResponse::ok(&response.to_string())
         } else {
-            BackendResponse::err(&"No attractor data found.")
+            BackendResponse::err("No attractor data found.")
         }
     } else {
-        BackendResponse::err(&"No attractor data found.")
+        BackendResponse::err("No attractor data found.")
     }
 }
 
@@ -232,10 +232,10 @@ fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
             ];
             BackendResponse::ok(&changes.to_string())
         } else {
-            BackendResponse::err(&"Invalid node or attribute id.".to_string())
+            BackendResponse::err("Invalid node or attribute id.")
         }
     } else {
-        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+        BackendResponse::err("No tree present. Run computation first.")
     };
 }
 
@@ -261,7 +261,7 @@ fn revert_decision(node_id: String) -> BackendResponse {
         };
         BackendResponse::ok(&response.to_string())
     } else {
-        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+        BackendResponse::err("No tree present. Run computation first.")
     };
 }
 
@@ -276,7 +276,7 @@ fn auto_expand(node_id: String, depth: String) -> BackendResponse {
         }
     };
     if depth > 10 {
-        return BackendResponse::err(&"Maximum allowed depth is 10.".to_string());
+        return BackendResponse::err("Maximum allowed depth is 10.");
     }
     let tree = TREE.clone();
     let mut tree = tree.write().unwrap();
@@ -289,7 +289,7 @@ fn auto_expand(node_id: String, depth: String) -> BackendResponse {
         let changed = tree.auto_expand(node_id, depth);
         BackendResponse::ok(&tree.to_json_partial(&changed).to_string())
     } else {
-        BackendResponse::err(&"Cannot modify decision tree.".to_string())
+        BackendResponse::err("Cannot modify decision tree.")
     }
 }
 
@@ -302,10 +302,10 @@ fn apply_tree_precision(precision: String) -> BackendResponse {
             tree.set_precision(precision);
             BackendResponse::ok("\"ok\"")
         } else {
-            BackendResponse::err(&"Cannot modify decision tree.".to_string())
+            BackendResponse::err("Cannot modify decision tree.")
         }
     } else {
-        BackendResponse::err(&"Given precision is not a number.".to_string())
+        BackendResponse::err("Given precision is not a number.")
     }
 }
 
@@ -316,7 +316,7 @@ fn get_tree_precision() -> BackendResponse {
     if let Some(tree) = tree.as_ref() {
         BackendResponse::ok(&format!("{}", tree.get_precision()))
     } else {
-        BackendResponse::err(&"Cannot modify decision tree.".to_string())
+        BackendResponse::err("Cannot modify decision tree.")
     }
 }
 
@@ -621,10 +621,10 @@ fn get_stability_witness(
                 );
             }
         } else {
-            BackendResponse::err(&"No attractor data found.")
+            BackendResponse::err("No attractor data found.")
         }
     } else {
-        BackendResponse::err(&"No attractor data found.")
+        BackendResponse::err("No attractor data found.")
     }
 }
 
@@ -672,7 +672,7 @@ fn get_witness_network(colors: &GraphColors) -> BackendResponse {
     let cmp = cmp.read().unwrap();
     if let Some(cmp) = &*cmp {
         if let Some(graph) = &cmp.graph {
-            let witness = graph.pick_witness(&colors);
+            let witness = graph.pick_witness(colors);
             let layout = read_layout(cmp.input_model.as_str());
             let mut model_string = format!("{}", witness); // convert back to aeon
             model_string += "\n";
@@ -807,10 +807,10 @@ fn get_stability_attractors(
                 );
             }
         } else {
-            BackendResponse::err(&"No attractor data found.")
+            BackendResponse::err("No attractor data found.")
         }
     } else {
-        BackendResponse::err(&"No attractor data found.")
+        BackendResponse::err("No attractor data found.")
     }
 }
 

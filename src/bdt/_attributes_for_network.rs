@@ -93,7 +93,7 @@ fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<
             let fn_x0_to_1 = fn_is_true.and(&regulator_is_false).var_project(regulator);
             let observability = fn_x1_to_1
                 .xor(&fn_x0_to_1)
-                .project(&context.state_variables());
+                .project(context.state_variables());
 
             out.push(Attribute {
                 name: format!(
@@ -116,13 +116,13 @@ fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<
             let fn_x0_to_1 = fn_is_true.and(&regulator_is_false).var_project(regulator);
             let non_activation = fn_x0_to_1
                 .and(&fn_x1_to_0)
-                .project(&context.state_variables());
+                .project(context.state_variables());
 
             let fn_x0_to_0 = fn_is_false.and(&regulator_is_false).var_project(regulator);
             let fn_x1_to_1 = fn_is_true.and(&regulator_is_true).var_project(regulator);
             let non_inhibition = fn_x0_to_0
                 .and(&fn_x1_to_1)
-                .project(&context.state_variables());
+                .project(context.state_variables());
 
             out.push(Attribute {
                 name: format!(
@@ -272,7 +272,7 @@ fn attributes_for_conditional_observability(graph: &SymbolicAsyncGraph, out: &mu
                     let fn_x0_to_1 = fn_is_true.and(&regulator_is_false).var_project(r_var);
                     let observability = fn_x1_to_1
                         .xor(&fn_x0_to_1)
-                        .project(&context.state_variables());
+                        .project(context.state_variables());
 
                     out.push(Attribute {
                         name: format!(

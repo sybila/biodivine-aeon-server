@@ -135,7 +135,7 @@ impl Classifier {
                         continue;
                     }
                     let found_second_successor =
-                        &graph.var_can_post(next_variable, &found_first_successor);
+                        &graph.var_can_post(next_variable, found_first_successor);
                     disorder = disorder.union(&found_second_successor.colors());
                 }
             }

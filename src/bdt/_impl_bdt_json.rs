@@ -85,12 +85,12 @@ impl Bdt {
             let node_json = self.node_to_json(top);
             if node_json.has_key("left") {
                 let left = node_json["left"].as_usize().unwrap();
-                let left_id = BdtNodeId::try_from(left, &self).unwrap();
+                let left_id = BdtNodeId::try_from(left, self).unwrap();
                 stack.push(left_id);
             }
             if node_json.has_key("right") {
                 let right = node_json["right"].as_usize().unwrap();
-                let right_id = BdtNodeId::try_from(right, &self).unwrap();
+                let right_id = BdtNodeId::try_from(right, self).unwrap();
                 stack.push(right_id);
             }
             if ids.contains(&top) {
