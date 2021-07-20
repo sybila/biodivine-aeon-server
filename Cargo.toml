@@ -16,9 +16,10 @@ rustdoc-args = ["--html-in-header", "docs-head.html"]
 lto = true
 
 [dependencies]
-biodivine-lib-bdd = "0.2.1"
-biodivine-lib-param-bn = "0.1.0"
-rocket = "0.4.6"
+#biodivine-lib-bdd = "0.2.1"
+biodivine-lib-bdd = { git="https://github.com/sybila/biodivine-lib-bdd", branch="capture-profile", features=["capture_profile"] }
+biodivine-lib-param-bn = { git="https://github.com/sybila/biodivine-lib-param-bn.git", branch="capture-profile" }
+rocket = "0.4.10"
 lazy_static = "1.4.0"
 json = "0.12.4"
 regex = "1.4.2"
