@@ -105,7 +105,8 @@ fn main() {
     println!("Parameters in sketch: {};", usize::from(all_bdd_vars) - original_model.num_vars());
     println!("Valid parametrisations: {};", sketch_graph.unit_colors().approx_cardinality());
 
-    /*for sketch_attractor in get_all_attractors(&sketch_graph) {
+    let mut identified = sketch_graph.mk_empty_colors();
+    for sketch_attractor in get_all_attractors(&sketch_graph) {
         println!("Sketch attractor (full): {}", sketch_attractor.approx_cardinality());
 
         let mut colors = sketch_attractor.colors();
@@ -137,6 +138,25 @@ fn main() {
             }
         }
 
+        identified = identified.union(&colors);
         println!("Valid sketches: {}", colors.approx_cardinality());
-    }*/
+    }
+
+    let mut identified_parameters = 0;
+    for bdd_variable in sketch_graph.symbolic_context().bdd_variable_set().variables() {
+        if sketch_graph.symbolic_context().state_variables().contains(&bdd_variable) {
+            continue;   // skipping state variables
+        }
+
+        let p_set = sketch_graph.symbolic_context().bdd_variable_set().mk_var(bdd_variable);
+        let p_not_set = sketch_graph.symbolic_context().bdd_variable_set().mk_not_var(bdd_variable);
+
+        if identified.as_bdd().and(&p_set).is_false() {
+            identified_parameters += 1;
+        } else if identified.as_bdd().and(&p_not_set).is_false() {
+            identified_parameters += 1;
+        }
+    }
+
+    println!("Fully identified parameters: {};", identified_parameters);
 }
