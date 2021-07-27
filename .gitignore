@@ -19,3 +19,5 @@ Cargo.lock
 # Benchmark runs
 bench1*
 bench_run*
+
+sketch_benchmark_run_*
