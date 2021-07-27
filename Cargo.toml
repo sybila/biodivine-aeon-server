@@ -13,7 +13,7 @@ rustdoc-args = ["--html-in-header", "docs-head.html"]
 # This is important for profiling - otherwise we would get unreadable traces.
 #debug = true
 # This gives a marginally better runtime, but a much much longer compile times, so disabled by default.
-lto = true
+#lto = true
 
 [dependencies]
 biodivine-lib-bdd = "0.2.1"
