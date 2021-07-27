@@ -100,13 +100,14 @@ fn main() {
     let sketch = make_sketch(&original_model);
     let sketch_graph = SymbolicAsyncGraph::new(sketch.clone()).unwrap();
     let all_bdd_vars = sketch_graph.symbolic_context().bdd_variable_set().num_vars();
+    let sketch_attractors = get_all_attractors(&sketch_graph);
     println!("Model variables: {}; Observable: {};", original_model.num_vars(), observable_variables.len());
     println!("Inputs: {};", inputs(&original_model).len());
     println!("Parameters in sketch: {};", usize::from(all_bdd_vars) - original_model.num_vars());
     println!("Valid parametrisations: {};", sketch_graph.unit_colors().approx_cardinality());
 
     let mut identified = sketch_graph.mk_empty_colors();
-    for sketch_attractor in get_all_attractors(&sketch_graph) {
+    for sketch_attractor in sketch_attractors {
         println!("Sketch attractor (full): {}", sketch_attractor.approx_cardinality());
 
         let mut colors = sketch_attractor.colors();
@@ -126,15 +127,15 @@ fn main() {
             if !v_states_original.is_empty() && !v_not_states_original.is_empty() {
                 let in_both = v_states_sketch.colors().intersect(&v_not_states_sketch.colors());
                 colors = colors.intersect(&in_both);
-                println!("Variable {} is *unstable*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
+                //println!("Variable {} is *unstable*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
             } else if !v_states_original.is_empty() {
                 let in_true = v_states_sketch.colors().minus(&v_not_states_sketch.colors());
                 colors = colors.intersect(&in_true);
-                println!("Variable {} is *true*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
+                //println!("Variable {} is *true*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
             } else {
                 let in_false = v_not_states_sketch.colors().minus(&v_states_sketch.colors());
                 colors = colors.intersect(&in_false);
-                println!("Variable {} is *false*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
+                //println!("Variable {} is *false*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
             }
         }
 

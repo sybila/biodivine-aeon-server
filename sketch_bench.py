@@ -35,6 +35,6 @@ for bench in BENCHMARKS:
 	name = os.path.splitext(bench)[0]
 	input_file = BENCH_DIR + "/" + bench
 	output_file = OUT_DIR + "/" + name + "_out.txt"
-	command = BINARY + " < " + input_file + " > " + output_file + " 2>&1"
+	command = BINARY + " < " + input_file + " > " + output_file + " 2>&1 &"
 	print(command)
 	os.system(command)
