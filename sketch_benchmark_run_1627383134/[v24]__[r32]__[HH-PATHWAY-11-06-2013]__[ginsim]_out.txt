@@ -1,0 +1,9 @@
+Variable Ci_repressor is *true*
+Variable Costa is *true*
+Variable Hh_exterior_input is *true*
+Variable Targets is *false*
+Variable dally_like is *true*
+Model variables: 24; Observable: 5;
+Inputs: 13;
+Parameters in sketch: 21;
+Valid parametrisations: 32768;

@@ -1,0 +1,17 @@
+Variable AnionCh is *true*
+Variable AnionCh_high is *true*
+Variable CaIc is *true*
+Variable Ci is *true*
+Variable Ci_sup is *true*
+Variable HATPase_2 is *false*
+Variable Kc is *false*
+Variable Kin is *false*
+Variable MCPS is *true*
+Variable PK_2 is *false*
+Variable PP1cc_1 is *true*
+Variable SO_1 is *false*
+Variable carbfix is *true*
+Model variables: 49; Observable: 13;
+Inputs: 5;
+Parameters in sketch: 53;
+Valid parametrisations: 131072;

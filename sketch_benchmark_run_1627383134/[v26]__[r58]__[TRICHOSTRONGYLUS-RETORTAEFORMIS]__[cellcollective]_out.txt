@@ -1,0 +1,14 @@
+Variable BC is *true*
+Variable DCI is *false*
+Variable EC is *true*
+Variable IL10I is *false*
+Variable IL12II is *false*
+Variable IL4II is *true*
+Variable IgE is *true*
+Variable IgG is *true*
+Variable T0 is *false*
+Variable Th2I is *false*
+Model variables: 26; Observable: 10;
+Inputs: 1;
+Parameters in sketch: 29;
+Valid parametrisations: 256;

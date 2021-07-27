@@ -1,0 +1,9 @@
+Variable Arm is *false*
+Variable Arr is *true*
+Variable Dally is *false*
+Variable Nemo is *false*
+Variable Pan is *false*
+Model variables: 26; Observable: 5;
+Inputs: 14;
+Parameters in sketch: 30;
+Valid parametrisations: 262144;

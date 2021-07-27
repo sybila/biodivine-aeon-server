@@ -1,0 +1,14 @@
+Variable Apoptosis is *false*
+Variable BAX is *true*
+Variable CASP3 is *false*
+Variable DISC_TNF is *true*
+Variable IKK is *false*
+Variable NFkB is *false*
+Variable RIP1K is *false*
+Variable RIP1ub is *false*
+Variable Survival is *false*
+Variable cFLIP is *false*
+Model variables: 28; Observable: 10;
+Inputs: 3;
+Parameters in sketch: 39;
+Valid parametrisations: 4096;

@@ -1,0 +1,12 @@
+Variable GNBP1 is *true*
+Variable Gram__negative_binding_protein_3 is *true*
+Variable Gram_positive_specific_serine_protease is *true*
+Variable Serine_Protease_Immune_Response_Integrator is *true*
+Variable Snake is *true*
+Variable Sphinx1_and_2 is *true*
+Variable gastrulation_defective is *true*
+Variable modular_serine_protease is *true*
+Model variables: 24; Observable: 8;
+Inputs: 6;
+Parameters in sketch: 18;
+Valid parametrisations: 512;

@@ -1,0 +1,19 @@
+Found disorder: 1
+Found disorder: 1
+Variable AKT is *true*
+Variable APC is *false*
+Variable Apoptosis is *false*
+Variable Cas12 is *false*
+Variable Cas3 is *false*
+Variable Cas8 is *false*
+Variable FADD is *true*
+Variable GFR is *true*
+Variable IkB is *unstable*
+Variable Mdm2 is *true*
+Variable RIP is *true*
+Variable TRAF is *true*
+Variable p53 is *false*
+Model variables: 41; Observable: 13;
+Inputs: 2;
+Parameters in sketch: 30;
+Valid parametrisations: 512;

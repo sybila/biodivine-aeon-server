@@ -1,0 +1,10 @@
+Variable IHF is *true*
+Variable Meta is *true*
+Variable PprA is *true*
+Variable RpoS is *true*
+Variable TurA is *true*
+Variable XylS is *true*
+Model variables: 24; Observable: 6;
+Inputs: 10;
+Parameters in sketch: 22;
+Valid parametrisations: 8192;

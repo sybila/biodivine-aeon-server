@@ -1,0 +1,14 @@
+Variable BAX is *true*
+Variable BCL2 is *false*
+Variable CASP8 is *true*
+Variable IKK is *false*
+Variable MOMP is *true*
+Variable NonACD is *true*
+Variable RIP1ub is *false*
+Variable ROS is *true*
+Variable XIAP is *false*
+Variable cIAP is *false*
+Model variables: 28; Observable: 10;
+Inputs: 3;
+Parameters in sketch: 39;
+Valid parametrisations: 4096;

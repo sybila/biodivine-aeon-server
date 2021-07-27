@@ -1,0 +1,18 @@
+Found disorder: 1
+Variable CD45 is *false*
+Variable CD8 is *false*
+Variable CREB is *false*
+Variable ERK is *false*
+Variable Fos is *false*
+Variable Grb2Sos is *false*
+Variable IkB is *true*
+Variable Itk is *false*
+Variable LATphosp is *false*
+Variable NFkB is *false*
+Variable Rlk is *false*
+Variable TCRbind is *true*
+Variable ZAP70 is *false*
+Model variables: 40; Observable: 13;
+Inputs: 0;
+Parameters in sketch: 20;
+Valid parametrisations: 32;

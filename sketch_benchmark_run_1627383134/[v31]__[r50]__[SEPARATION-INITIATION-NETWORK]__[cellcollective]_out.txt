@@ -1,0 +1,13 @@
+Variable SIP is *false*
+Variable byr4 is *false*
+Variable cdc11 is *true*
+Variable cdc7 is *true*
+Variable dma1 is *true*
+Variable gef1 is *true*
+Variable pak1 is *true*
+Variable plo1 is *false*
+Variable scd1 is *true*
+Model variables: 31; Observable: 9;
+Inputs: 8;
+Parameters in sketch: 32;
+Valid parametrisations: 24576;

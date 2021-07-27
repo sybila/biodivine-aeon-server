@@ -1,0 +1,15 @@
+Variable AgAb is *false*
+Variable BC is *false*
+Variable C is *false*
+Variable EC is *false*
+Variable IFNgI is *false*
+Variable IL10II is *false*
+Variable IL4I is *false*
+Variable IL4II is *false*
+Variable MPI is *false*
+Variable PIC is *false*
+Variable TrI is *false*
+Model variables: 33; Observable: 11;
+Inputs: 0;
+Parameters in sketch: 24;
+Valid parametrisations: 64;

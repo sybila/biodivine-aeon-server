@@ -1,0 +1,12 @@
+Variable Easter is *true*
+Variable GNBP1 is *true*
+Variable Gd is *true*
+Variable PGRP_SA is *true*
+Variable PGRP_SD is *true*
+Variable Snk is *true*
+Variable Spirit is *true*
+Variable Spz is *true*
+Model variables: 24; Observable: 8;
+Inputs: 6;
+Parameters in sketch: 18;
+Valid parametrisations: 512;

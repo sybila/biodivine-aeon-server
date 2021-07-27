@@ -1,0 +1,12 @@
+Variable CDK2 is *false*
+Variable CDK4 is *false*
+Variable CyclinD1 is *false*
+Variable ERBB1_3 is *false*
+Variable ERBB2 is *false*
+Variable ERalpha is *false*
+Variable MYC is *false*
+Variable p21 is *true*
+Model variables: 20; Observable: 8;
+Inputs: 1;
+Parameters in sketch: 21;
+Valid parametrisations: 64;

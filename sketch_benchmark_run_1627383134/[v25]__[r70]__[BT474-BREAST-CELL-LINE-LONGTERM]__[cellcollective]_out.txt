@@ -1,0 +1,13 @@
+Variable BAX is *false*
+Variable CyclinB1 is *false*
+Variable ERBB1 is *false*
+Variable FoxO1_3a is *false*
+Variable GSK3a_b is *true*
+Variable PTEN is *false*
+Variable TSC2 is *false*
+Variable cJUN is *false*
+Variable p53 is *true*
+Model variables: 25; Observable: 9;
+Inputs: 4;
+Parameters in sketch: 32;
+Valid parametrisations: 2048;

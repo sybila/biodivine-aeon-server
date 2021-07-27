@@ -1,0 +1,14 @@
+Variable Cd19 is *false*
+Variable Cebpa is *false*
+Variable Cebpb is *false*
+Variable E2A_gene is *false*
+Variable E2A_protein_active is *false*
+Variable Egr1 is *false*
+Variable Foxo1 is *false*
+Variable Foxo1_gene is *false*
+Variable IL7r_activated is *false*
+Variable Mac1_gene is *false*
+Model variables: 33; Observable: 10;
+Inputs: 2;
+Parameters in sketch: 38;
+Valid parametrisations: 3072;
