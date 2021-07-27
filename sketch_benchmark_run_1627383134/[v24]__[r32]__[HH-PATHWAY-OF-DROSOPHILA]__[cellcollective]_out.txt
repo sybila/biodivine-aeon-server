@@ -1,9 +1,0 @@
-Variable Ci_rep is *false*
-Variable Cos is *false*
-Variable Dlp is *true*
-Variable Smo is *true*
-Variable SuFu is *false*
-Model variables: 24; Observable: 5;
-Inputs: 13;
-Parameters in sketch: 21;
-Valid parametrisations: 32768;

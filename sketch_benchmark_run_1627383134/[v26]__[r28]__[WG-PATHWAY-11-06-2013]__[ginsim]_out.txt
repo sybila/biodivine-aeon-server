@@ -1,9 +1,0 @@
-Variable Armadillo is *false*
-Variable Arrow is *true*
-Variable Dishevelled is *false*
-Variable Zeste_white_3 is *true*
-Variable dally_like is *false*
-Model variables: 26; Observable: 5;
-Inputs: 15;
-Parameters in sketch: 31;
-Valid parametrisations: 524288;
