@@ -27,6 +27,11 @@ where
 
         if !stepped.is_empty() {
             *set = set.union(&stepped);
+
+            if set.as_bdd().size() > 100_000 {
+                println!("Progress: {}/{} with {}", set.approx_cardinality(), universe.approx_cardinality(), set.as_bdd().size());
+            }
+
             return false;
         }
     }

@@ -32,7 +32,7 @@ fn make_sketch(model: &BooleanNetwork) -> BooleanNetwork {
     let mut new_network = BooleanNetwork::new(model.as_graph().clone());
     for v in model.variables() {
         let regs = model.regulators(v).len();
-        if regs != 0 && regs != 2 { // No need to rewrite 1, that one is usually deterministic
+        if regs != 0 && regs != 2 && regs != 3 && regs != 4 { // No need to rewrite 1, that one is usually deterministic
             let function = model.get_update_function(v).as_ref().unwrap().clone();
             new_network.add_update_function(v, function).unwrap();
         }
@@ -74,90 +74,80 @@ fn main() {
     let mut random = StdRng::seed_from_u64(123456789);
     let original_model = read_aeon_from_stdin();
     let original_graph = SymbolicAsyncGraph::new(original_model.clone()).unwrap();
-    let observable_variables = pick_observable_variables(&mut random, &original_model, 0.4);
 
     let original_attractor = get_all_attractors(&original_graph)
         .into_iter()
         .next()
         .unwrap();
 
-    for v in observable_variables.clone() {
-        let v_set = original_graph.fix_network_variable(v, true);
-        let v_not_set = original_graph.fix_network_variable(v, false);
-
-        let v_states = original_attractor.intersect(&v_set);
-        let v_not_states = original_attractor.intersect(&v_not_set);
-
-        if !v_states.is_empty() && !v_not_states.is_empty() {
-            println!("Variable {} is *unstable*", original_model.get_variable_name(v));
-        } else if !v_states.is_empty() {
-            println!("Variable {} is *true*", original_model.get_variable_name(v));
-        } else {
-            println!("Variable {} is *false*", original_model.get_variable_name(v));
-        }
-    }
-
     let sketch = make_sketch(&original_model);
     let sketch_graph = SymbolicAsyncGraph::new(sketch.clone()).unwrap();
     let all_bdd_vars = sketch_graph.symbolic_context().bdd_variable_set().num_vars();
     let sketch_attractors = get_all_attractors(&sketch_graph);
-    println!("Model variables: {}; Observable: {};", original_model.num_vars(), observable_variables.len());
+    println!("Model variables: {};", original_model.num_vars());
     println!("Inputs: {};", inputs(&original_model).len());
     println!("Parameters in sketch: {};", usize::from(all_bdd_vars) - original_model.num_vars());
     println!("Valid parametrisations: {};", sketch_graph.unit_colors().approx_cardinality());
 
-    let mut identified = sketch_graph.mk_empty_colors();
-    for sketch_attractor in sketch_attractors {
-        println!("Sketch attractor (full): {}", sketch_attractor.approx_cardinality());
+    for p_observability in [0.2, 0.4, 0.8, 1.0] {
+        let observable_variables = pick_observable_variables(&mut random, &original_model, p_observability);
 
-        let mut colors = sketch_attractor.colors();
-        for v in observable_variables.clone() {
-            let v_set_original = original_graph.fix_network_variable(v, true);
-            let v_not_set_original = original_graph.fix_network_variable(v, false);
+        println!("Observable variables: {}", observable_variables.len());
 
-            let v_set_sketch = sketch_graph.fix_network_variable(v, true);
-            let v_not_set_sketch = sketch_graph.fix_network_variable(v, false);
+        let mut identified = sketch_graph.mk_empty_colors();
+        for sketch_attractor in &sketch_attractors {
+            println!("Sketch attractor (full): {}", sketch_attractor.approx_cardinality());
 
-            let v_states_original = original_attractor.intersect(&v_set_original);
-            let v_not_states_original = original_attractor.intersect(&v_not_set_original);
+            let mut colors = sketch_attractor.colors();
+            for v in observable_variables.clone() {
+                let v_set_original = original_graph.fix_network_variable(v, true);
+                let v_not_set_original = original_graph.fix_network_variable(v, false);
 
-            let v_states_sketch = sketch_attractor.intersect(&v_set_sketch);
-            let v_not_states_sketch = sketch_attractor.intersect(&v_not_set_sketch);
+                let v_set_sketch = sketch_graph.fix_network_variable(v, true);
+                let v_not_set_sketch = sketch_graph.fix_network_variable(v, false);
 
-            if !v_states_original.is_empty() && !v_not_states_original.is_empty() {
-                let in_both = v_states_sketch.colors().intersect(&v_not_states_sketch.colors());
-                colors = colors.intersect(&in_both);
-                //println!("Variable {} is *unstable*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
-            } else if !v_states_original.is_empty() {
-                let in_true = v_states_sketch.colors().minus(&v_not_states_sketch.colors());
-                colors = colors.intersect(&in_true);
-                //println!("Variable {} is *true*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
-            } else {
-                let in_false = v_not_states_sketch.colors().minus(&v_states_sketch.colors());
-                colors = colors.intersect(&in_false);
-                //println!("Variable {} is *false*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
+                let v_states_original = original_attractor.intersect(&v_set_original);
+                let v_not_states_original = original_attractor.intersect(&v_not_set_original);
+
+                let v_states_sketch = sketch_attractor.intersect(&v_set_sketch);
+                let v_not_states_sketch = sketch_attractor.intersect(&v_not_set_sketch);
+
+                if !v_states_original.is_empty() && !v_not_states_original.is_empty() {
+                    let in_both = v_states_sketch.colors().intersect(&v_not_states_sketch.colors());
+                    colors = colors.intersect(&in_both);
+                    //println!("Variable {} is *unstable*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
+                } else if !v_states_original.is_empty() {
+                    let in_true = v_states_sketch.colors().minus(&v_not_states_sketch.colors());
+                    colors = colors.intersect(&in_true);
+                    //println!("Variable {} is *true*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
+                } else {
+                    let in_false = v_not_states_sketch.colors().minus(&v_states_sketch.colors());
+                    colors = colors.intersect(&in_false);
+                    //println!("Variable {} is *false*; Remaining {}", original_model.get_variable_name(v), colors.approx_cardinality());
+                }
+            }
+
+            identified = identified.union(&colors);
+            println!("Valid sketches: {}", colors.approx_cardinality());
+        }
+
+        let mut identified_parameters = 0;
+        for bdd_variable in sketch_graph.symbolic_context().bdd_variable_set().variables() {
+            if sketch_graph.symbolic_context().state_variables().contains(&bdd_variable) {
+                continue;   // skipping state variables
+            }
+
+            let p_set = sketch_graph.symbolic_context().bdd_variable_set().mk_var(bdd_variable);
+            let p_not_set = sketch_graph.symbolic_context().bdd_variable_set().mk_not_var(bdd_variable);
+
+            if identified.as_bdd().and(&p_set).is_false() {
+                identified_parameters += 1;
+            } else if identified.as_bdd().and(&p_not_set).is_false() {
+                identified_parameters += 1;
             }
         }
 
-        identified = identified.union(&colors);
-        println!("Valid sketches: {}", colors.approx_cardinality());
+        println!("All identified parametrisations: {};", identified.approx_cardinality());
+        println!("Fully identified parameters: {};", identified_parameters);
     }
-
-    let mut identified_parameters = 0;
-    for bdd_variable in sketch_graph.symbolic_context().bdd_variable_set().variables() {
-        if sketch_graph.symbolic_context().state_variables().contains(&bdd_variable) {
-            continue;   // skipping state variables
-        }
-
-        let p_set = sketch_graph.symbolic_context().bdd_variable_set().mk_var(bdd_variable);
-        let p_not_set = sketch_graph.symbolic_context().bdd_variable_set().mk_not_var(bdd_variable);
-
-        if identified.as_bdd().and(&p_set).is_false() {
-            identified_parameters += 1;
-        } else if identified.as_bdd().and(&p_not_set).is_false() {
-            identified_parameters += 1;
-        }
-    }
-
-    println!("Fully identified parameters: {};", identified_parameters);
 }
