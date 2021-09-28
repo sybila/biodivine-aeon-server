@@ -107,7 +107,7 @@ fn get_bifurcation_tree() -> BackendResponse {
     if let Some(tree) = &*tree {
         BackendResponse::ok(&tree.to_json().to_string())
     } else {
-        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+        BackendResponse::err("No tree present. Run computation first.")
     }
 }
 
@@ -124,7 +124,7 @@ fn get_attributes(node_id: String) -> BackendResponse {
         };
         BackendResponse::ok(&tree.attribute_gains_json(node).to_string())
     } else {
-        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+        BackendResponse::err("No tree present. Run computation first.")
     }
 }
 
@@ -200,10 +200,10 @@ fn get_stability_data(node_id: String, behaviour_str: String) -> BackendResponse
             }
             BackendResponse::ok(&response.to_string())
         } else {
-            BackendResponse::err(&"No attractor data found.")
+            BackendResponse::err("No attractor data found.")
         }
     } else {
-        BackendResponse::err(&"No attractor data found.")
+        BackendResponse::err("No attractor data found.")
     }
 }
 
@@ -232,10 +232,10 @@ fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
             ];
             BackendResponse::ok(&changes.to_string())
         } else {
-            BackendResponse::err(&"Invalid node or attribute id.".to_string())
+            BackendResponse::err("Invalid node or attribute id.")
         }
     } else {
-        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+        BackendResponse::err("No tree present. Run computation first.")
     };
 }
 
@@ -261,7 +261,7 @@ fn revert_decision(node_id: String) -> BackendResponse {
         };
         BackendResponse::ok(&response.to_string())
     } else {
-        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+        BackendResponse::err("No tree present. Run computation first.")
     };
 }
 
@@ -276,7 +276,7 @@ fn auto_expand(node_id: String, depth: String) -> BackendResponse {
         }
     };
     if depth > 10 {
-        return BackendResponse::err(&"Maximum allowed depth is 10.".to_string());
+        return BackendResponse::err("Maximum allowed depth is 10.");
     }
     let tree = TREE.clone();
     let mut tree = tree.write().unwrap();
@@ -289,7 +289,7 @@ fn auto_expand(node_id: String, depth: String) -> BackendResponse {
         let changed = tree.auto_expand(node_id, depth);
         BackendResponse::ok(&tree.to_json_partial(&changed).to_string())
     } else {
-        BackendResponse::err(&"Cannot modify decision tree.".to_string())
+        BackendResponse::err("Cannot modify decision tree.")
     }
 }
 
@@ -302,10 +302,10 @@ fn apply_tree_precision(precision: String) -> BackendResponse {
             tree.set_precision(precision);
             BackendResponse::ok("\"ok\"")
         } else {
-            BackendResponse::err(&"Cannot modify decision tree.".to_string())
+            BackendResponse::err("Cannot modify decision tree.")
         }
     } else {
-        BackendResponse::err(&"Given precision is not a number.".to_string())
+        BackendResponse::err("Given precision is not a number.")
     }
 }
 
@@ -316,7 +316,7 @@ fn get_tree_precision() -> BackendResponse {
     if let Some(tree) = tree.as_ref() {
         BackendResponse::ok(&format!("{}", tree.get_precision()))
     } else {
-        BackendResponse::err(&"Cannot modify decision tree.".to_string())
+        BackendResponse::err("Cannot modify decision tree.")
     }
 }
 
@@ -473,10 +473,10 @@ fn get_results() -> BackendResponse {
                     );
                 }
             } else {
-                return BackendResponse::err(&"Results not available yet.".to_string());
+                return BackendResponse::err("Results not available yet.");
             }
         } else {
-            return BackendResponse::err(&"No results available.".to_string());
+            return BackendResponse::err("No results available.");
         }
     };
     let lines: Vec<String> = data
@@ -524,10 +524,10 @@ fn get_tree_witness(node_id: String) -> BackendResponse {
         if let Some(params) = tree.params_for_leaf(node) {
             get_witness_network(params)
         } else {
-            BackendResponse::err(&"Given node is not an unprocessed node.".to_string())
+            BackendResponse::err("Given node is not an unprocessed node.")
         }
     } else {
-        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+        BackendResponse::err("No tree present. Run computation first.")
     };
 }
 
@@ -621,10 +621,10 @@ fn get_stability_witness(
                 );
             }
         } else {
-            BackendResponse::err(&"No attractor data found.")
+            BackendResponse::err("No attractor data found.")
         }
     } else {
-        BackendResponse::err(&"No attractor data found.")
+        BackendResponse::err("No attractor data found.")
     }
 }
 
@@ -637,7 +637,7 @@ fn get_witness(class_str: String) -> BackendResponse {
             'O' => class.extend(Behaviour::Oscillation),
             'S' => class.extend(Behaviour::Stability),
             _ => {
-                return BackendResponse::err(&"Invalid class.".to_string());
+                return BackendResponse::err("Invalid class.");
             }
         }
     }
@@ -650,7 +650,7 @@ fn get_witness(class_str: String) -> BackendResponse {
                     if let Some(class) = has_class {
                         get_witness_network(&class)
                     } else {
-                        BackendResponse::err(&"Specified class has no witness.".to_string())
+                        BackendResponse::err("Specified class has no witness.")
                     }
                 } else {
                     BackendResponse::err(
@@ -659,10 +659,10 @@ fn get_witness(class_str: String) -> BackendResponse {
                     )
                 }
             } else {
-                BackendResponse::err(&"No results available.".to_string())
+                BackendResponse::err("No results available.")
             }
         } else {
-            BackendResponse::err(&"No results available.".to_string())
+            BackendResponse::err("No results available.")
         }
     }
 }
@@ -672,7 +672,7 @@ fn get_witness_network(colors: &GraphColors) -> BackendResponse {
     let cmp = cmp.read().unwrap();
     if let Some(cmp) = &*cmp {
         if let Some(graph) = &cmp.graph {
-            let witness = graph.pick_witness(&colors);
+            let witness = graph.pick_witness(colors);
             let layout = read_layout(cmp.input_model.as_str());
             let mut model_string = format!("{}", witness); // convert back to aeon
             model_string += "\n";
@@ -688,10 +688,10 @@ fn get_witness_network(colors: &GraphColors) -> BackendResponse {
             }
             BackendResponse::ok(&object! { "model" => model_string }.to_string())
         } else {
-            BackendResponse::err(&"No results available.".to_string())
+            BackendResponse::err("No results available.")
         }
     } else {
-        BackendResponse::err(&"No results available.".to_string())
+        BackendResponse::err("No results available.")
     }
 }
 
@@ -710,10 +710,10 @@ fn get_tree_attractors(node_id: String) -> BackendResponse {
         if let Some(params) = tree.params_for_leaf(node) {
             get_witness_attractors(params)
         } else {
-            BackendResponse::err(&"Given node is not an unprocessed node.".to_string())
+            BackendResponse::err("Given node is not an unprocessed node.")
         }
     } else {
-        BackendResponse::err(&"No tree present. Run computation first.".to_string())
+        BackendResponse::err("No tree present. Run computation first.")
     };
 }
 
@@ -807,10 +807,10 @@ fn get_stability_attractors(
                 );
             }
         } else {
-            BackendResponse::err(&"No attractor data found.")
+            BackendResponse::err("No attractor data found.")
         }
     } else {
-        BackendResponse::err(&"No attractor data found.")
+        BackendResponse::err("No attractor data found.")
     }
 }
 
@@ -825,7 +825,7 @@ fn get_attractors(class_str: String) -> BackendResponse {
             'O' => class.extend(Behaviour::Oscillation),
             'S' => class.extend(Behaviour::Stability),
             _ => {
-                return BackendResponse::err(&"Invalid class.".to_string());
+                return BackendResponse::err("Invalid class.");
             }
         }
     }
@@ -838,7 +838,7 @@ fn get_attractors(class_str: String) -> BackendResponse {
                     if let Some(class) = has_class {
                         get_witness_attractors(&class)
                     } else {
-                        BackendResponse::err(&"Specified class has no witness.".to_string())
+                        BackendResponse::err("Specified class has no witness.")
                     }
                 } else {
                     BackendResponse::err(
@@ -847,10 +847,10 @@ fn get_attractors(class_str: String) -> BackendResponse {
                     )
                 }
             } else {
-                BackendResponse::err(&"No results available.".to_string())
+                BackendResponse::err("No results available.")
             }
         } else {
-            BackendResponse::err(&"No results available.".to_string())
+            BackendResponse::err("No results available.")
         }
     }
 }
@@ -988,13 +988,13 @@ fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
                     );
                     BackendResponse::ok(&(json + "}"))
                 } else {
-                    BackendResponse::err(&"No results available.".to_string())
+                    BackendResponse::err("No results available.")
                 }
             } else {
-                BackendResponse::err(&"No results available.".to_string())
+                BackendResponse::err("No results available.")
             }
         } else {
-            BackendResponse::err(&"No results available.".to_string())
+            BackendResponse::err("No results available.")
         }
     }
 }
@@ -1017,7 +1017,7 @@ fn start_computation(data: Data) -> BackendResponse {
                         let cmp = cmp.read().unwrap();
                         if let Some(computation) = &*cmp {
                             if computation.thread.is_some() {
-                                return BackendResponse::err(&"Previous computation is still running. Cancel it before starting a new one.".to_string());
+                                return BackendResponse::err("Previous computation is still running. Cancel it before starting a new one.");
                             }
                         }
                     }
@@ -1026,7 +1026,7 @@ fn start_computation(data: Data) -> BackendResponse {
                         let mut cmp = cmp.write().unwrap();
                         if let Some(computation) = &*cmp {
                             if computation.thread.is_some() {
-                                return BackendResponse::err(&"Previous computation is still running. Cancel it before starting a new one.".to_string());
+                                return BackendResponse::err("Previous computation is still running. Cancel it before starting a new one.");
                             }
                         }
                         let mut new_cmp = Computation {
@@ -1157,31 +1157,27 @@ fn cancel_computation() -> BackendResponse {
         let cmp = cmp.read().unwrap();
         if let Some(cmp) = &*cmp {
             if cmp.thread.is_none() {
-                return BackendResponse::err(
-                    &"Nothing to cancel. Computation already done.".to_string(),
-                );
+                return BackendResponse::err("Nothing to cancel. Computation already done.");
             }
             if cmp.task.is_cancelled() {
-                return BackendResponse::err(&"Computation already cancelled.".to_string());
+                return BackendResponse::err("Computation already cancelled.");
             }
         } else {
-            return BackendResponse::err(&"No computation to cancel.".to_string());
+            return BackendResponse::err("No computation to cancel.");
         }
     }
     let cmp = cmp.read().unwrap();
     if let Some(cmp) = &*cmp {
         if cmp.thread.is_none() {
-            return BackendResponse::err(
-                &"Nothing to cancel. Computation already done.".to_string(),
-            );
+            return BackendResponse::err("Nothing to cancel. Computation already done.");
         }
         if cmp.task.cancel() {
             BackendResponse::ok(&"\"ok\"".to_string())
         } else {
-            BackendResponse::err(&"Computation already cancelled.".to_string())
+            BackendResponse::err("Computation already cancelled.")
         }
     } else {
-        BackendResponse::err(&"No computation to cancel.".to_string())
+        BackendResponse::err("No computation to cancel.")
     }
 }
 

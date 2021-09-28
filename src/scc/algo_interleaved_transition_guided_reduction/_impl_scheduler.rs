@@ -66,7 +66,7 @@ impl Scheduler<'_> {
 
     /// Get context of this task (meta state, manages cancellation or progress).
     pub fn get_context(&self) -> &GraphTaskContext {
-        &self.ctx
+        self.ctx
     }
 
     /// True if all processes are finished.
