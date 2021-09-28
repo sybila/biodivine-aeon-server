@@ -855,18 +855,19 @@ fn get_attractors(class_str: String) -> BackendResponse {
     }
 }
 
-fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
+fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
     {
+        // Variables prefixed with f_ are from the original fully parametrised graph.
         let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
         let cmp = cmp.read().unwrap();
         if let Some(cmp) = &*cmp {
-            if let Some(classifier) = &cmp.classifier {
+            if let Some(f_classifier) = &cmp.classifier {
                 if let Some(graph) = &cmp.graph {
-                    let witness_colour = colors.pick_singleton();
-                    let witness_network: BooleanNetwork = graph.pick_witness(&witness_colour);
+                    let f_witness_colour = f_colors.pick_singleton();
+                    let witness_network: BooleanNetwork = graph.pick_witness(&f_witness_colour);
                     let witness_graph = SymbolicAsyncGraph::new(witness_network.clone()).unwrap();
                     let witness_str = witness_network.to_string();
-                    let witness_attractors = classifier.attractors(&witness_colour);
+                    let f_witness_attractors = f_classifier.attractors(&f_witness_colour);
                     let variable_name_strings = witness_network
                         .variables()
                         .map(|id| format!("\"{}\"", witness_network.get_variable_name(id)));
@@ -878,25 +879,25 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                     // are based on the witness_graph. This means they have different number
                     // of BDD variables inside!
                     let mut has_large_attractors = false;
-                    for (attractor, behaviour) in witness_attractors.iter() {
+                    for (f_attractor, behaviour) in f_witness_attractors.iter() {
                         println!(
                             "Attractor {:?} state count: {}",
                             behaviour,
-                            attractor.approx_cardinality()
+                            f_attractor.approx_cardinality()
                         );
                         let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> = Vec::new();
                         let mut not_fixed_vars: HashSet<usize> = HashSet::new();
                         if *behaviour == Behaviour::Stability {
                             // This is a sink - no edges
-                            assert_eq!(attractor.materialize().iter().count(), 1);
+                            assert_eq!(f_attractor.materialize().iter().count(), 1);
                             let sink: ArrayBitVector =
-                                attractor.materialize().iter().next().unwrap();
+                                f_attractor.materialize().iter().next().unwrap();
                             attractor_graph.push((sink.clone(), sink));
                             for i in 0..witness_network.num_vars() {
                                 // In sink, we mark everything as "not-fixed" because we want to just display it normally.
                                 not_fixed_vars.insert(i);
                             }
-                        } else if attractor.approx_cardinality() >= 500.0 {
+                        } else if f_attractor.approx_cardinality() >= 500.0 {
                             has_large_attractors = true;
                             // For large attractors, only show fixed values.
                             let mut state_0 =
@@ -904,15 +905,13 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                             let mut state_1 =
                                 ArrayBitVector::from(vec![true; graph.as_network().num_vars()]);
                             for var in graph.as_network().variables() {
-                                let var_true =
-                                    witness_graph.fix_network_variable(var, true).vertices();
-                                let var_false =
-                                    witness_graph.fix_network_variable(var, false).vertices();
-                                let always_one = attractor.intersect(&var_false).is_empty();
-                                let always_zero = attractor.intersect(&var_true).is_empty();
-                                if always_one {
+                                let f_var_true = graph.fix_network_variable(var, true).vertices();
+                                let f_var_false = graph.fix_network_variable(var, false).vertices();
+                                let f_always_one = f_attractor.intersect(&f_var_false).is_empty();
+                                let f_always_zero = f_attractor.intersect(&f_var_true).is_empty();
+                                if f_always_one {
                                     state_0.set(var.into(), true);
-                                } else if always_zero {
+                                } else if f_always_zero {
                                     state_1.set(var.into(), false);
                                 } else {
                                     not_fixed_vars.insert(var.into());
@@ -921,7 +920,7 @@ fn get_witness_attractors(colors: &GraphColors) -> BackendResponse {
                             attractor_graph.push((state_0.clone(), state_1.clone()));
                             attractor_graph.push((state_1, state_0));
                         } else {
-                            for source in attractor.materialize().iter() {
+                            for source in f_attractor.materialize().iter() {
                                 let source_set = witness_graph.vertex(&source);
                                 let mut target_set = witness_graph.mk_empty_vertices();
                                 for v in witness_graph.as_network().variables() {
