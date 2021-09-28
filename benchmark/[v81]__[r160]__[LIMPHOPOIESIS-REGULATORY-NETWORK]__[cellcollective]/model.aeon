@@ -59,8 +59,8 @@ AKT -| SMAD3
 TGFbR -> SMAD2
 ThPOK -| Runx3
 STAT5 -> Runx3
-CD4 -| Runx3
-CD8 -> Runx3
+ThPOK__CD4 -| Runx3
+ThPOK__CD8 -> Runx3
 Runx3 -| Ebf1
 Runx1 -> Ebf1
 Notch1 -| Runx1
@@ -118,23 +118,23 @@ RORgt -> ThPOK
 Runx3 -| ThPOK
 Foxp3 -> ThPOK
 TCR -> ThPOK
-CD4 -> ThPOK
-CD8 -| ThPOK
+ThPOK__CD4 -> ThPOK
+ThPOK__CD8 -| ThPOK
 Tbet -> ThPOK
 IL2R -> STAT5
 JAK3 -> STAT5
 SOCS1 -| STAT5
-Notch1 -> CD4
-ThPOK -> CD4
-Ebf1 -| CD4
-Runx3 -| CD4
-CD4 -> CD4
-ThPOK -| CD8
-Notch1 -> CD8
-Ebf1 -| CD8
-Runx3 -> CD8
-TCR -| CD8
-CD8 -> CD8
+Notch1 -> ThPOK__CD4
+ThPOK -> ThPOK__CD4
+Ebf1 -| ThPOK__CD4
+Runx3 -| ThPOK__CD4
+ThPOK__CD4 -> ThPOK__CD4
+ThPOK -| ThPOK__CD8
+Notch1 -> ThPOK__CD8
+Ebf1 -| ThPOK__CD8
+Runx3 -> ThPOK__CD8
+TCR -| ThPOK__CD8
+ThPOK__CD8 -> ThPOK__CD8
 IL12 -> IL12R
 STAT6 -| IL12R
 GATA3 -> IL4
@@ -167,8 +167,8 @@ $Bcl2: (STAT5 | FR4)
 $Bcl6: ((IL21R & Ebf1) & (!Blimp1 & !Irf4))
 $Blimp1: (Irf4 & ((!Pax5 & !Bach2) & !Bcl6))
 $CD19: Pax5
-$CD4: (((Notch1 & (!Ebf1 & !Runx3)) | (ThPOK & (!Ebf1 & !Runx3))) | (CD4 & (!Ebf1 & !Runx3)))
-$CD8: (((CD8 & ((!ThPOK & !Ebf1) & !TCR)) | (Runx3 & ((!ThPOK & !Ebf1) & !TCR))) | (Notch1 & ((!ThPOK & !Ebf1) & !TCR)))
+$ThPOK__CD4: (((Notch1 & (!Ebf1 & !Runx3)) | (ThPOK & (!Ebf1 & !Runx3))) | (ThPOK__CD4 & (!Ebf1 & !Runx3)))
+$ThPOK__CD8: (((ThPOK__CD8 & ((!ThPOK & !Ebf1) & !TCR)) | (Runx3 & ((!ThPOK & !Ebf1) & !TCR))) | (Notch1 & ((!ThPOK & !Ebf1) & !TCR)))
 $Dll1: true
 $EOMES: ((IL27R & Runx3) | (Tbet & Runx3))
 $ERK: (BCR | Flt3)
@@ -221,7 +221,7 @@ $Pax5: (((STAT5 & ((!ThPOK & !Blimp1) & !Irf4)) & Ebf1) | (Ebf1 & (((!ThPOK & !B
 $Prf1: EOMES
 $RORgt: ((SMAD2 & STAT3) | (RORgt & ((!GATA3 & !Foxp3) & !Tbet)))
 $Runx1: (Runx1 & (((!Notch1 & !ThPOK) & !Runx3) & !TCR))
-$Runx3: ((CD8 & ((!ThPOK & !STAT5) & !CD4)) | (STAT5 & CD8))
+$Runx3: ((ThPOK__CD8 & ((!ThPOK & !STAT5) & !ThPOK__CD4)) | (STAT5 & ThPOK__CD8))
 $SMAD2: TGFbR
 $SMAD3: (TGFbR & !AKT)
 $SOCS1: (Tbet | STAT1)
@@ -237,5 +237,5 @@ $TGFbR: TGFb
 $TNFR2: TNFa
 $TNFa: RORgt
 $Tbet: ((Tbet & ((!GATA3 & !RORgt) & !Foxp3)) | (STAT1 & ((!GATA3 & !RORgt) & !Foxp3)))
-$ThPOK: ((((((ThPOK | (Tbet & !Runx3)) | TCR) | GATA3) | RORgt) | Foxp3) | (CD4 & !CD8))
+$ThPOK: ((((((ThPOK | (Tbet & !Runx3)) | TCR) | GATA3) | RORgt) | Foxp3) | (ThPOK__CD4 & !ThPOK__CD8))
 $XBP1: Blimp1

@@ -32,7 +32,7 @@ fn make_sketch(model: &BooleanNetwork) -> BooleanNetwork {
     let mut new_network = BooleanNetwork::new(model.as_graph().clone());
     for v in model.variables() {
         let regs = model.regulators(v).len();
-        if regs != 0 && regs != 2 && regs != 3 && regs != 4 { // No need to rewrite 1, that one is usually deterministic
+        if regs != 0 && regs != 2 /*&& regs != 3 *//*&& regs != 4*/ { // No need to rewrite 1, that one is usually deterministic
             let function = model.get_update_function(v).as_ref().unwrap().clone();
             new_network.add_update_function(v, function).unwrap();
         }
@@ -70,23 +70,42 @@ fn get_all_attractors(graph: &SymbolicAsyncGraph) -> Vec<GraphColoredVertices> {
     components.into_iter().map(|(s, _)| s).collect()
 }
 
+fn count_holes(bn: &BooleanNetwork) -> usize {
+    let mut holes = bn.num_parameters();
+    for v in bn.variables() {
+        if bn.get_update_function(v).is_none() {
+            holes += 1;
+        }
+    }
+
+    holes
+}
+
 fn main() {
     let mut random = StdRng::seed_from_u64(123456789);
     let original_model = read_aeon_from_stdin();
     let original_graph = SymbolicAsyncGraph::new(original_model.clone()).unwrap();
+
+    let sketch = make_sketch(&original_model);
+    let sketch_graph = SymbolicAsyncGraph::new(sketch.clone()).unwrap();
+    let all_bdd_vars = sketch_graph.symbolic_context().bdd_variable_set().num_vars();
 
     let original_attractor = get_all_attractors(&original_graph)
         .into_iter()
         .next()
         .unwrap();
 
-    let sketch = make_sketch(&original_model);
-    let sketch_graph = SymbolicAsyncGraph::new(sketch.clone()).unwrap();
-    let all_bdd_vars = sketch_graph.symbolic_context().bdd_variable_set().num_vars();
+
+    println!("Model variables: {};", original_model.num_vars());
+    println!("Inputs: {};", inputs(&original_model).len());
+    println!("Parameters in sketch: {}; Holes in sketch: {};", usize::from(all_bdd_vars) - original_model.num_vars(), count_holes(&sketch));
+    println!("Valid parametrisations: {};", sketch_graph.unit_colors().approx_cardinality());
+
+
     let sketch_attractors = get_all_attractors(&sketch_graph);
     println!("Model variables: {};", original_model.num_vars());
     println!("Inputs: {};", inputs(&original_model).len());
-    println!("Parameters in sketch: {};", usize::from(all_bdd_vars) - original_model.num_vars());
+    println!("Parameters in sketch: {}; Holes in sketch: {};", usize::from(all_bdd_vars) - original_model.num_vars(), count_holes(&sketch));
     println!("Valid parametrisations: {};", sketch_graph.unit_colors().approx_cardinality());
 
     for p_observability in [0.2, 0.4, 0.8, 1.0] {
