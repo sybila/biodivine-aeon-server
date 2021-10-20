@@ -18,10 +18,10 @@ lto = true
 [dependencies]
 biodivine-lib-bdd = "0.2.1"
 biodivine-lib-param-bn = "0.1.0"
-rocket = "0.4.6"
+rocket = "0.4.10"
 lazy_static = "1.4.0"
 json = "0.12.4"
-regex = "1.4.2"
+regex = "1.5.4"
 rand = "0.8.1"
 
 [features]
