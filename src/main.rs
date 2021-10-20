@@ -1286,10 +1286,15 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
 fn main() {
     //test_main::run();
     let address = std::env::var("AEON_ADDR").unwrap_or_else(|_| "localhost".to_string());
-    let port: u16 = std::env::var("AEON_PORT")
+    let port_from_args = {
+        let mut args = std::env::args();
+        args.next(); // Skip binary path
+        args.next().and_then(|s| s.parse::<u16>().ok())
+    };
+    let port_from_env = std::env::var("AEON_PORT")
         .ok()
-        .and_then(|s| s.parse::<u16>().ok())
-        .unwrap_or(8000);
+        .and_then(|s| s.parse::<u16>().ok());
+    let port: u16 = port_from_args.or(port_from_env).unwrap_or(8000);
     let config = Config::build(Environment::Production)
         .address(address)
         .port(port)
