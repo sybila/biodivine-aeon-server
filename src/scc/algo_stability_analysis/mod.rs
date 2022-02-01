@@ -60,6 +60,7 @@ pub fn compute_stability(
     graph
         .as_network()
         .variables()
+        .filter(|id| graph.as_network().get_variable_name(*id).contains("phenotype"))
         .map(|id| (id, VariableStability::for_attractors(graph, components, id)))
         .collect()
 }

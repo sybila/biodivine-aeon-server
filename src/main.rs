@@ -191,12 +191,14 @@ fn get_stability_data(node_id: String, behaviour_str: String) -> BackendResponse
             let stability_data = compute_stability(graph, &components);
             let mut response = JsonValue::new_array();
             for variable in graph.as_network().variables() {
-                response
-                    .push(object! {
+                if stability_data.contains_key(&variable) {
+                    response
+                        .push(object! {
                         "variable": graph.as_network().get_variable_name(variable).clone(),
                         "data": stability_data[&variable].to_json(),
                     })
-                    .unwrap();
+                        .unwrap();
+                }
             }
             BackendResponse::ok(&response.to_string())
         } else {
