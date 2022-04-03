@@ -93,8 +93,19 @@ impl Scheduler<'_> {
         self.processes.sort_by_key(|(w, _)| usize::MAX - (*w));
 
         // Perform one step in a process
-        if let Some((_, mut process)) = self.processes.pop() {
-            let is_done = process.step(self, graph);
+        if let Some((weight, mut process)) = self.processes.pop() {
+            //if weight > 1_000 {
+                println!("Process weight: {}", weight);
+            //}
+            let next_best_weight = self.processes.get(0).map(|p| p.0).unwrap_or(usize::MAX);
+            let mut is_done;
+            loop {
+                is_done = process.step(self, graph);
+
+                if is_done || process.weight() > 1_000 * next_best_weight {
+                    break;
+                }
+            }
             if !is_done {
                 self.processes.push((process.weight(), process))
             }
