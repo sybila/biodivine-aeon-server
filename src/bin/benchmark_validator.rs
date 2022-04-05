@@ -131,7 +131,7 @@ fn main() {
                             eprintln!("{}", model.to_string());
                         }
                     } else {
-                        let graph = SymbolicAsyncGraph::new(model);
+                        let graph = SymbolicAsyncGraph::new(model, 0);
                         match graph {
                             Ok(graph) => {
                                 if graph.unit_colors().as_bdd()

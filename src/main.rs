@@ -360,7 +360,7 @@ fn check_update_function(data: Data) -> BackendResponse {
                             model.num_vars(),
                             max_size
                         );
-                        SymbolicAsyncGraph::new(model)
+                        SymbolicAsyncGraph::new(model, 0)
                     } else {
                         Err("Function too large for on-the-fly analysis.".to_string())
                     }
@@ -865,7 +865,7 @@ fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
                 if let Some(graph) = &cmp.graph {
                     let f_witness_colour = f_colors.pick_singleton();
                     let witness_network: BooleanNetwork = graph.pick_witness(&f_witness_colour);
-                    let witness_graph = SymbolicAsyncGraph::new(witness_network.clone()).unwrap();
+                    let witness_graph = SymbolicAsyncGraph::new(witness_network.clone(), 0).unwrap();
                     let witness_str = witness_network.to_string();
                     let f_witness_attractors = f_classifier.attractors(&f_witness_colour);
                     let variable_name_strings = witness_network
@@ -1044,7 +1044,7 @@ fn start_computation(data: Data) -> BackendResponse {
                         // stuff.
                         let cmp_thread = std::thread::spawn(move || {
                             let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-                            match SymbolicAsyncGraph::new(network) {
+                            match SymbolicAsyncGraph::new(network, 0) {
                                 Ok(graph) => {
                                     // Now that we have graph, we can create classifier and progress
                                     // and save them into the computation.
@@ -1268,13 +1268,16 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
     let mut aeon_string = String::new();
     return match stream.read_to_string(&mut aeon_string) {
         Ok(_) => {
-            match BooleanNetwork::try_from(aeon_string.as_str()).and_then(SymbolicAsyncGraph::new) {
-                Ok(graph) => {
-                    let witness = graph.pick_witness(graph.unit_colors());
-                    let layout = read_layout(&aeon_string);
-                    BackendResponse::ok(
-                        &object! { "model" => witness.to_sbml(Some(&layout)) }.to_string(),
-                    )
+            match BooleanNetwork::try_from(aeon_string.as_str()) {
+                Ok(network) => match SymbolicAsyncGraph::new(network, 0) {
+                    Ok(graph) => {
+                        let witness = graph.pick_witness(graph.unit_colors());
+                        let layout = read_layout(&aeon_string);
+                        BackendResponse::ok(
+                            &object! { "model" => witness.to_sbml(Some(&layout)) }.to_string(),
+                        )
+                    }
+                    Err(error) => BackendResponse::err(&error),
                 }
                 Err(error) => BackendResponse::err(&error),
             }
