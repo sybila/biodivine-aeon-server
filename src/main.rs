@@ -1,4 +1,3 @@
-#![feature(proc_macro_hygiene, decl_macro)]
 #[macro_use]
 extern crate rocket;
 
@@ -8,39 +7,40 @@ extern crate lazy_static;
 #[macro_use]
 extern crate json;
 
-use rocket::http::hyper::header::AccessControlAllowOrigin;
 use rocket::http::{ContentType, Header};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
-use biodivine_aeon_server::scc::{Behaviour, Class, Classifier};
 use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate};
+use ensemble_explorer::scc::{Behaviour, Class, Classifier};
 use regex::Regex;
 use std::convert::TryFrom;
 
-use biodivine_aeon_server::bdt::{AttributeId, Bdt, BdtNodeId};
-use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
-use biodivine_aeon_server::scc::algo_stability_analysis::{
-    compute_stability, StabilityVector, VariableStability,
-};
-use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
-use biodivine_aeon_server::util::functional::Functional;
-use biodivine_aeon_server::util::index_type::IndexType;
-use biodivine_aeon_server::GraphTaskContext;
+use biodivine_lib_bdd::Bdd;
 use biodivine_lib_param_bn::biodivine_std::bitvector::{ArrayBitVector, BitVector};
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
+use ensemble_explorer::bdt::{AttributeId, Bdt, BdtNodeId};
+use ensemble_explorer::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
+use ensemble_explorer::scc::algo_stability_analysis::{
+    compute_stability, StabilityVector, VariableStability,
+};
+use ensemble_explorer::scc::algo_xie_beerel::xie_beerel_attractors;
+use ensemble_explorer::util::functional::Functional;
+use ensemble_explorer::util::index_type::IndexType;
+use ensemble_explorer::GraphTaskContext;
 use json::JsonValue;
-use rocket::config::Environment;
-use rocket::{Config, Data};
+use rocket::config::LogLevel;
+use rocket::data::ByteUnit;
+use rocket::tokio::io::AsyncReadExt;
+use rocket::{Data, Error};
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
+use std::net::IpAddr;
+use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use biodivine_lib_bdd::Bdd;
-use rocket::logger::LoggingLevel;
 
 /// Computation keeps all information
 struct Computation {
@@ -338,10 +338,10 @@ fn max_parameter_cardinality(function: &FnUpdate) -> usize {
 /// Return cardinality of such model (i.e. the number of instantiations of this update function)
 /// or error if the update function (or model) is invalid.
 #[post("/check_update_function", format = "plain", data = "<data>")]
-fn check_update_function(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000); // limit model size to 10MB
+async fn check_update_function(data: Data<'_>) -> BackendResponse {
+    let mut stream = data.open(ByteUnit::Mebibyte(10));
     let mut model_string = String::new();
-    return match stream.read_to_string(&mut model_string) {
+    return match stream.read_to_string(&mut model_string).await {
         Ok(_) => {
             let lock = CHECK_UPDATE_FUNCTION_LOCK.clone();
             let mut lock = lock.write().unwrap();
@@ -486,11 +486,7 @@ fn get_results() -> BackendResponse {
         .map(|(c, p)| {
             let sat_count = p.approx_cardinality();
             let sat_count = sat_count.min(f64::MAX);
-            format!(
-                "{{\"sat_count\":{},\"phenotype\":{}}}",
-                sat_count,
-                c
-            )
+            format!("{{\"sat_count\":{},\"phenotype\":{}}}", sat_count, c)
         })
         .collect();
 
@@ -1005,10 +1001,10 @@ fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
 
 /// Accept an Aeon model, parse it and start a new computation (if there is no computation running).
 #[post("/start_computation", format = "plain", data = "<data>")]
-fn start_computation(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000); // limit model to 10MB
+async fn start_computation(data: Data<'_>) -> BackendResponse {
+    let mut stream = data.open(ByteUnit::Mebibyte(10));
     let mut aeon_string = String::new();
-    return match stream.read_to_string(&mut aeon_string) {
+    return match stream.read_to_string(&mut aeon_string).await {
         Ok(_) => {
             // First, try to parse the network so that the user can at least verify it is correct...
             match BooleanNetwork::try_from(aeon_string.as_str()) {
@@ -1189,10 +1185,10 @@ fn cancel_computation() -> BackendResponse {
 /// If everything goes well, return a standard result object with a parsed model, or
 /// error if something fails.
 #[post("/sbml_to_aeon", format = "plain", data = "<data>")]
-fn sbml_to_aeon(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000); // limit model to 10MB
+async fn sbml_to_aeon(data: Data<'_>) -> BackendResponse {
+    let mut stream = data.open(ByteUnit::Mebibyte(10));
     let mut sbml_string = String::new();
-    match stream.read_to_string(&mut sbml_string) {
+    match stream.read_to_string(&mut sbml_string).await {
         Ok(_) => {
             match BooleanNetwork::try_from_sbml(&sbml_string) {
                 Ok((model, layout)) => {
@@ -1247,10 +1243,10 @@ fn read_metadata(aeon_string: &str) -> (Option<String>, Option<String>) {
 /// which will then be translated into SBML (XML) representation.
 /// Preserve layout metadata.
 #[post("/aeon_to_sbml", format = "plain", data = "<data>")]
-fn aeon_to_sbml(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000); // limit model to 10MB
+async fn aeon_to_sbml(data: Data<'_>) -> BackendResponse {
+    let mut stream = data.open(ByteUnit::Mebibyte(10));
     let mut aeon_string = String::new();
-    match stream.read_to_string(&mut aeon_string) {
+    match stream.read_to_string(&mut aeon_string).await {
         Ok(_) => match BooleanNetwork::try_from(aeon_string.as_str()) {
             Ok(network) => {
                 let layout = read_layout(&aeon_string);
@@ -1267,10 +1263,10 @@ fn aeon_to_sbml(data: Data) -> BackendResponse {
 /// Note that this can take quite a while for large models since we have to actually build
 /// the unit BDD right now (in the future, we might opt to use a SAT solver which might be faster).
 #[post("/aeon_to_sbml_instantiated", format = "plain", data = "<data>")]
-fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000); // limit model to 10MB
+async fn aeon_to_sbml_instantiated(data: Data<'_>) -> BackendResponse {
+    let mut stream = data.open(ByteUnit::Mebibyte(10));
     let mut aeon_string = String::new();
-    return match stream.read_to_string(&mut aeon_string) {
+    return match stream.read_to_string(&mut aeon_string).await {
         Ok(_) => {
             match BooleanNetwork::try_from(aeon_string.as_str()).and_then(SymbolicAsyncGraph::new) {
                 Ok(graph) => {
@@ -1287,41 +1283,43 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
     };
 }
 
-fn main() {
+#[rocket::main]
+async fn main() -> Result<(), Error> {
     let args = std::env::args().collect::<Vec<_>>();
     //test_main::run();
     let address = std::env::var("AEON_ADDR").unwrap_or_else(|_| "localhost".to_string());
-    let port_from_args = {
-        args.get(1).and_then(|s| s.parse::<u16>().ok())
-    };
+    let port_from_args = { args.get(1).and_then(|s| s.parse::<u16>().ok()) };
     let port_from_env = std::env::var("AEON_PORT")
         .ok()
         .and_then(|s| s.parse::<u16>().ok());
     let port: u16 = port_from_args.or(port_from_env).unwrap_or(8000);
-    let config = Config::build(Environment::Production)
-        .address(address)
-        .port(port)
-        .log_level(LoggingLevel::Off)
-        .finalize();
+    let mut config = rocket::Config::release_default();
+    config.address = IpAddr::from_str(address.as_str()).unwrap();
+    config.port = port;
+    config.log_level = LogLevel::Off;
 
-    let sketch_file = args.get(2).expect(
-        "Expected second argument to be `.aeon` sketch file."
-    );
+    let sketch_file = args
+        .get(2)
+        .expect("Expected second argument to be `.aeon` sketch file.");
 
-    let cluster_folder = args.get(3).expect(
-        "Expected thrid argument to be a folder with symbolic class sets."
-    );
+    let cluster_folder = args
+        .get(3)
+        .expect("Expected thrid argument to be a folder with symbolic class sets.");
 
     let core_bn_input = std::fs::read_to_string(sketch_file.as_str()).unwrap();
     let core_bn = BooleanNetwork::try_from(core_bn_input.as_str()).unwrap();
     let stg = SymbolicAsyncGraph::new(core_bn).unwrap();
-    println!("Loaded core model with {} variables.", stg.as_network().num_vars());
+    println!(
+        "Loaded core model with {} variables.",
+        stg.as_network().num_vars()
+    );
 
     let mut classes = HashMap::new();
     let mut cls = Class::new_empty();
 
     // Sort class files so that they have a predictable mapping.
-    let mut files = std::fs::read_dir(cluster_folder.as_str()).unwrap()
+    let mut files = std::fs::read_dir(cluster_folder.as_str())
+        .unwrap()
         .map(|it| it.unwrap().path())
         .collect::<Vec<_>>();
     files.sort_by_cached_key(|path| path.file_name().unwrap().to_str().unwrap().to_string());
@@ -1334,7 +1332,11 @@ fn main() {
             let string = std::fs::read_to_string(&dir).unwrap();
             let class = Bdd::from_string(string.as_str().trim());
             cls = cls.clone_extended(Behaviour::Stability);
-            println!("Found a class with {} items; Loaded as {}", class.cardinality(), cls);
+            println!(
+                "Found a class with {} items; Loaded as {}",
+                class.cardinality(),
+                cls
+            );
             classes.insert(cls.clone(), stg.empty_colors().copy(class));
         } else {
             println!("Skipping file {}.", name);
@@ -1365,7 +1367,7 @@ fn main() {
     println!("Continue by opening https://biodivine.fi.muni.cz/aeon/v0.4.0/tree_explorer.html?engine=http://localhost:{}", port);
     println!("(but don't do it in Safari - Chrome or Firefox preferred)");
 
-    rocket::custom(config.unwrap())
+    rocket::custom(config)
         .mount(
             "/",
             routes![
@@ -1393,7 +1395,8 @@ fn main() {
                 auto_expand,
             ],
         )
-        .launch();
+        .launch()
+        .await
 }
 
 struct BackendResponse {
@@ -1418,19 +1421,18 @@ impl BackendResponse {
     }
 }
 
-impl<'r> Responder<'r> for BackendResponse {
-    fn respond_to(self, _: &Request) -> response::Result<'r> {
+impl<'r, 'o: 'r> Responder<'r, 'o> for BackendResponse {
+    fn respond_to(self, _: &'r Request) -> response::Result<'o> {
         use std::io::Cursor;
 
-        let cursor = Cursor::new(self.message);
         Response::build()
             .header(ContentType::Plain)
-            .header(AccessControlAllowOrigin::Any)
+            //.header(AccessControlAllowOrigin::Any)
             // This magic set of headers might fix some CROS issues, but we are not sure yet...
             .header(Header::new("Allow", "GET, POST, OPTIONS, PUT, DELETE"))
             .header(Header::new("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE"))
             .header(Header::new("Access-Control-Allow-Headers", "X-API-KEY, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method"))
-            .sized_body(cursor)
+            .sized_body(self.message.len(), Cursor::new(self.message.clone()))
             .ok()
     }
 }

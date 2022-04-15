@@ -1,16 +1,16 @@
-use std::convert::TryFrom;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
-use biodivine_lib_param_bn::BooleanNetwork;
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
+use biodivine_lib_param_bn::BooleanNetwork;
+use std::convert::TryFrom;
 
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
-    let core_network = args.get(1).expect(
-        "Expected path to the network sketch as the first argument."
-    );
-    let ensemble = args.get(2).expect(
-        "Expected path to ensemble folder as the second argument."
-    );
+    let core_network = args
+        .get(1)
+        .expect("Expected path to the network sketch as the first argument.");
+    let ensemble = args
+        .get(2)
+        .expect("Expected path to ensemble folder as the second argument.");
 
     let core_bn = {
         let text = std::fs::read_to_string(core_network.as_str()).unwrap();

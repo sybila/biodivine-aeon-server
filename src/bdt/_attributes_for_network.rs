@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::bdt::{Attribute, AttributeContext, Bdt, BifurcationFunction};
 use crate::util::functional::Functional;
 use biodivine_lib_bdd::Bdd;
@@ -11,15 +12,30 @@ impl Bdt {
         attributes_for_network_inputs(graph, &mut attributes);
         println!("Attribute candidates (inputs): {}", attributes.len());
         attributes_for_constant_parameters(graph, &mut attributes);
-        println!("Attribute candidates (constant params): {}", attributes.len());
+        println!(
+            "Attribute candidates (constant params): {}",
+            attributes.len()
+        );
         //attributes_for_missing_constraints(graph, &mut attributes);
-        println!("Attribute candidates (missing constraints): {}", attributes.len());
+        println!(
+            "Attribute candidates (missing constraints): {}",
+            attributes.len()
+        );
         //attributes_for_implicit_function_tables(graph, &mut attributes);
-        println!("Attribute candidates (implicit tables): {}", attributes.len());
+        println!(
+            "Attribute candidates (implicit tables): {}",
+            attributes.len()
+        );
         //attributes_for_explicit_function_tables(graph, &mut attributes);
-        println!("Attribute candidates (explicit tables): {}", attributes.len());
+        println!(
+            "Attribute candidates (explicit tables): {}",
+            attributes.len()
+        );
         //attributes_for_conditional_observability(graph, &mut attributes);
-        println!("Attribute candidates (conditional obs.): {}", attributes.len());
+        println!(
+            "Attribute candidates (conditional obs.): {}",
+            attributes.len()
+        );
         canalizing_attributes(graph, &mut attributes);
         println!("Attribute candidates (canalizing): {}", attributes.len());
         let attributes: Vec<Attribute> = attributes

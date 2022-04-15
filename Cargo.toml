@@ -1,18 +1,13 @@
 [package]
-name = "biodivine-aeon-server"
+name = "ensemble_explorer"
 version = "0.5.0-SNAPSHOT"
 authors = ["Samuel Pastva <daemontus@gmail.com>"]
 edition = "2018"
-default-run = "biodivine-aeon-server"
-
-# Enable rich docs for some online docs autogen services.
-[package.metadata.docs.rs]
-rustdoc-args = ["--html-in-header", "docs-head.html"]
 
 [dependencies]
 biodivine-lib-bdd = "0.3.0"
 biodivine-lib-param-bn = { git = "https://github.com/sybila/biodivine-lib-param-bn.git", branch = "new-ordering" }
-rocket = "0.4.10"
+rocket = "0.5.0-rc.1"
 lazy_static = "1.4.0"
 json = "0.12.4"
 regex = "1.5.4"
