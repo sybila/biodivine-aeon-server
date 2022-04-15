@@ -32,6 +32,7 @@ use ensemble_explorer::GraphTaskContext;
 use json::JsonValue;
 use rocket::config::LogLevel;
 use rocket::data::ByteUnit;
+use rocket::fairing::{Fairing, Info, Kind};
 use rocket::tokio::io::AsyncReadExt;
 use rocket::{Data, Error};
 use std::cmp::max;
@@ -1287,7 +1288,7 @@ async fn aeon_to_sbml_instantiated(data: Data<'_>) -> BackendResponse {
 async fn main() -> Result<(), Error> {
     let args = std::env::args().collect::<Vec<_>>();
     //test_main::run();
-    let address = std::env::var("AEON_ADDR").unwrap_or_else(|_| "localhost".to_string());
+    let address = std::env::var("AEON_ADDR").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port_from_args = { args.get(1).and_then(|s| s.parse::<u16>().ok()) };
     let port_from_env = std::env::var("AEON_PORT")
         .ok()
@@ -1368,6 +1369,7 @@ async fn main() -> Result<(), Error> {
     println!("(but don't do it in Safari - Chrome or Firefox preferred)");
 
     rocket::custom(config)
+        .attach(CORS)
         .mount(
             "/",
             routes![
@@ -1434,5 +1436,27 @@ impl<'r, 'o: 'r> Responder<'r, 'o> for BackendResponse {
             .header(Header::new("Access-Control-Allow-Headers", "X-API-KEY, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method"))
             .sized_body(self.message.len(), Cursor::new(self.message.clone()))
             .ok()
+    }
+}
+
+pub struct CORS;
+
+#[rocket::async_trait]
+impl Fairing for CORS {
+    fn info(&self) -> Info {
+        Info {
+            name: "Add CORS headers to responses",
+            kind: Kind::Response,
+        }
+    }
+
+    async fn on_response<'r>(&self, _request: &'r Request<'_>, response: &mut Response<'r>) {
+        response.set_header(Header::new("Access-Control-Allow-Origin", "*"));
+        response.set_header(Header::new(
+            "Access-Control-Allow-Methods",
+            "POST, GET, PATCH, OPTIONS",
+        ));
+        response.set_header(Header::new("Access-Control-Allow-Headers", "*"));
+        response.set_header(Header::new("Access-Control-Allow-Credentials", "true"));
     }
 }
