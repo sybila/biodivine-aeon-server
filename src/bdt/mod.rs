@@ -34,12 +34,14 @@ pub enum BdtNode {
         params: GraphColors,
     },
     Decision {
+        pending: Vec<AppliedAttribute>,
         attribute: AttributeId,
         left: BdtNodeId,
         right: BdtNodeId,
         classes: BifurcationFunction,
     },
     Unprocessed {
+        pending: Vec<AppliedAttribute>,
         classes: BifurcationFunction,
     },
 }
@@ -124,7 +126,11 @@ pub fn entropy(classes: &BifurcationFunction) -> f64 {
         let proportion = *c / total;
         result += -proportion * proportion.log2();
     }
-    result
+    if result.is_finite() {
+        result
+    } else {
+        0.0
+    }
 }
 
 /// Complete information gain from original and divided dataset cardinality.

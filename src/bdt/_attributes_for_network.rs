@@ -7,14 +7,22 @@ use biodivine_lib_param_bn::{FnUpdate, VariableId};
 
 impl Bdt {
     pub fn new_from_graph(classes: BifurcationFunction, graph: &SymbolicAsyncGraph) -> Bdt {
-        let mut attributes = Vec::new();
+        let mut attributes: Vec<Attribute> = Vec::new();
         attributes_for_network_inputs(graph, &mut attributes);
+        println!("Attribute candidates (inputs): {}", attributes.len());
         attributes_for_constant_parameters(graph, &mut attributes);
-        attributes_for_missing_constraints(graph, &mut attributes);
-        attributes_for_implicit_function_tables(graph, &mut attributes);
-        attributes_for_explicit_function_tables(graph, &mut attributes);
-        attributes_for_conditional_observability(graph, &mut attributes);
-        let attributes = attributes
+        println!("Attribute candidates (constant params): {}", attributes.len());
+        //attributes_for_missing_constraints(graph, &mut attributes);
+        println!("Attribute candidates (missing constraints): {}", attributes.len());
+        //attributes_for_implicit_function_tables(graph, &mut attributes);
+        println!("Attribute candidates (implicit tables): {}", attributes.len());
+        //attributes_for_explicit_function_tables(graph, &mut attributes);
+        println!("Attribute candidates (explicit tables): {}", attributes.len());
+        //attributes_for_conditional_observability(graph, &mut attributes);
+        println!("Attribute candidates (conditional obs.): {}", attributes.len());
+        canalizing_attributes(graph, &mut attributes);
+        println!("Attribute candidates (canalizing): {}", attributes.len());
+        let attributes: Vec<Attribute> = attributes
             .into_iter()
             .filter(|a| {
                 let is_not_empty = !a.positive.is_empty() && !a.negative.is_empty();
@@ -25,6 +33,7 @@ impl Bdt {
                 is_not_empty
             })
             .collect();
+        println!("Final number of attributes: {}", attributes.len());
         Bdt::new(classes, attributes)
     }
 }
@@ -63,6 +72,72 @@ fn attributes_for_constant_parameters(graph: &SymbolicAsyncGraph, out: &mut Vec<
                 positive: graph.empty_colors().copy(bdd),
                 context: None,
             })
+        }
+    }
+}
+
+fn canalizing_attributes(graph: &SymbolicAsyncGraph, out: &mut Vec<Attribute>) {
+    let network = graph.as_network();
+    let context = graph.symbolic_context();
+    for target in network.variables() {
+        for regulator in network.regulators(target) {
+            let update_function = network.get_update_function(target);
+            let fn_is_true = if let Some(function) = update_function {
+                context.mk_fn_update_true(function)
+            } else {
+                context.mk_implicit_function_is_true(target, &network.regulators(target))
+            };
+            let fn_is_false = fn_is_true.not();
+            let regulator_index: usize = regulator.into();
+            let regulator_var = context.state_variables()[regulator_index];
+            let regulator_is_true = context.mk_state_variable_is_true(regulator);
+            let regulator_is_false = context.mk_state_variable_is_true(regulator).not();
+
+            {
+                // reg=true => fn=true (pos. canalizing)
+                let invalid_colors = regulator_is_true
+                    .and(&fn_is_false)
+                    .project(context.state_variables());
+                let valid_colors = context.mk_constant(true).and_not(&invalid_colors);
+
+                out.push(Attribute {
+                    name: format!(
+                        "{}=1 canalizing in {}",
+                        network.get_variable_name(regulator),
+                        network.get_variable_name(target),
+                    ),
+                    negative: graph.empty_colors().copy(valid_colors.not()),
+                    positive: graph.empty_colors().copy(valid_colors),
+                    context: Some(AttributeContext {
+                        regulator,
+                        target,
+                        context: vec![],
+                    }),
+                });
+            }
+
+            {
+                // reg=false => fn=true (pos. canalizing)
+                let invalid_colors = regulator_is_false
+                    .and(&fn_is_false)
+                    .project(context.state_variables());
+                let valid_colors = context.mk_constant(true).and_not(&invalid_colors);
+
+                out.push(Attribute {
+                    name: format!(
+                        "{}=0 canalizing in {}",
+                        network.get_variable_name(regulator),
+                        network.get_variable_name(target),
+                    ),
+                    negative: graph.empty_colors().copy(valid_colors.not()),
+                    positive: graph.empty_colors().copy(valid_colors),
+                    context: Some(AttributeContext {
+                        regulator,
+                        target,
+                        context: vec![],
+                    }),
+                });
+            }
         }
     }
 }

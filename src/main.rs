@@ -39,6 +39,7 @@ use std::io::Read;
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use biodivine_lib_bdd::Bdd;
 
 /// Computation keeps all information
 struct Computation {
@@ -482,9 +483,11 @@ fn get_results() -> BackendResponse {
     let lines: Vec<String> = data
         .iter()
         .map(|(c, p)| {
+            let sat_count = p.approx_cardinality();
+            let sat_count = sat_count.min(f64::MAX);
             format!(
                 "{{\"sat_count\":{},\"phenotype\":{}}}",
-                p.approx_cardinality(),
+                sat_count,
                 c
             )
         })
@@ -1299,6 +1302,53 @@ fn main() {
         .address(address)
         .port(port)
         .finalize();
+
+    /*
+    let core_bn_input = std::fs::read_to_string("/Users/daemontus/Downloads/ensamble.aeon").unwrap();
+    let core_bn = BooleanNetwork::try_from(core_bn_input.as_str()).unwrap();
+    let stg = SymbolicAsyncGraph::new(core_bn).unwrap();
+    println!("Loaded core model.");
+
+    let class_0 = std::fs::read_to_string("/Users/daemontus/Downloads/cluster_0/union.bdd").unwrap();
+    let class_0 = Bdd::from_string(class_0.as_str().trim());
+    let class_0 = stg.mk_empty_colors().copy(class_0);
+    println!("Loaded class [0]: {}", class_0.as_bdd().size());
+
+    let class_1 = std::fs::read_to_string("/Users/daemontus/Downloads/cluster_1/union.bdd").unwrap();
+    let class_1 = Bdd::from_string(class_1.as_str().trim());
+    let class_1 = stg.mk_empty_colors().copy(class_1);
+    println!("Loaded class [1]: {}", class_1.as_bdd().size());
+
+    let class_2 = std::fs::read_to_string("/Users/daemontus/Downloads/cluster_2/union.bdd").unwrap();
+    let class_2 = Bdd::from_string(class_2.as_str().trim());
+    let class_2 = stg.mk_empty_colors().copy(class_2);
+    println!("Loaded class [2]: {}", class_2.as_bdd().size());
+
+    {
+        let mut tree = TREE.write().unwrap();
+        let mut function: HashMap<Class, GraphColors> = HashMap::new();
+        let empty = Class::new_empty();
+        function.insert(empty.clone_extended(Behaviour::Stability), class_0);
+        function.insert(empty.clone_extended(Behaviour::Oscillation), class_1);
+        function.insert(empty.clone_extended(Behaviour::Disorder), class_2);
+        *tree = Some(Bdt::new_from_graph(function, &stg));
+    }
+
+    println!("Decision tree created.");
+
+    {
+        let mut comp = COMPUTATION.write().unwrap();
+        *comp = Some(Computation {
+            timestamp: SystemTime::now(),
+            input_model: core_bn_input,
+            task: GraphTaskContext::new(),
+            classifier: Some(Arc::new(Classifier::new(&stg))),
+            graph: Some(Arc::new(stg)),
+            thread: None,
+            error: None,
+            finished_timestamp: Some(SystemTime::now()),
+        });
+    }*/
 
     rocket::custom(config.unwrap())
         .mount(

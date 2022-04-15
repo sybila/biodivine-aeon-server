@@ -7,6 +7,14 @@ use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use json::JsonValue;
 use std::collections::{HashMap, HashSet};
 
+fn wrap_f64(value: f64) -> f64 {
+    if value.is_infinite() {
+        f64::MAX
+    } else {
+        value
+    }
+}
+
 impl BdtNode {
     /// Convert this BDT node to json value with all available information stored in the node.
     ///
@@ -16,21 +24,21 @@ impl BdtNode {
         match self {
             BdtNode::Leaf { class, params } => object! {
                 "type" => "leaf".to_string(),
-                "cardinality" => params.approx_cardinality(),
+                "cardinality" => wrap_f64(params.approx_cardinality()),
                 "class" => format!("{}", class),
             },
-            BdtNode::Unprocessed { classes } => {
+            BdtNode::Unprocessed { classes, .. } => {
                 if let Some((major_class, major_params)) = get_majority_class(classes, precision) {
                     object! {
                         "type" => "leaf".to_string(),
-                        "cardinality" => major_params.approx_cardinality(),
+                        "cardinality" => wrap_f64(major_params.approx_cardinality()),
                         "class" => major_class.to_string(),
                         "all_classes" => class_list_to_json(classes),
                     }
                 } else {
                     object! {
                         "type" => "unprocessed".to_string(),
-                        "cardinality" => class_list_cardinality(classes),
+                        "cardinality" => wrap_f64(class_list_cardinality(classes)),
                         "classes" => class_list_to_json(classes),
                     }
                 }
@@ -40,18 +48,19 @@ impl BdtNode {
                 left,
                 right,
                 classes,
+                ..
             } => {
                 if let Some((major_class, major_params)) = get_majority_class(classes, precision) {
                     object! {
                         "type" => "leaf".to_string(),
-                        "cardinality" => major_params.approx_cardinality(),
+                        "cardinality" => wrap_f64(major_params.approx_cardinality()),
                         "class" => major_class.to_string(),
                         "all_classes" => class_list_to_json(classes),
                     }
                 } else {
                     object! {
                         "type" => "decision".to_string(),
-                        "cardinality" => class_list_cardinality(classes),
+                        "cardinality" => wrap_f64(class_list_cardinality(classes)),
                         "classes" => class_list_to_json(classes),
                         "attribute_id" => attribute.0,
                         "left" => left.0,
@@ -144,7 +153,7 @@ pub(super) fn class_list_to_json(classes: &HashMap<Class, GraphColors>) -> JsonV
 
 pub(super) fn class_to_json((class, params): (&Class, &GraphColors)) -> JsonValue {
     object! {
-        "cardinality" => params.approx_cardinality(),
+        "cardinality" => wrap_f64(params.approx_cardinality()),
         "class" => format!("{}", class),
     }
 }

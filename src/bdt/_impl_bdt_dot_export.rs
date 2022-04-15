@@ -38,7 +38,7 @@ impl Bdt {
                     params.approx_cardinality()
                 )?;
             }
-            BdtNode::Unprocessed { classes } => {
+            BdtNode::Unprocessed { classes, .. } => {
                 let classes: Vec<String> = classes
                     .iter()
                     .map(|(c, p)| format!("({},{})", c, p.approx_cardinality()).replace("\"", ""))

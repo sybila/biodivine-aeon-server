@@ -14,12 +14,15 @@ impl Bdt {
     /// Create a new single-node tree for given classification and attributes.
     pub fn new(classes: BifurcationFunction, attributes: Vec<Attribute>) -> Bdt {
         Bdt {
-            attributes,
+            attributes: attributes.clone(),
             storage: HashMap::new(),
             next_id: 0,
             precision: None,
         }
-        .apply(|t| t.insert_node_with_classes(classes))
+        .apply(|t| {
+            let attrs = t.attributes().collect::<Vec<_>>();
+            t.insert_node_with_classes(classes, &attrs)
+        })
     }
 
     /// Sets the precision of this tree in the hundreds of percent (i.e. 9753 becomes 97.53%).
@@ -110,14 +113,37 @@ impl Bdt {
     }
 
     /// **(internal)** Create a leaf/unprocessed node for the given class list.
-    pub(super) fn insert_node_with_classes(&mut self, classes: BifurcationFunction) -> BdtNodeId {
+    pub(super) fn insert_node_with_classes(&mut self, classes: BifurcationFunction, pending: &[AttributeId]) -> BdtNodeId {
         assert!(!classes.is_empty(), "Inserting empty node.");
         if classes.len() == 1 {
             let (class, params) = classes.into_iter().next().unwrap();
             self.insert_node(BdtNode::Leaf { class, params })
         } else {
-            self.insert_node(BdtNode::Unprocessed { classes })
+            let pending = self.apply_attrs(&classes, pending);
+            self.insert_node(BdtNode::Unprocessed { pending, classes })
         }
+    }
+
+    fn apply_attrs(&self, classes: &BifurcationFunction, attributes: &[AttributeId]) -> Vec<AppliedAttribute> {
+        let result = attributes.iter()
+            .filter_map(|id| {
+                let attribute = &self[*id];
+                let (left, right) = attribute.split_function(&classes);
+                println!("Apply attr {:?} / {} / {}", id, left.len(), right.len());
+                if left.len() == 0 || right.len() == 0 {
+                    None
+                } else {
+                    Some(AppliedAttribute {
+                        attribute: *id,
+                        information_gain: 0.0,
+                        left,
+                        right,
+                    })
+                }
+            })
+            .collect::<Vec<_>>();
+        println!("Applied attributes: {}", result.len());
+        result
     }
 
     /// Compute the list of applied attributes (sorted by information gain) for a given node.
@@ -127,13 +153,42 @@ impl Bdt {
             BdtNode::Decision { classes, .. } => classes.clone(),
             BdtNode::Unprocessed { classes, .. } => classes.clone(),
         };
+
         if classes.is_empty() {
             return Vec::new();
         }
-        let original_entropy = entropy(&classes);
+
+        match &self[node] {
+            BdtNode::Leaf { .. } => Vec::new(),
+            BdtNode::Decision { pending, .. } => pending.clone(),
+            BdtNode::Unprocessed { pending, .. } => pending.clone(),
+        }
+
+        /*let attrs = self.attributes()
+            .filter_map(|id| {
+                println!("Apply attr {:?}", id);
+                let attribute = &self[id];
+                let (left, right) = attribute.split_function(&classes);
+                println!("Apply attr {:?} / {} / {}", id, left.len(), right.len());
+                if left.len() == 0 || right.len() == 0 {
+                    None
+                } else {
+                    Some(AppliedAttribute {
+                        attribute: id,
+                        information_gain: 0.0,
+                        left,
+                        right,
+                    })
+                }
+            })
+            .collect();
+        println!("Final attributes: {}", attrs.len());
+        attrs*/
+        /*let original_entropy = entropy(&classes);
         let attributes = self
             .attributes()
             .filter_map(|id| {
+                println!("Apply attr {:?}", id);
                 let attribute = &self[id];
                 let (left, right) = attribute.split_function(&classes);
                 let gain = information_gain(original_entropy, entropy(&left), entropy(&right));
@@ -151,7 +206,8 @@ impl Bdt {
                 it.reverse();
             });
 
-        Vec::new().apply(|result| {
+        attributes
+        /*Vec::new().apply(|result| {
             for a in &attributes {
                 let attr_a = &self[a.attribute];
                 let mut skip = false;
@@ -165,7 +221,7 @@ impl Bdt {
                     result.push(a.clone());
                 }
             }
-        })
+        })*/*/
     }
 
     /// Replace an unprocessed node with a decision node using the given attribute.
@@ -180,18 +236,22 @@ impl Bdt {
         if attribute.to_index() >= self.attributes.len() {
             return Err("Attribute not found".to_string());
         }
-        if let BdtNode::Unprocessed { classes } = &self[node] {
+        if let BdtNode::Unprocessed { pending, classes } = self[node].clone() {
             let attr = &self[attribute];
-            let (left, right) = attr.split_function(classes);
+            let (left, right) = attr.split_function(&classes);
             if left.is_empty() || right.is_empty() {
                 return Err("No decision based on given attribute.".to_string());
             }
             let classes = classes.clone();
-            let left_node = self.insert_node_with_classes(left);
-            let right_node = self.insert_node_with_classes(right);
+            let candidates = pending.iter()
+                .map(|it| it.attribute)
+                .collect::<Vec<_>>();
+            let left_node = self.insert_node_with_classes(left, &candidates);
+            let right_node = self.insert_node_with_classes(right, &candidates);
             self.replace_node(
                 node,
                 BdtNode::Decision {
+                    pending,
                     classes,
                     attribute,
                     left: left_node,
@@ -209,7 +269,7 @@ impl Bdt {
     /// Returns list of deleted nodes.
     pub fn revert_decision(&mut self, node: BdtNodeId) -> Vec<BdtNodeId> {
         let mut deleted = vec![];
-        if let BdtNode::Decision { classes, .. } = self[node].clone() {
+        if let BdtNode::Decision { pending, classes, .. } = self[node].clone() {
             let mut dfs = vec![node];
             while let Some(expand) = dfs.pop() {
                 if let BdtNode::Decision { left, right, .. } = &self[expand] {
@@ -222,7 +282,7 @@ impl Bdt {
             deleted.iter().for_each(|n| {
                 self.storage.remove(&n.to_index());
             });
-            self.replace_node(node, BdtNode::Unprocessed { classes });
+            self.replace_node(node, BdtNode::Unprocessed { pending, classes });
         }
         deleted
     }
