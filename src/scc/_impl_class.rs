@@ -26,14 +26,15 @@ impl Class {
 
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        write!(
+        /*write!(
             f,
             "{:?}",
             self.0
                 .iter()
                 .map(|c| format!("{:?}", c))
                 .collect::<Vec<_>>()
-        )
+        )*/
+        write!(f, "[\"{}\"]", self.0.len())
     }
 }
 

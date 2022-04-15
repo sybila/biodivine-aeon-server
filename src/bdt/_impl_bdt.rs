@@ -129,7 +129,7 @@ impl Bdt {
             .filter_map(|id| {
                 let attribute = &self[*id];
                 let (left, right) = attribute.split_function(&classes);
-                println!("Apply attr {:?} / {} / {}", id, left.len(), right.len());
+                println!("Pre-compute attribute {:?} (result: {} / {})", attribute.name, left.len(), right.len());
                 if left.len() == 0 || right.len() == 0 {
                     None
                 } else {
@@ -142,7 +142,7 @@ impl Bdt {
                 }
             })
             .collect::<Vec<_>>();
-        println!("Applied attributes: {}", result.len());
+        println!("Final admissible attributes: {}", result.len());
         result
     }
 

@@ -40,6 +40,7 @@ use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use biodivine_lib_bdd::Bdd;
+use rocket::logger::LoggingLevel;
 
 /// Computation keeps all information
 struct Computation {
@@ -1287,12 +1288,11 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
 }
 
 fn main() {
+    let args = std::env::args().collect::<Vec<_>>();
     //test_main::run();
     let address = std::env::var("AEON_ADDR").unwrap_or_else(|_| "localhost".to_string());
     let port_from_args = {
-        let mut args = std::env::args();
-        args.next(); // Skip binary path
-        args.next().and_then(|s| s.parse::<u16>().ok())
+        args.get(1).and_then(|s| s.parse::<u16>().ok())
     };
     let port_from_env = std::env::var("AEON_PORT")
         .ok()
@@ -1301,37 +1301,49 @@ fn main() {
     let config = Config::build(Environment::Production)
         .address(address)
         .port(port)
+        .log_level(LoggingLevel::Off)
         .finalize();
 
-    /*
-    let core_bn_input = std::fs::read_to_string("/Users/daemontus/Downloads/ensamble.aeon").unwrap();
+    let sketch_file = args.get(2).expect(
+        "Expected second argument to be `.aeon` sketch file."
+    );
+
+    let cluster_folder = args.get(3).expect(
+        "Expected thrid argument to be a folder with symbolic class sets."
+    );
+
+    let core_bn_input = std::fs::read_to_string(sketch_file.as_str()).unwrap();
     let core_bn = BooleanNetwork::try_from(core_bn_input.as_str()).unwrap();
     let stg = SymbolicAsyncGraph::new(core_bn).unwrap();
-    println!("Loaded core model.");
+    println!("Loaded core model with {} variables.", stg.as_network().num_vars());
 
-    let class_0 = std::fs::read_to_string("/Users/daemontus/Downloads/cluster_0/union.bdd").unwrap();
-    let class_0 = Bdd::from_string(class_0.as_str().trim());
-    let class_0 = stg.mk_empty_colors().copy(class_0);
-    println!("Loaded class [0]: {}", class_0.as_bdd().size());
+    let mut classes = HashMap::new();
+    let mut cls = Class::new_empty();
 
-    let class_1 = std::fs::read_to_string("/Users/daemontus/Downloads/cluster_1/union.bdd").unwrap();
-    let class_1 = Bdd::from_string(class_1.as_str().trim());
-    let class_1 = stg.mk_empty_colors().copy(class_1);
-    println!("Loaded class [1]: {}", class_1.as_bdd().size());
+    // Sort class files so that they have a predictable mapping.
+    let mut files = std::fs::read_dir(cluster_folder.as_str()).unwrap()
+        .map(|it| it.unwrap().path())
+        .collect::<Vec<_>>();
+    files.sort_by_cached_key(|path| path.file_name().unwrap().to_str().unwrap().to_string());
 
-    let class_2 = std::fs::read_to_string("/Users/daemontus/Downloads/cluster_2/union.bdd").unwrap();
-    let class_2 = Bdd::from_string(class_2.as_str().trim());
-    let class_2 = stg.mk_empty_colors().copy(class_2);
-    println!("Loaded class [2]: {}", class_2.as_bdd().size());
+    for dir in files {
+        let file_name = dir.file_name().unwrap();
+        let name = file_name.to_str().unwrap();
+        if name.ends_with(".bdd") {
+            println!("Reading class file `{}`.", name);
+            let string = std::fs::read_to_string(&dir).unwrap();
+            let class = Bdd::from_string(string.as_str().trim());
+            cls = cls.clone_extended(Behaviour::Stability);
+            println!("Found a class with {} items; Loaded as {}", class.cardinality(), cls);
+            classes.insert(cls.clone(), stg.empty_colors().copy(class));
+        } else {
+            println!("Skipping file {}.", name);
+        }
+    }
 
     {
         let mut tree = TREE.write().unwrap();
-        let mut function: HashMap<Class, GraphColors> = HashMap::new();
-        let empty = Class::new_empty();
-        function.insert(empty.clone_extended(Behaviour::Stability), class_0);
-        function.insert(empty.clone_extended(Behaviour::Oscillation), class_1);
-        function.insert(empty.clone_extended(Behaviour::Disorder), class_2);
-        *tree = Some(Bdt::new_from_graph(function, &stg));
+        *tree = Some(Bdt::new_from_graph(classes, &stg));
     }
 
     println!("Decision tree created.");
@@ -1348,7 +1360,10 @@ fn main() {
             error: None,
             finished_timestamp: Some(SystemTime::now()),
         });
-    }*/
+    }
+
+    println!("Continue by opening https://biodivine.fi.muni.cz/aeon/v0.4.0/tree_explorer.html?engine=http://localhost:{}", port);
+    println!("(but don't do it in Safari - Chrome or Firefox preferred)");
 
     rocket::custom(config.unwrap())
         .mount(
