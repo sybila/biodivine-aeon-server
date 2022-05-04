@@ -4,7 +4,6 @@ extern crate json;
 use crate::scc::ProgressTracker;
 use std::sync::atomic::AtomicBool;
 
-pub mod all;
 pub mod bdt;
 pub mod scc;
 /// Some utility methods which we can later move to std-lib
