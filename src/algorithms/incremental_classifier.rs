@@ -8,6 +8,7 @@ pub trait Feature: Clone + Default + Eq {
     fn extend(&self, other: &Self) -> Self;
 }
 
+#[derive(Clone)]
 pub struct IncrementalClassifier<F: Feature, S: Set> {
     // Sorted vector of features currently tracked by this classifier.
     items: Vec<(F, S)>,
@@ -20,6 +21,11 @@ impl<F: Feature, S: Set> IncrementalClassifier<F, S> {
         IncrementalClassifier {
             items: vec![(F::default(), unit_set)],
         }
+    }
+
+    /// Returns the number of unique features currently tracked by this classifier.
+    pub fn len(&self) -> usize {
+        self.items.len()
     }
 
     /// Get the underlying list of features tracked by  this `IncrementalClassifier`.

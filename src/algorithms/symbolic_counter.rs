@@ -4,19 +4,14 @@ use biodivine_lib_param_bn::biodivine_std::traits::Set;
 
 /// Basic `SymbolicCounter` object that uses `IncrementalClassifier` to count how many times
 /// a a particular set member has been observed.
+#[derive(Clone)]
 pub struct SymbolicCounter<S: Set> {
     counter: IncrementalClassifier<Count, S>,
 }
 
 /// Just a private wrapper around `usize` that implements `Feature`.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 struct Count(usize);
-
-impl Default for Count {
-    fn default() -> Self {
-        Count(0)
-    }
-}
 
 impl Feature for Count {
     fn extend(&self, other: &Self) -> Self {

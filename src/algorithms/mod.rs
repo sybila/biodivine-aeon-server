@@ -12,6 +12,18 @@ pub mod asymptotic_behaviour;
 /// member of a symbolic set.
 mod symbolic_counter;
 
+/// **(internal)** Provides `AsymptoticBehaviourCounter` that uses `AsymptoticBehaviour` and
+/// `IncrementalClassifier` to count the number of occurrences of different types of asymptotic
+/// behaviour.
+mod asymptotic_behaviour_counter;
+
+/// **(internal)** Provides `AsymptoticBehaviourClassifier` that uses `AsymptoticBehaviour` as
+/// features in an `IncrementalClassifier`. It does not count the multiplicity of each behaviour,
+/// only remembers whether the behaviour was seen.
+mod asymptotic_behaviour_classifier;
+
 // Re-export stuff from private modules to public scope as part of `algorithms` module:
 
+pub use asymptotic_behaviour_classifier::AsymptoticBehaviourClassifier;
+pub use asymptotic_behaviour_counter::AsymptoticBehaviourCounter;
 pub use symbolic_counter::SymbolicCounter;

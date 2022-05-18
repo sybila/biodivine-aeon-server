@@ -1,11 +1,14 @@
+use crate::algorithms::asymptotic_behaviour::AsymptoticBehaviour::{
+    Disorder, Oscillation, Stability,
+};
 use crate::util::functional::Functional;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{
     GraphColoredVertices, GraphColors, SymbolicAsyncGraph,
 };
 use biodivine_lib_param_bn::VariableId;
-use fixed_map::Map;
 use rocket::route::BoxFuture;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 /// Describes a possible asymptotic behaviour of a discrete system.
@@ -25,7 +28,94 @@ pub enum AsymptoticBehaviour {
     Disorder,
 }
 
-type AsymptoticBehaviourMap = Map<AsymptoticBehaviour, GraphColors>;
+impl AsymptoticBehaviour {
+    /// List all possible behaviours.
+    ///
+    /// If possible, use this instead of listing behaviours
+    /// manually, because this will still work if we start adding new behaviours. Or at least
+    /// break deterministically.
+    pub fn behaviours() -> [AsymptoticBehaviour; 3] {
+        [Stability, Oscillation, Disorder]
+    }
+}
+
+/// A very simple fixed-size map for passing classification results around.
+///
+/// The main point of this structure is that it always has some (at least empty) value for
+/// every type of asymptotic behaviour.
+#[derive(Clone)]
+pub struct AsymptoticBehaviourMap([GraphColors; 3]);
+
+impl Debug for AsymptoticBehaviourMap {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AsymptoticBehaviourMap[stability={}, oscillation={}, disorder={}]",
+            self.0[0].approx_cardinality(),
+            self.0[1].approx_cardinality(),
+            self.0[2].approx_cardinality(),
+        )
+    }
+}
+
+impl AsymptoticBehaviourMap {
+    /// Create a new map initialised in the context of the given `SymbolicAsyncGraph`.
+    fn new(stg: &SymbolicAsyncGraph) -> AsymptoticBehaviourMap {
+        AsymptoticBehaviourMap([
+            stg.mk_empty_colors(),
+            stg.mk_empty_colors(),
+            stg.mk_empty_colors(),
+        ])
+    }
+
+    pub fn get(&self, behaviour: AsymptoticBehaviour) -> &GraphColors {
+        match behaviour {
+            Stability => &self.0[0],
+            Oscillation => &self.0[1],
+            Disorder => &self.0[2],
+        }
+    }
+
+    pub fn export(self, behaviour: AsymptoticBehaviour) -> GraphColors {
+        let array = self.0;
+        match behaviour {
+            Stability => array.into_iter().nth(0),
+            Oscillation => array.into_iter().nth(1),
+            Disorder => array.into_iter().nth(2),
+        }
+        .unwrap()
+    }
+
+    pub fn set(&mut self, behaviour: AsymptoticBehaviour, colors: GraphColors) {
+        match behaviour {
+            Stability => {
+                self.0[0] = colors;
+            }
+            Oscillation => {
+                self.0[1] = colors;
+            }
+            Disorder => {
+                self.0[2] = colors;
+            }
+        }
+    }
+
+    /// Exports the non-empty values from this map into a vector.
+    pub fn to_vec(self) -> Vec<(AsymptoticBehaviour, GraphColors)> {
+        let [stability, oscillation, disorder] = self.0;
+        Vec::new().apply(|it| {
+            if !stability.is_empty() {
+                it.push((Stability, stability));
+            }
+            if !oscillation.is_empty() {
+                it.push((Oscillation, oscillation));
+            }
+            if !disorder.is_empty() {
+                it.push((Disorder, disorder));
+            }
+        })
+    }
+}
 
 /// Basic long-term behaviour classification algorithms.
 impl AsymptoticBehaviour {
@@ -74,9 +164,7 @@ impl AsymptoticBehaviour {
     /// This method should be roughly equivalent in speed to computing
     /// `AsymptoticBehaviour::classify`.
     pub fn check_oscillation(stg: &SymbolicAsyncGraph, set: &GraphColoredVertices) -> GraphColors {
-        Self::classify(stg, set)
-            .remove(AsymptoticBehaviour::Oscillation)
-            .unwrap_or_else(|| stg.mk_empty_colors())
+        Self::classify(stg, set).export(Oscillation)
     }
 
     /// Given a coloured `set` of states, identify which colours correspond to *disordered*
@@ -88,9 +176,7 @@ impl AsymptoticBehaviour {
     /// This method should be roughly equivalent in speed to computing
     /// `AsymptoticBehaviour::classify`.
     pub fn check_disorder(stg: &SymbolicAsyncGraph, set: &GraphColoredVertices) -> GraphColors {
-        Self::classify(stg, set)
-            .remove(AsymptoticBehaviour::Disorder)
-            .unwrap_or_else(|| stg.mk_empty_colors())
+        Self::classify(stg, set).export(Disorder)
     }
 
     /// Classify the asymptotic behaviour within the given symbolic `set` as `stable`,
@@ -137,16 +223,10 @@ impl AsymptoticBehaviour {
             .minus(&successors_more.colors());
         let disorder = set.colors().minus(&stability).minus(&oscillation);
 
-        Map::new().apply(|it| {
-            if !stability.is_empty() {
-                it.insert(AsymptoticBehaviour::Stability, stability);
-            }
-            if !oscillation.is_empty() {
-                it.insert(AsymptoticBehaviour::Oscillation, oscillation);
-            }
-            if !disorder.is_empty() {
-                it.insert(AsymptoticBehaviour::Disorder, disorder);
-            }
+        AsymptoticBehaviourMap::new(stg).apply(|it| {
+            it.set(Stability, stability);
+            it.set(Oscillation, oscillation);
+            it.set(Disorder, disorder);
         })
     }
 }
@@ -163,22 +243,16 @@ impl AsymptoticBehaviour {
     ) -> AsymptoticBehaviourMap {
         let all_colors = set.colors();
         let variables = stg.as_network().variables().collect();
-        let [zero, one, more] = Self::classify_recursive(stg, set, variables).await;
+        let [zero, one, more] = Self::classify_recursive(stg.clone(), set.clone(), variables).await;
 
         let stability = zero.colors().minus(&one.colors()).minus(&more.colors());
         let oscillation = one.colors().minus(&zero.colors()).minus(&more.colors());
         let disorder = all_colors.minus(&stability).minus(&oscillation);
 
-        Map::new().apply(|it| {
-            if !stability.is_empty() {
-                it.insert(AsymptoticBehaviour::Stability, stability);
-            }
-            if !oscillation.is_empty() {
-                it.insert(AsymptoticBehaviour::Oscillation, oscillation);
-            }
-            if !disorder.is_empty() {
-                it.insert(AsymptoticBehaviour::Disorder, disorder);
-            }
+        AsymptoticBehaviourMap::new(stg.as_ref()).apply(|it| {
+            it.set(Stability, stability);
+            it.set(Oscillation, oscillation);
+            it.set(Disorder, disorder);
         })
     }
 
@@ -233,9 +307,9 @@ mod tests {
     use std::sync::Arc;
 
     /*
-        Each test runs the parallel and normal versions, comparing results, plus comparing
-        to the specialised sequential versions and some easy to prove axioms where appropriate.
-     */
+       Each test runs the parallel and normal versions, comparing results, plus comparing
+       to the specialised sequential versions and some easy to prove axioms where appropriate.
+    */
 
     #[tokio::test]
     async fn test_stability_check_1() {
@@ -262,23 +336,16 @@ mod tests {
         let classification_par =
             AsymptoticBehaviour::classify_parallel(Arc::new(stg), Arc::new(sinks)).await;
 
-        for behaviour in [Stability, Oscillation, Disorder] {
-            let (l, r) = (
-                classification.get(behaviour),
-                classification_par.get(behaviour),
+        for behaviour in AsymptoticBehaviour::behaviours() {
+            assert_symbolic_eq!(
+                classification.get(behaviour).as_bdd(),
+                classification_par.get(behaviour).as_bdd()
             );
-            assert_eq!(l.is_some(), r.is_some());
-            if l.is_some() {
-                assert_symbolic_eq!(l.unwrap().as_bdd(), r.unwrap().as_bdd());
-            }
         }
 
         assert_symbolic_eq!(
             sink_colors.as_bdd(),
-            classification
-                .get(AsymptoticBehaviour::Stability)
-                .unwrap()
-                .as_bdd()
+            classification.get(AsymptoticBehaviour::Stability).as_bdd()
         );
     }
 
@@ -309,23 +376,16 @@ mod tests {
         let classification_par =
             AsymptoticBehaviour::classify_parallel(Arc::new(stg), Arc::new(sinks)).await;
 
-        for behaviour in [Stability, Oscillation, Disorder] {
-            let (l, r) = (
-                classification.get(behaviour),
-                classification_par.get(behaviour),
+        for behaviour in AsymptoticBehaviour::behaviours() {
+            assert_symbolic_eq!(
+                classification.get(behaviour).as_bdd(),
+                classification_par.get(behaviour).as_bdd()
             );
-            assert_eq!(l.is_some(), r.is_some());
-            if l.is_some() {
-                assert_symbolic_eq!(l.unwrap().as_bdd(), r.unwrap().as_bdd());
-            }
         }
 
         assert_symbolic_eq!(
             sink_colors.as_bdd(),
-            classification
-                .get(AsymptoticBehaviour::Stability)
-                .unwrap()
-                .as_bdd()
+            classification.get(AsymptoticBehaviour::Stability).as_bdd()
         );
     }
 
@@ -357,22 +417,17 @@ mod tests {
         let classification_par =
             AsymptoticBehaviour::classify_parallel(Arc::new(stg), Arc::new(cycle)).await;
 
-        for behaviour in [Stability, Oscillation, Disorder] {
-            let (l, r) = (
-                classification.get(behaviour),
-                classification_par.get(behaviour),
+        for behaviour in AsymptoticBehaviour::behaviours() {
+            assert_symbolic_eq!(
+                classification.get(behaviour).as_bdd(),
+                classification_par.get(behaviour).as_bdd()
             );
-            assert_eq!(l.is_some(), r.is_some());
-            if l.is_some() {
-                assert_symbolic_eq!(l.unwrap().as_bdd(), r.unwrap().as_bdd());
-            }
         }
 
         assert_symbolic_eq!(
             oscillation_colors.as_bdd(),
             classification
                 .get(AsymptoticBehaviour::Oscillation)
-                .unwrap()
                 .as_bdd()
         );
     }
@@ -399,23 +454,16 @@ mod tests {
         let classification_par =
             AsymptoticBehaviour::classify_parallel(Arc::new(stg), Arc::new(all_states)).await;
 
-        for behaviour in [Stability, Oscillation, Disorder] {
-            let (l, r) = (
-                classification.get(behaviour),
-                classification_par.get(behaviour),
+        for behaviour in AsymptoticBehaviour::behaviours() {
+            assert_symbolic_eq!(
+                classification.get(behaviour).as_bdd(),
+                classification_par.get(behaviour).as_bdd()
             );
-            assert_eq!(l.is_some(), r.is_some());
-            if l.is_some() {
-                assert_symbolic_eq!(l.unwrap().as_bdd(), r.unwrap().as_bdd());
-            }
         }
 
         assert_symbolic_eq!(
             disordered_colors.as_bdd(),
-            classification
-                .get(AsymptoticBehaviour::Disorder)
-                .unwrap()
-                .as_bdd()
+            classification.get(AsymptoticBehaviour::Disorder).as_bdd()
         );
     }
 
@@ -430,7 +478,7 @@ mod tests {
             b -?? a
         ",
         )
-            .unwrap();
+        .unwrap();
 
         let stg = SymbolicAsyncGraph::new(bn).unwrap();
         let all_states = stg.mk_unit_colored_vertices();
@@ -440,20 +488,16 @@ mod tests {
         let classification_par =
             AsymptoticBehaviour::classify_parallel(Arc::new(stg), Arc::new(all_states)).await;
 
-        for behaviour in [Stability, Oscillation, Disorder] {
-            let (l, r) = (
-                classification.get(behaviour),
-                classification_par.get(behaviour),
+        for behaviour in AsymptoticBehaviour::behaviours() {
+            assert_symbolic_eq!(
+                classification.get(behaviour).as_bdd(),
+                classification_par.get(behaviour).as_bdd()
             );
-            assert_eq!(l.is_some(), r.is_some());
-            if l.is_some() {
-                assert_symbolic_eq!(l.unwrap().as_bdd(), r.unwrap().as_bdd());
-            }
         }
 
-        let stable = classification.get(Stability).unwrap();
-        let oscillating = classification.get(Oscillation).unwrap();
-        let disorder = classification.get(Disorder).unwrap();
+        let stable = classification.get(Stability);
+        let oscillating = classification.get(Oscillation);
+        let disorder = classification.get(Disorder);
 
         assert!(!stable.is_empty());
         assert!(!oscillating.is_empty());
