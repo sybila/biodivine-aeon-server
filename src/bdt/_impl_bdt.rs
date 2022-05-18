@@ -4,7 +4,6 @@ use crate::bdt::{
 };
 use crate::scc::Class;
 use crate::util::functional::Functional;
-use crate::util::index_type::IndexType;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use std::collections::{HashMap, HashSet};

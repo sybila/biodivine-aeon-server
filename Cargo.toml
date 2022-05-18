@@ -1,8 +1,8 @@
 [package]
 name = "biodivine-aeon-server"
-version = "0.4.1"
+version = "0.5.0-SNAPSHOT"
 authors = ["Samuel Pastva <daemontus@gmail.com>"]
-edition = "2018"
+edition = "2021"
 default-run = "biodivine-aeon-server"
 
 # Enable rich docs for some online docs autogen services.
@@ -13,26 +13,17 @@ rustdoc-args = ["--html-in-header", "docs-head.html"]
 # This is important for profiling - otherwise we would get unreadable traces.
 #debug = true
 # This gives a marginally better runtime, but a much much longer compile times, so disabled by default.
-lto = true
+#lto = true
 
 [dependencies]
-biodivine-lib-bdd = "0.2.1"
-biodivine-lib-param-bn = "0.1.0"
-rocket = "0.4.10"
-lazy_static = "1.4.0"
+biodivine-lib-bdd = "0.4.0"
+biodivine-lib-param-bn = "0.3.0"
+rocket = "0.5.0-rc.1"
 json = "0.12.4"
 regex = "1.5.4"
 rand = "0.8.1"
-
-[features]
-# With shields_up you enable explicit assertions of pre/post conditions and invariants in critical
-# codepaths that cannot be proved safe by the rust compiler. Every such assertion should be proven
-# correct by an associated comment. We use shields_up instead of debug_assertion to have it separated
-# from debug mode (shields_up is not strictly for debugging, its a general safety net / troubleshooting
-# measure). For official releases and benchmarks, you should disable shields_up to avoid unnecessary
-# performance penalty. Avoid introducing dead code when shields_up is enabled - this will mess with test coverage.
-shields_up = []
-
-default = ["shields_up"]
+futures = "0.3.21"
+tokio = "1.18.1"
+fixed-map = "0.7.2"
 
 [dev-dependencies]

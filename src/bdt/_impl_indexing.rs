@@ -1,25 +1,24 @@
 use crate::bdt::{Attribute, AttributeId, Bdt, BdtNode, BdtNodeId};
 use crate::util::functional::Functional;
-use crate::util::index_type::IndexType;
 use std::fmt::{Display, Formatter};
 use std::ops::Index;
 
-impl IndexType<BdtNode, Bdt> for BdtNodeId {
-    fn to_index(&self) -> usize {
+impl BdtNodeId {
+    pub fn to_index(&self) -> usize {
         self.0
     }
 
-    fn try_from(index: usize, collection: &Bdt) -> Option<Self> {
+    pub fn try_from(index: usize, collection: &Bdt) -> Option<Self> {
         BdtNodeId(index).take_if(|i| collection.storage.contains_key(&i.0))
     }
 }
 
-impl IndexType<Attribute, Bdt> for AttributeId {
-    fn to_index(&self) -> usize {
+impl AttributeId {
+    pub fn to_index(&self) -> usize {
         self.0
     }
 
-    fn try_from(index: usize, collection: &Bdt) -> Option<Self> {
+    pub fn try_from(index: usize, collection: &Bdt) -> Option<Self> {
         AttributeId(index).take_if(|i| i.0 < collection.attributes.len())
     }
 }
