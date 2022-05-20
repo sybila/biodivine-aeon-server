@@ -70,6 +70,8 @@ impl Scheduler {
         let new_weight_limit = min(2 * weight_limit, weight_limit + 10_000_000);
         self.weight_limit.store(new_weight_limit, Ordering::SeqCst);
 
+        println!("New weight limit: {}", new_weight_limit);
+
         // Now we can notify everyone that was waiting for a weight increase.
         while let Some(send) = guard.1.pop() {
             send.send(()).unwrap();
@@ -178,7 +180,7 @@ pub async fn schedule_reductions(
                             if !to_remove.is_empty() {
                                 let mut universe = universe.write().await;
                                 *universe = universe.minus(&to_remove);
-                                println!("Remaining universe: {}", universe.approx_cardinality());
+                                println!("Remaining universe: {} ({})", universe.approx_cardinality(), universe.symbolic_size());
                                 timestamp.fetch_add(1, Ordering::SeqCst);
                                 drop(universe);
                             }
