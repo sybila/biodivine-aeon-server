@@ -70,6 +70,9 @@ pub async fn bwd(
 ) -> GraphColoredVertices {
     let mut result = set.clone();
     while let Some(predecessors) = bwd_step(stg, &result, variables).await {
+        if result.symbolic_size() > 10_000 {
+            println!("BWD progress: {} / {}", result.approx_cardinality(), result.symbolic_size());
+        }
         result = result.union(&predecessors);
     }
     result
