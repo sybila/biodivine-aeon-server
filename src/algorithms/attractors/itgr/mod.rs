@@ -1,34 +1,41 @@
 use std::cmp::min;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, SystemTime};
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
-use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt};
-use tokio::sync::{Notify, OwnedSemaphorePermit, RwLock, Semaphore, SemaphorePermit};
+use tokio::sync::{Mutex, MutexGuard, RwLock, Semaphore, SemaphorePermit};
 use crate::algorithms::attractors::itgr::itgr_process::ItgrProcess;
+use tokio::sync::oneshot;
 
 mod reachability_process;
 mod itgr_process;
 
 struct Scheduler {
+    // The maximal amount of parallelism allowed in this scheduler.
     fork_limit: usize,
-    // Processes that exceed this weight are automatically parked.
-    weight_limit: AtomicUsize,
-    // Barrier where all tasks parked due to weight limit are waiting.
-    weight_increased: Notify,
-    // Number of tasks that are not parked due to weight limit.
-    eligible_tasks: AtomicUsize,
     // Hands out permits to tasks, limiting the amount of total parallelism.
     task_permits: Semaphore,
-    // Overall amount of tasks that are still running or parked.
-    remaining_tasks: AtomicUsize,
+    // Tracks the maximum weight of a task that is allowed to execute right now.
+    // Note that the limit can only increase.
+    weight_limit: AtomicUsize,
+    // Tracks the number of all remaining tasks and a list of tasks waiting to be resumed.
+    //  > Note that this is slightly cleaner than using `Notify` because we'd have to put that
+    //  > into an Arc to make sure sender and receiver sides do not drop it prematurely.
+    wait_list: Mutex<(usize, Vec<oneshot::Sender<()>>)>,
 }
 
 struct TaskPermit<'a> {
-    scheduler: &'a Scheduler,
-    permit: SemaphorePermit<'a>,
+    _scheduler: &'a Scheduler,
+    _permit: SemaphorePermit<'a>,
+    weight_limit: usize,
+}
+
+impl<'a> TaskPermit<'a> {
+
+    pub fn is_valid_for(&self, weight: usize) -> bool {
+        weight <= self.weight_limit
+    }
+
 }
 
 impl Scheduler {
@@ -39,84 +46,82 @@ impl Scheduler {
         Scheduler {
             fork_limit,
             weight_limit: AtomicUsize::new(max_weight),
-            weight_increased: Notify::new(),
-            eligible_tasks: AtomicUsize::new(tasks),
             task_permits: Semaphore::new(fork_limit),
-            remaining_tasks: AtomicUsize::new(tasks),
+            wait_list: Mutex::new((tasks, Vec::new())),
         }
     }
 
-    /// Called by a task that completed. This also releases its task permit.
-    pub fn finish_task<'a>(&'a self, permit: TaskPermit<'a>) {
-        let eligible_tasks = self.remaining_tasks.fetch_sub(1, Ordering::SeqCst);
-        // The task must have been eligible since it is running right now.
-        let remaining_tasks = self.eligible_tasks.fetch_sub(1, Ordering::SeqCst);
+    pub async fn finish_task<'a>(&self) {
+        let mut wait_list = self.wait_list.lock().await;
+        wait_list.0 -= 1;   // Decrease the number of tasks.
+        println!("Remaining tasks: {}.", wait_list.0);
 
-        // At this point, we have to also test the same thing as in `acquire_permit` to ensure
-        // that finished tasks do not artificially block existing tasks from running.
-        if remaining_tasks <= self.fork_limit || eligible_tasks <= self.fork_limit {
-            // TODO: Checked overflow.
-            let weight_limit = self.weight_limit.load(Ordering::SeqCst);
-            let new_weight_limit = min(2 * weight_limit, weight_limit + 10_000_000);
-            if self.weight_limit.compare_exchange(weight_limit, new_weight_limit, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
-                self.weight_increased.notify_waiters();
-            }
+        // At this point, the occupancy of the CPU might decrease. If necessary, we have to
+        // increase the weight limit to start running new tasks.
+        if wait_list.0 - wait_list.1.len() < self.fork_limit {
+            self.increase_weight_limit_and_notify(wait_list);
         }
-
-        println!("Remaining: {}", remaining_tasks);
-
-        drop(permit);
     }
 
-    /// Acquire a work permit form the scheduler. The permit is automatically rewoked when
-    /// the returned object is dropped.
-    pub async fn acquire_permit<'a>(&'a self, current_weight: usize) -> TaskPermit<'a> {
+    fn increase_weight_limit_and_notify(&self, mut guard: MutexGuard<(usize, Vec<oneshot::Sender<()>>)>) {
+        // 10M seems like a reasonable upper bound for exponential growth at the moment.
+        // But we might need to increase it at some point.
+        let weight_limit = self.weight_limit.load(Ordering::SeqCst);
+        let new_weight_limit = min(2 * weight_limit, weight_limit + 10_000_000);
+        self.weight_limit.store(new_weight_limit, Ordering::SeqCst);
+
+        // Now we can notify everyone that was waiting for a weight increase.
+        while let Some(send) = guard.1.pop() {
+            send.send(()).unwrap();
+        }
+    }
+
+    pub async fn acquire_permit<'a>(&'a self, weight: usize) -> TaskPermit<'a> {
         loop {
             let weight_limit = self.weight_limit.load(Ordering::SeqCst);
-            if current_weight <= weight_limit {
-                // The process is eligible for work, but needs a permit to ensure there
-                // aren't too many threads hammering the CPU resources.
+            if weight <= weight_limit {
+                // If we are still within the weight limit, we can just wait for the semaphore
+                // and return a permit.
                 let semaphore_permit = self.task_permits.acquire().await;
                 let semaphore_permit = semaphore_permit.unwrap();
                 return TaskPermit {
-                    scheduler: self,
-                    permit: semaphore_permit,
+                    _permit: semaphore_permit,
+                    _scheduler: &self,
+                    weight_limit,
                 }
             } else {
-                // The process is not eligible for work now. We need to park it.
-                // First, remove it from eligible processes.
-                let eligible_tasks = self.eligible_tasks.load(Ordering::SeqCst);
-                let remaining_tasks = self.remaining_tasks.load(Ordering::SeqCst);
-                if remaining_tasks <= self.fork_limit || eligible_tasks <= self.fork_limit {
-                    // We need to increase the weight limit for all processes. This is because
-                    // we either don't have enough tasks to saturate the CPU, so we might as well
-                    // just run them all, or the number of eligible tasks is smaller than
-                    // the available level of parallelism, so we need to release some tasks to
-                    // make up for this.
+                let mut wait_list = self.wait_list.lock().await;
 
-                    // We intentionally compare to the old value to ensure that only one process
-                    // can truly increase the weight limit. Everyone else will just continue
-                    // the loop and try again (either seeing a new result, or attempting again
-                    // to set a new limit).
+                // We have to reload the weight limit because it might have been increased
+                // while we waited for the mutex to lock. Since we are only increasing it
+                // when the mutex is locked, nobody should mess with it until we drop
+                // the `wait_list` guard.
+                let observed_weight_limit = weight_limit;
+                let weight_limit = self.weight_limit.load(Ordering::SeqCst);
+                if observed_weight_limit != weight_limit {
+                    continue;
+                }
 
-                    // TODO: Checked overflow.
-                    let new_weight_limit = min(2 * weight_limit, weight_limit + 10_000_000);
-                    if self.weight_limit.compare_exchange(weight_limit, new_weight_limit, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
-                        self.weight_increased.notify_waiters();
-                    }
+                if wait_list.0 - wait_list.1.len() < self.fork_limit {
+                    // The number of total tasks that are not waiting is smaller than the number
+                    // of tasks that are allowed to run under the current limit. Let's increase
+                    // the limit and notify everyone.
+                    self.increase_weight_limit_and_notify(wait_list);
                 } else {
-                    // There is still enough eligible tasks to keep the CPU saturated.
-                    // We should mark ourselves as non-eligible and wait to be notified.
-                    self.eligible_tasks.fetch_sub(1, Ordering::SeqCst);
-                    self.weight_increased.notified().await;
-                    // Once we wake up, we mark ourselves as eligible again:
-                    self.eligible_tasks.fetch_add(1, Ordering::SeqCst);
+                    // There is still a sufficient amount of eligible tasks to saturate the CPU.
+                    // We can just add ourselves to the wait list, drop the lock and wait for
+                    // someone to send us a restart signal.
+                    let (send, receive) = oneshot::channel::<()>();
+                    wait_list.1.push(send);
+                    println!("Wait list: {}.", wait_list.1.len());
+                    // We need to drop the guard here to avoid blocking the list while we wait.
+                    // In other branches, this happens automatically as the guard gets out of scope.
+                    drop(wait_list);
+                    receive.await.unwrap();
                 }
             }
-
         }
     }
-
 }
 
 pub async fn schedule_reductions(
@@ -149,41 +154,38 @@ pub async fn schedule_reductions(
                         println!("Running: {} / {}", running + 1, fork_limit);
                     }*/
 
-                    // Check if we need to update universe.
-                    let current_timestamp = timestamp.load(Ordering::SeqCst);
-                    if current_timestamp > last_timestamp {
-                        last_timestamp = current_timestamp;
-                        let universe = universe.read().await;
-                        process.restrict(&universe, last_timestamp);
-                        drop(universe);
-                    }
+                    while permit.is_valid_for(process.weight()) {
 
-                    // Perform a process step.
-                    let (done, to_remove) = process.step().await;
+                        // Check if we need to update the universe.
+                        let current_timestamp = timestamp.load(Ordering::SeqCst);
+                        if current_timestamp > last_timestamp {
+                            last_timestamp = current_timestamp;
+                            let universe = universe.read().await;
+                            process.restrict(&universe, last_timestamp);
+                            drop(universe);
+                        }
 
-                    // If necessary, remove states from the universe.
-                    if let Some(to_remove) = to_remove {
-                        let mut universe = universe.write().await;
-                        *universe = universe.minus(&to_remove);
-                        println!("Remaining universe: {}", universe.approx_cardinality());
-                        timestamp.fetch_add(1, Ordering::SeqCst);
-                        drop(universe);
-                    }
+                        // Perform a process step.
+                        let (done, to_remove) = process.step().await;
 
-                    // If done, signal to scheduler, otherwise drop permit and request new one.
-                    if done {
-                        scheduler.finish_task(permit);
-                        /*{
-                            let running = running.fetch_sub(1, Ordering::SeqCst);
-                            println!("[Finished] Running: {} / {}", running + 1, fork_limit);
-                        }*/
-                        return;
-                    } else {
-                        drop(permit);
-                        /*{
-                            let running = running.fetch_sub(1, Ordering::SeqCst);
-                            println!("Running: {} / {}", running + 1, fork_limit);
-                        }*/
+                        // If necessary, remove states from the universe.
+                        if let Some(to_remove) = to_remove {
+                            let mut universe = universe.write().await;
+                            *universe = universe.minus(&to_remove);
+                            println!("Remaining universe: {}", universe.approx_cardinality());
+                            timestamp.fetch_add(1, Ordering::SeqCst);
+                            drop(universe);
+                        }
+
+                        // If done, signal to scheduler, otherwise drop permit and request new one.
+                        if done {
+                            scheduler.finish_task().await;
+                            /*{
+                                let running = running.fetch_sub(1, Ordering::SeqCst);
+                                println!("[Finished] Running: {} / {}", running + 1, fork_limit);
+                            }*/
+                            return;
+                        }
                     }
                 }
             })

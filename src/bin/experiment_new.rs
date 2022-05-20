@@ -1,12 +1,7 @@
-use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
-use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
-use biodivine_aeon_server::scc::Classifier;
-use biodivine_aeon_server::GraphTaskContext;
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
 use std::convert::TryFrom;
 use std::io::Read;
-use std::time::{SystemTime, UNIX_EPOCH};
 use biodivine_aeon_server::algorithms::attractors::transition_guided_reduction;
 
 #[tokio::main]
@@ -35,7 +30,7 @@ async fn main() {
     );
 
     // First, perform ITGR reduction.
-    let universe = transition_guided_reduction(&graph, 8).await;
+    let universe = transition_guided_reduction(&graph, num_cpus::get_physical()).await;
 
     println!("Universe: {}", universe.approx_cardinality());
 }

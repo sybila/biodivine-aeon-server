@@ -25,5 +25,6 @@ rand = "0.8.1"
 futures = "0.3.21"
 tokio = "1.18.1"
 fixed-map = "0.7.2"
+num_cpus = "1.13.1"
 
 [dev-dependencies]
