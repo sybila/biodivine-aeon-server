@@ -160,9 +160,14 @@ pub async fn schedule_reductions(
                         let current_timestamp = timestamp.load(Ordering::SeqCst);
                         if current_timestamp > last_timestamp {
                             last_timestamp = current_timestamp;
-                            let universe = universe.read().await;
+                            // Clone the universe into out process while keeping the guard for
+                            // as little time as possible.
+                            let universe = {
+                                let guard = universe.read().await;
+                                guard.clone()
+                            };
+                            // Because this is probably going to take some time...
                             process.restrict(&universe, last_timestamp);
-                            drop(universe);
                         }
 
                         // Perform a process step.
@@ -170,11 +175,13 @@ pub async fn schedule_reductions(
 
                         // If necessary, remove states from the universe.
                         if let Some(to_remove) = to_remove {
-                            let mut universe = universe.write().await;
-                            *universe = universe.minus(&to_remove);
-                            println!("Remaining universe: {}", universe.approx_cardinality());
-                            timestamp.fetch_add(1, Ordering::SeqCst);
-                            drop(universe);
+                            if !to_remove.is_empty() {
+                                let mut universe = universe.write().await;
+                                *universe = universe.minus(&to_remove);
+                                println!("Remaining universe: {}", universe.approx_cardinality());
+                                timestamp.fetch_add(1, Ordering::SeqCst);
+                                drop(universe);
+                            }
                         }
 
                         // If done, signal to scheduler, otherwise drop permit and request new one.
