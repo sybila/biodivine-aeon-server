@@ -51,7 +51,10 @@ fn main() {
         graph.mk_unit_colored_vertices(),
     );
 
-    println!("Remaining after reduction: {}", universe.approx_cardinality());
+    println!(
+        "Remaining after reduction: {}",
+        universe.approx_cardinality()
+    );
 
     // Then run Xie-Beerel to actually detect the components.
     xie_beerel_attractors(
@@ -87,7 +90,6 @@ fn main() {
     println!("Elapsed time: {}s", (elapsed as f64) / 1000.0);
 }
 
-
 fn inline_inputs(bn: BooleanNetwork) -> BooleanNetwork {
     let mut variables = Vec::new();
     let mut parameters = Vec::new();
@@ -105,12 +107,9 @@ fn inline_inputs(bn: BooleanNetwork) -> BooleanNetwork {
         let old_regulator = bn.get_variable_name(reg.get_regulator());
         let old_target = bn.get_variable_name(reg.get_target());
         if variables.contains(old_regulator) {
-            inlined_rg.add_regulation(
-                old_regulator,
-                old_target,
-                false,
-                reg.get_monotonicity()
-            ).unwrap();
+            inlined_rg
+                .add_regulation(old_regulator, old_target, false, reg.get_monotonicity())
+                .unwrap();
         }
     }
 
@@ -124,9 +123,10 @@ fn inline_inputs(bn: BooleanNetwork) -> BooleanNetwork {
         let name = inlined_bn.get_variable_name(var).clone();
         let old_id = bn.as_graph().find_variable(name.as_str()).unwrap();
         let old_function = bn.get_update_function(old_id).as_ref().unwrap();
-        inlined_bn.add_string_update_function(name.as_str(), old_function.to_string(&bn).as_str()).unwrap();
+        inlined_bn
+            .add_string_update_function(name.as_str(), old_function.to_string(&bn).as_str())
+            .unwrap();
     }
 
     inlined_bn
 }
-

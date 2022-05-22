@@ -1,14 +1,14 @@
-use std::cmp::min;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::algorithms::attractors::itgr::itgr_process::ItgrProcess;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
-use tokio::sync::{Mutex, MutexGuard, RwLock, Semaphore, SemaphorePermit};
-use crate::algorithms::attractors::itgr::itgr_process::ItgrProcess;
+use std::cmp::min;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use tokio::sync::oneshot;
+use tokio::sync::{Mutex, MutexGuard, RwLock, Semaphore, SemaphorePermit};
 
-mod reachability_process;
 mod itgr_process;
+mod reachability_process;
 
 struct Scheduler {
     // The maximal amount of parallelism allowed in this scheduler.
@@ -31,15 +31,12 @@ struct TaskPermit<'a> {
 }
 
 impl<'a> TaskPermit<'a> {
-
     pub fn is_valid_for(&self, weight: usize) -> bool {
         weight <= self.weight_limit
     }
-
 }
 
 impl Scheduler {
-
     /// Create a new scheduler that limits the maximum parallelism to the given `fork_limit`
     /// and initially parks threads with more than `max_weight`.
     pub fn new(tasks: usize, fork_limit: usize, max_weight: usize) -> Scheduler {
@@ -53,7 +50,7 @@ impl Scheduler {
 
     pub async fn finish_task<'a>(&self) {
         let mut wait_list = self.wait_list.lock().await;
-        wait_list.0 -= 1;   // Decrease the number of tasks.
+        wait_list.0 -= 1; // Decrease the number of tasks.
         println!("Remaining tasks: {}.", wait_list.0);
 
         // At this point, the occupancy of the CPU might decrease. If necessary, we have to
@@ -63,7 +60,10 @@ impl Scheduler {
         }
     }
 
-    fn increase_weight_limit_and_notify(&self, mut guard: MutexGuard<(usize, Vec<oneshot::Sender<()>>)>) {
+    fn increase_weight_limit_and_notify(
+        &self,
+        mut guard: MutexGuard<(usize, Vec<oneshot::Sender<()>>)>,
+    ) {
         // 10M seems like a reasonable upper bound for exponential growth at the moment.
         // But we might need to increase it at some point.
         let weight_limit = self.weight_limit.load(Ordering::SeqCst);
@@ -90,7 +90,7 @@ impl Scheduler {
                     _permit: semaphore_permit,
                     _scheduler: &self,
                     weight_limit,
-                }
+                };
             } else {
                 let mut wait_list = self.wait_list.lock().await;
 
@@ -137,7 +137,9 @@ pub async fn schedule_reductions(
 
     let running = Arc::new(AtomicUsize::new(0));
 
-    let mut processes = stg.as_network().variables()
+    let mut processes = stg
+        .as_network()
+        .variables()
         .map(|var| {
             let stg = stg.clone();
             let scheduler = scheduler.clone();
@@ -157,7 +159,6 @@ pub async fn schedule_reductions(
                     }*/
 
                     while permit.is_valid_for(process.weight()) {
-
                         // Check if we need to update the universe.
                         let current_timestamp = timestamp.load(Ordering::SeqCst);
                         if current_timestamp > last_timestamp {
@@ -180,7 +181,11 @@ pub async fn schedule_reductions(
                             if !to_remove.is_empty() {
                                 let mut universe = universe.write().await;
                                 *universe = universe.minus(&to_remove);
-                                println!("Remaining universe: {} ({})", universe.approx_cardinality(), universe.symbolic_size());
+                                println!(
+                                    "Remaining universe: {} ({})",
+                                    universe.approx_cardinality(),
+                                    universe.symbolic_size()
+                                );
                                 timestamp.fetch_add(1, Ordering::SeqCst);
                                 drop(universe);
                             }

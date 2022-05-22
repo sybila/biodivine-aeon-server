@@ -1,13 +1,14 @@
-use std::cmp::{max, min};
-use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
-use biodivine_lib_param_bn::{BooleanNetwork, ParameterId, RegulatoryGraph, VariableId};
-use std::convert::TryFrom;
-use std::io::Read;
-use biodivine_lib_param_bn::biodivine_std::traits::Set;
-use rocket::form::validate::Contains;
-use text_io::read;
 use biodivine_aeon_server::algorithms::attractors::transition_guided_reduction;
 use biodivine_aeon_server::algorithms::reachability::bwd;
+use biodivine_aeon_server::algorithms::FixedPoints;
+use biodivine_lib_param_bn::biodivine_std::traits::Set;
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
+use biodivine_lib_param_bn::{BooleanNetwork, ParameterId, RegulatoryGraph, VariableId};
+use rocket::form::validate::Contains;
+use std::cmp::{max, min};
+use std::convert::TryFrom;
+use std::io::Read;
+use text_io::read;
 
 #[tokio::main]
 async fn main() {
@@ -19,7 +20,11 @@ async fn main() {
 
     let model = BooleanNetwork::try_from(buffer.as_str()).unwrap();
     let model = inline_inputs(model);
-    println!("Model loaded. {} variables and {} parameters.", model.num_vars(), model.num_parameters());
+    println!(
+        "Model loaded. {} variables and {} parameters.",
+        model.num_vars(),
+        model.num_parameters()
+    );
 
     let graph = SymbolicAsyncGraph::new(model.clone()).unwrap();
 
@@ -37,46 +42,9 @@ async fn main() {
     params.sort_by_cached_key(|p| find_dependent_variables(&model, *p).len());
     params.reverse();
 
-    find_sinks_approx(&graph.clone(), &graph.clone(), &params);
-
-    //let mut sinks = graph.mk_unit_colored_vertices();
-    /*for var in model.variables() {
-        let can_post = graph.var_can_post(var, &sinks);
-        sinks = sinks.minus(&can_post);
-        println!("Applied {:?}, result is {} / {}", var, sinks.approx_cardinality(), sinks.symbolic_size());
-    }*/
-
-    /*let mut candidates = model.variables().collect::<Vec<_>>();
-    while !candidates.is_empty() {
-        let mut best = (usize::MAX, model.variables().next().unwrap());
-        for var in &candidates {
-            let can_post = graph.var_can_post(*var, &sinks);
-            let result = sinks.minus(&can_post);
-            if result.symbolic_size() < best.0 {
-                best = (result.symbolic_size(), *var);
-            }
-        }
-        let best = best.1;
-        let index = candidates.iter().position(|x| *x == best).unwrap();
-        candidates.remove(index);
-        let can_post = graph.var_can_post(best, &sinks);
-        sinks = sinks.minus(&can_post);
-        println!("Applied {:?} ({}), result is {} / {}", best, candidates.len(), sinks.approx_cardinality(), sinks.symbolic_size());
-    }*/
-    /*let candidates = model.variables().collect::<Vec<_>>();
-    let sink_list = find_sinks(&graph, candidates, graph.mk_unit_colored_vertices(), 100_000);
-
-    for sink_set in sink_list {
-        println!("Sinks: {} / {}", sink_set.symbolic_size(), sink_set.approx_cardinality());
-    }*/
-
-    /*
-    println!("Sinks: {}", sinks.approx_cardinality());
-    let variables = graph.as_network().variables().collect::<Vec<_>>();
-    let basin = bwd(&graph, &sinks, &variables).await;
-    println!("Basin: {} / {}", basin.approx_cardinality(), basin.symbolic_size());
-    let not_basin = graph.unit_colored_vertices().minus(&basin);
-    println!("Not basin: {} / {}", not_basin.approx_cardinality(), not_basin.symbolic_size());*/
+    let variables = model.variables().collect::<Vec<_>>();
+    let sinks = FixedPoints::greedy(&graph, graph.unit_colored_vertices(), &variables);
+    println!("Found {} sinks.", sinks.approx_cardinality());
 }
 
 fn find_sinks_approx(
@@ -86,44 +54,77 @@ fn find_sinks_approx(
 ) -> (usize, Vec<GraphColoredVertices>) {
     let variables = over_approx.as_network().variables().collect::<Vec<_>>();
     if parameters.is_empty() {
-        let under_sinks = find_sinks_greedy(&under_approx, variables.clone(), under_approx.mk_unit_colored_vertices());
-        let over_sinks = find_sinks_greedy(&over_approx, variables.clone(), over_approx.mk_unit_colored_vertices());
-        println!("Under: {} / {}", under_sinks.approx_cardinality(), under_sinks.symbolic_size());
-        println!("Over: {} / {}", over_sinks.approx_cardinality(), over_sinks.symbolic_size());
-        println!("All: {} / {}", under_approx.unit_colored_vertices().approx_cardinality(), under_approx.unit_colored_vertices().symbolic_size());
+        let under_sinks = find_sinks_greedy(
+            &under_approx,
+            variables.clone(),
+            under_approx.mk_unit_colored_vertices(),
+        );
+        let over_sinks = find_sinks_greedy(
+            &over_approx,
+            variables.clone(),
+            over_approx.mk_unit_colored_vertices(),
+        );
+        println!(
+            "Under: {} / {}",
+            under_sinks.approx_cardinality(),
+            under_sinks.symbolic_size()
+        );
+        println!(
+            "Over: {} / {}",
+            over_sinks.approx_cardinality(),
+            over_sinks.symbolic_size()
+        );
+        println!(
+            "All: {} / {}",
+            under_approx.unit_colored_vertices().approx_cardinality(),
+            under_approx.unit_colored_vertices().symbolic_size()
+        );
         return (under_sinks.symbolic_size(), vec![under_sinks]);
     } else {
         let parameter = parameters[0];
         let (limit, sink_candidates) = find_sinks_approx(
             &over_approx.param_over_approximation(parameter),
             &under_approx.param_under_approximation(parameter),
-            &parameters[1..]
+            &parameters[1..],
         );
 
         /*let limit = sink_candidates.iter()
-            .map(|it| it.symbolic_size())
-            .max()
-            .unwrap();*/
+        .map(|it| it.symbolic_size())
+        .max()
+        .unwrap();*/
 
         let mut new_candidates = Vec::new();
         for candidates in sink_candidates {
-            let under_sinks = find_sinks_greedy(&under_approx, find_dependent_variables(under_approx.as_network(), parameter), candidates.clone());
+            let under_sinks = find_sinks_greedy(
+                &under_approx,
+                find_dependent_variables(under_approx.as_network(), parameter),
+                candidates.clone(),
+            );
             //let over_sinks = find_sinks_greedy(&over_approx, variables.clone(), candidates.clone());
-            println!("Under: {} / {}", under_sinks.approx_cardinality(), under_sinks.symbolic_size());
+            println!(
+                "Under: {} / {}",
+                under_sinks.approx_cardinality(),
+                under_sinks.symbolic_size()
+            );
             //println!("Over: {} / {}", over_sinks.approx_cardinality(), over_sinks.symbolic_size());
-            println!("All: {} / {}", under_approx.unit_colored_vertices().approx_cardinality(), under_approx.unit_colored_vertices().symbolic_size());
+            println!(
+                "All: {} / {}",
+                under_approx.unit_colored_vertices().approx_cardinality(),
+                under_approx.unit_colored_vertices().symbolic_size()
+            );
             if under_sinks.symbolic_size() > limit {
-                let (_, bdd_var) = under_approx.symbolic_context()
+                let (_, bdd_var) = under_approx
+                    .symbolic_context()
                     .get_explicit_function_table(parameter)
                     .into_iter()
                     .next()
                     .unwrap();
-                let true_candidates = under_approx.unit_colored_vertices().copy(
-                    under_sinks.as_bdd().var_select(bdd_var, true)
-                );
-                let false_candidates = under_approx.unit_colored_vertices().copy(
-                    under_sinks.as_bdd().var_select(bdd_var, false)
-                );
+                let true_candidates = under_approx
+                    .unit_colored_vertices()
+                    .copy(under_sinks.as_bdd().var_select(bdd_var, true));
+                let false_candidates = under_approx
+                    .unit_colored_vertices()
+                    .copy(under_sinks.as_bdd().var_select(bdd_var, false));
                 new_candidates.push(true_candidates);
                 new_candidates.push(false_candidates);
             } else {
@@ -131,7 +132,11 @@ fn find_sinks_approx(
             }
         }
 
-        println!("Finished {}. Candidate sets: {}", parameters.len(), new_candidates.len());
+        println!(
+            "Finished {}. Candidate sets: {}",
+            parameters.len(),
+            new_candidates.len()
+        );
         return (limit, new_candidates);
     }
 }
@@ -152,7 +157,7 @@ fn find_dependent_variables(bn: &BooleanNetwork, param: ParameterId) -> Vec<Vari
 fn find_sinks_greedy(
     stg: &SymbolicAsyncGraph,
     mut variables: Vec<VariableId>,
-    mut sinks: GraphColoredVertices
+    mut sinks: GraphColoredVertices,
 ) -> GraphColoredVertices {
     /*let mut empty = Vec::new();
     for var in &variables {
@@ -187,7 +192,13 @@ fn find_sinks_greedy(
         variables.remove(index);
         let can_post = stg.var_can_post(best, &sinks);
         sinks = sinks.minus(&can_post);
-        println!("Applied {:?} ({}), result is {} / {}", best, variables.len(), sinks.approx_cardinality(), sinks.symbolic_size());
+        println!(
+            "Applied {:?} ({}), result is {} / {}",
+            best,
+            variables.len(),
+            sinks.approx_cardinality(),
+            sinks.symbolic_size()
+        );
     }
 
     sinks
@@ -200,7 +211,11 @@ fn find_sinks(
     limit: usize,
 ) -> Vec<GraphColoredVertices> {
     if variables.is_empty() {
-        println!("Found sinks: {} / {}", states.symbolic_size(), states.approx_cardinality());
+        println!(
+            "Found sinks: {} / {}",
+            states.symbolic_size(),
+            states.approx_cardinality()
+        );
         return vec![states];
     }
 
@@ -219,7 +234,13 @@ fn find_sinks(
         variables.remove(index);
         let can_post = stg.var_can_post(best, &states);
         states = states.minus(&can_post);
-        println!("Applied {:?} ({}), result is {} / {}", best, variables.len(), states.approx_cardinality(), states.symbolic_size());
+        println!(
+            "Applied {:?} ({}), result is {} / {}",
+            best,
+            variables.len(),
+            states.approx_cardinality(),
+            states.symbolic_size()
+        );
         return find_sinks(stg, variables, states, limit);
     }
 
@@ -258,7 +279,7 @@ fn find_sinks(
     let mut true_result = find_sinks(stg, variables.clone(), true_fork);
     let false_result = find_sinks(stg, variables.clone(), false_fork);*/
 
-    let parameter = pick_best_fork(stg, &states);//stg.as_network().parameters().nth(n).unwrap();
+    let parameter = pick_best_fork(stg, &states); //stg.as_network().parameters().nth(n).unwrap();
 
     if let Some(parameter) = parameter {
         let mut true_result = {
@@ -272,9 +293,17 @@ fn find_sinks(
             };
             find_sinks(&true_stg, variables.clone(), true_set, new_limit)
         };
-        println!("States before propagation: {} / {}", states.symbolic_size(), states.approx_cardinality());
+        println!(
+            "States before propagation: {} / {}",
+            states.symbolic_size(),
+            states.approx_cardinality()
+        );
         for result in &true_result {
-            println!("Re-searching result {} / {}", result.symbolic_size(), result.approx_cardinality());
+            println!(
+                "Re-searching result {} / {}",
+                result.symbolic_size(),
+                result.approx_cardinality()
+            );
             let result_flipped = stg.param_lift_vertices(result, (parameter, false));
             let found = find_sinks(stg, variables.clone(), result_flipped, usize::MAX);
             for f in found {
@@ -282,7 +311,11 @@ fn find_sinks(
                 states = states.minus(&f);
             }
         }
-        println!("States after propagation: {} / {}", states.symbolic_size(), states.approx_cardinality());
+        println!(
+            "States after propagation: {} / {}",
+            states.symbolic_size(),
+            states.approx_cardinality()
+        );
         let false_result = {
             let false_stg = stg.param_select((parameter, false));
             let false_set = stg.param_select_vertices(&states, (parameter, false));
@@ -323,7 +356,7 @@ fn pick_best_fork(stg: &SymbolicAsyncGraph, states: &GraphColoredVertices) -> Op
         let size_error = ((true_size + false_size) / 2) as f64;
         let skew_error = (max(true_size, false_size) - min(true_size, false_size)) as f64;
 
-        let error = (((size_error*size_error) + (skew_error*skew_error)) / 2.0).sqrt();
+        let error = (((size_error * size_error) + (skew_error * skew_error)) / 2.0).sqrt();
 
         if let Some((_, best_error)) = best {
             if error < best_error {
@@ -363,12 +396,9 @@ fn inline_inputs(bn: BooleanNetwork) -> BooleanNetwork {
         let old_regulator = bn.get_variable_name(reg.get_regulator());
         let old_target = bn.get_variable_name(reg.get_target());
         if variables.contains(old_regulator) {
-            inlined_rg.add_regulation(
-                old_regulator,
-                old_target,
-                false,
-                reg.get_monotonicity()
-            ).unwrap();
+            inlined_rg
+                .add_regulation(old_regulator, old_target, false, reg.get_monotonicity())
+                .unwrap();
         }
     }
 
@@ -382,7 +412,9 @@ fn inline_inputs(bn: BooleanNetwork) -> BooleanNetwork {
         let name = inlined_bn.get_variable_name(var).clone();
         let old_id = bn.as_graph().find_variable(name.as_str()).unwrap();
         let old_function = bn.get_update_function(old_id).as_ref().unwrap();
-        inlined_bn.add_string_update_function(name.as_str(), old_function.to_string(&bn).as_str()).unwrap();
+        inlined_bn
+            .add_string_update_function(name.as_str(), old_function.to_string(&bn).as_str())
+            .unwrap();
     }
 
     inlined_bn

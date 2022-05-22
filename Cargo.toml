@@ -17,15 +17,34 @@ rustdoc-args = ["--html-in-header", "docs-head.html"]
 
 [dependencies]
 biodivine-lib-bdd = "0.4.0"
-biodivine-lib-param-bn = { git="https://github.com/sybila/biodivine-lib-param-bn", branch="symbolic-restrictions" }
+biodivine-lib-param-bn = "0.3.0"
 rocket = "0.5.0-rc.1"
 json = "0.12.4"
 regex = "1.5.4"
 rand = "0.8.1"
 futures = "0.3.21"
 tokio = "1.18.1"
+tokio-stream = "0.1.8"
 fixed-map = "0.7.2"
 num_cpus = "1.13.1"
 text_io = "0.1.10"
 
 [dev-dependencies]
+
+[features]
+log-progress-fixed-points = []
+log-progress = ["log-progress-fixed-points"]
+
+# Section with example binaries that are used for benchmarking in technical reports.
+
+[[example]]
+name = "fixed-points-naive"
+path = "examples/benchmarks/fixed-points-naive.rs"
+
+[[example]]
+name = "fixed-points-greedy"
+path = "examples/benchmarks/fixed-points-greedy.rs"
+
+[[example]]
+name = "fixed-points-greedy-parallel"
+path = "examples/benchmarks/fixed-points-greedy-parallel.rs"

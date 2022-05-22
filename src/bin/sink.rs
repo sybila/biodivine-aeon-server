@@ -1,10 +1,10 @@
+use biodivine_aeon_server::algorithms::attractors::transition_guided_reduction;
+use biodivine_aeon_server::algorithms::reachability::bwd;
+use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::{BooleanNetwork, RegulatoryGraph};
 use std::convert::TryFrom;
 use std::io::Read;
-use biodivine_lib_param_bn::biodivine_std::traits::Set;
-use biodivine_aeon_server::algorithms::attractors::transition_guided_reduction;
-use biodivine_aeon_server::algorithms::reachability::bwd;
 
 #[tokio::main]
 async fn main() {
@@ -16,7 +16,11 @@ async fn main() {
 
     let model = BooleanNetwork::try_from_bnet(buffer.as_str()).unwrap();
     let model = inline_inputs(model);
-    println!("Model loaded. {} variables and {} parameters.", model.num_vars(), model.num_parameters());
+    println!(
+        "Model loaded. {} variables and {} parameters.",
+        model.num_vars(),
+        model.num_parameters()
+    );
 
     let graph = SymbolicAsyncGraph::new(model.clone()).unwrap();
 
@@ -53,16 +57,30 @@ async fn main() {
         candidates.remove(index);
         let can_post = graph.var_can_post(best, &sinks);
         sinks = sinks.minus(&can_post);
-        println!("Applied {:?} ({}), result is {} / {}", best, candidates.len(), sinks.approx_cardinality(), sinks.symbolic_size());
+        println!(
+            "Applied {:?} ({}), result is {} / {}",
+            best,
+            candidates.len(),
+            sinks.approx_cardinality(),
+            sinks.symbolic_size()
+        );
     }
 
     println!("Sinks: {}", sinks.approx_cardinality());
 
     let variables = graph.as_network().variables().collect::<Vec<_>>();
     let basin = bwd(&graph, &sinks, &variables).await;
-    println!("Basin: {} / {}", basin.approx_cardinality(), basin.symbolic_size());
+    println!(
+        "Basin: {} / {}",
+        basin.approx_cardinality(),
+        basin.symbolic_size()
+    );
     let not_basin = graph.unit_colored_vertices().minus(&basin);
-    println!("Not basin: {} / {}", not_basin.approx_cardinality(), not_basin.symbolic_size());
+    println!(
+        "Not basin: {} / {}",
+        not_basin.approx_cardinality(),
+        not_basin.symbolic_size()
+    );
 }
 
 fn inline_inputs(bn: BooleanNetwork) -> BooleanNetwork {
@@ -82,12 +100,9 @@ fn inline_inputs(bn: BooleanNetwork) -> BooleanNetwork {
         let old_regulator = bn.get_variable_name(reg.get_regulator());
         let old_target = bn.get_variable_name(reg.get_target());
         if variables.contains(old_regulator) {
-            inlined_rg.add_regulation(
-                old_regulator,
-                old_target,
-                false,
-                reg.get_monotonicity()
-            ).unwrap();
+            inlined_rg
+                .add_regulation(old_regulator, old_target, false, reg.get_monotonicity())
+                .unwrap();
         }
     }
 
@@ -101,7 +116,9 @@ fn inline_inputs(bn: BooleanNetwork) -> BooleanNetwork {
         let name = inlined_bn.get_variable_name(var).clone();
         let old_id = bn.as_graph().find_variable(name.as_str()).unwrap();
         let old_function = bn.get_update_function(old_id).as_ref().unwrap();
-        inlined_bn.add_string_update_function(name.as_str(), old_function.to_string(&bn).as_str()).unwrap();
+        inlined_bn
+            .add_string_update_function(name.as_str(), old_function.to_string(&bn).as_str())
+            .unwrap();
     }
 
     inlined_bn
