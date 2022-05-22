@@ -43,7 +43,8 @@ pub async fn attractors<OnAttractor, OnEliminated>(
     let mut active_stg = root_stg.restrict(set);
     while !active_stg.unit_colored_vertices().is_empty() {
         // Compute variables that can still perform some transitions within the remaining graph.
-        let active_variables = non_constant_variables(&active_stg);
+        let mut active_variables = non_constant_variables(&active_stg);
+        active_variables.reverse();
 
         // Pick a (colored) vertex and compute the backward-reachable basin.
         let pivot = active_stg.unit_colored_vertices().pick_vertex();
@@ -52,6 +53,7 @@ pub async fn attractors<OnAttractor, OnEliminated>(
         // Compute the rest of the pivot's SCC, stopping if it is not terminal.
         let mut pivot_component = pivot.clone();
         while let Some(successors) = fwd_step(&active_stg, &pivot_component, &active_variables).await {
+            pivot_component = pivot_component.union(&successors);
             let non_terminal = successors.minus(&pivot_basin);
             if !non_terminal.is_empty() {
                 pivot_component = pivot_component.minus_colors(&non_terminal.colors());

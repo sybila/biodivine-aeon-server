@@ -2,7 +2,10 @@ use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::{BooleanNetwork, RegulatoryGraph};
 use std::convert::TryFrom;
 use std::io::Read;
-use biodivine_aeon_server::algorithms::attractors::transition_guided_reduction;
+use std::sync::{Arc, Mutex};
+use biodivine_aeon_server::algorithms::asymptotic_behaviour::AsymptoticBehaviour;
+use biodivine_aeon_server::algorithms::AsymptoticBehaviourCounter;
+use biodivine_aeon_server::algorithms::attractors::{attractors, transition_guided_reduction};
 
 #[tokio::main]
 async fn main() {
@@ -29,6 +32,27 @@ async fn main() {
     let universe = transition_guided_reduction(&graph, num_cpus::get_physical()).await;
 
     println!("Universe: {}", universe.approx_cardinality());
+
+    let classifier = Arc::new(Mutex::new(AsymptoticBehaviourCounter::new(&graph)));
+    let classifier_2 = classifier.clone();
+    let graph = Arc::new(graph);
+    attractors(
+        &graph.clone(),
+        &universe,
+        move |attr| {
+            println!("Found attractor: {}", attr.approx_cardinality());
+            let classification = AsymptoticBehaviour::classify(&graph, &attr);
+            classifier.lock().unwrap().add_classification(&classification);
+        },
+        |eliminated| {
+            println!("Eliminated: {}", eliminated.approx_cardinality());
+        }
+    ).await;
+
+    let classes = classifier_2.lock().unwrap().classes().iter().cloned().collect::<Vec<_>>();
+    for (cls, set) in classes {
+        println!("Class {:?} -> {:?}", cls, set.approx_cardinality());
+    }
 }
 
 fn inline_inputs(bn: BooleanNetwork) -> BooleanNetwork {

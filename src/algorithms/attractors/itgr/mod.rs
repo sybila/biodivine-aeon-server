@@ -115,7 +115,7 @@ impl Scheduler {
                     // someone to send us a restart signal.
                     let (send, receive) = oneshot::channel::<()>();
                     wait_list.1.push(send);
-                    println!("Wait list: {}.", wait_list.1.len());
+                    //println!("Wait list: {}.", wait_list.1.len());
                     // We need to drop the guard here to avoid blocking the list while we wait.
                     // In other branches, this happens automatically as the guard gets out of scope.
                     drop(wait_list);
@@ -131,7 +131,7 @@ pub async fn schedule_reductions(
     fork_limit: usize,
 ) -> GraphColoredVertices {
     let stg = Arc::new(stg);
-    let scheduler = Arc::new(Scheduler::new(stg.as_network().num_vars(), fork_limit, 10_000));
+    let scheduler = Arc::new(Scheduler::new(stg.as_network().num_vars(), fork_limit, 64));
     let timestamp = Arc::new(AtomicUsize::new(0));
     let universe = Arc::new(RwLock::new(stg.mk_unit_colored_vertices()));
 
