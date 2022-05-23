@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use crate::util::spawn_bound;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
 use futures::future::join_all;
 use futures::FutureExt;
+use std::sync::Arc;
 use tokio::task::yield_now;
-use crate::util::spawn_bound;
 
 #[derive(Clone)]
 pub struct FixedPoints<'a> {
@@ -93,7 +93,7 @@ impl<'a> FixedPoints<'a> {
         let mut fixed_points = candidates.clone();
 
         for var in transitions {
-            yield_now().await;  // Potentially cancel here.
+            yield_now().await; // Potentially cancel here.
             let can_post = stg.var_can_post(*var, stg.unit_colored_vertices());
             fixed_points = fixed_points.minus(&can_post);
             if cfg!(feature = "log-progress-fixed-points") {
@@ -155,7 +155,6 @@ impl<'a> FixedPoints<'a> {
         // But we can't just do it like in the naive algorithm, otherwise it might explode.
 
         while candidates.len() > 1 {
-
             // Put the smallest candidate set last.
             candidates.sort_by_cached_key(|it| it.symbolic_size());
             candidates.reverse();
@@ -163,7 +162,7 @@ impl<'a> FixedPoints<'a> {
             let item = candidates.pop().unwrap();
 
             for candidate in &mut candidates {
-                yield_now().await;  // Potentially cancel here.
+                yield_now().await; // Potentially cancel here.
                 *candidate = candidate.intersect(&item);
             }
 
@@ -229,14 +228,16 @@ impl<'a> FixedPoints<'a> {
         // Sets of vertices that *cannot* perform a particular transition.
 
         let stg = Arc::new(stg.clone());
-        let candidates = transitions.iter()
+        let candidates = transitions
+            .iter()
             .cloned()
             .map(|it| {
                 let stg = stg.clone();
                 spawn_bound(async move {
                     let can_post = stg.var_can_post(it, stg.unit_colored_vertices());
                     stg.unit_colored_vertices().minus(&can_post)
-                }).map(|it| it.unwrap())
+                })
+                .map(|it| it.unwrap())
             })
             .collect::<Vec<_>>();
 
@@ -246,19 +247,17 @@ impl<'a> FixedPoints<'a> {
         // But we can't just do it like in the naive algorithm, otherwise it might explode.
 
         while candidates.len() > 1 {
-
             // Put the smallest candidate set last.
             candidates.sort_by_cached_key(|it| it.symbolic_size());
             candidates.reverse();
 
             let item = Arc::new(candidates.pop().unwrap());
 
-            let tasks = candidates.into_iter()
+            let tasks = candidates
+                .into_iter()
                 .map(|candidate| {
                     let item = item.clone();
-                    spawn_bound(async move {
-                        candidate.intersect(&item)
-                    }).map(|it| it.unwrap())
+                    spawn_bound(async move { candidate.intersect(&item) }).map(|it| it.unwrap())
                 })
                 .collect::<Vec<_>>();
 

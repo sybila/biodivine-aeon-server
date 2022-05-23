@@ -19,14 +19,13 @@ macro_rules! assert_symbolic_ne {
     };
 }
 
-
 /* Adapter from: https://blog.yoshuawuyts.com/async-cancellation-1/ */
 
 /// Spawn a new tokio Task that is canceled when the handle is dropped.
 pub fn spawn_bound<T>(future: T) -> BoundJoinHandle<T::Output>
-    where
-        T: Future + Send + 'static,
-        T::Output: Send + 'static,
+where
+    T: Future + Send + 'static,
+    T::Output: Send + 'static,
 {
     BoundJoinHandle(tokio::task::spawn(future))
 }
@@ -34,7 +33,7 @@ pub fn spawn_bound<T>(future: T) -> BoundJoinHandle<T::Output>
 /// Cancels the wrapped tokio Task on Drop.
 pub struct BoundJoinHandle<T>(tokio::task::JoinHandle<T>);
 
-impl<T> Future for BoundJoinHandle<T>{
+impl<T> Future for BoundJoinHandle<T> {
     type Output = Result<T, tokio::task::JoinError>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         unsafe { Pin::new_unchecked(&mut self.0) }.poll(cx)
