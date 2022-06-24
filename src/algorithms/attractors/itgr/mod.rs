@@ -55,7 +55,7 @@ impl Scheduler {
 
         // At this point, the occupancy of the CPU might decrease. If necessary, we have to
         // increase the weight limit to start running new tasks.
-        if wait_list.0 - wait_list.1.len() < self.fork_limit {
+        if !wait_list.1.is_empty() && wait_list.0 - wait_list.1.len() < self.fork_limit {
             self.increase_weight_limit_and_notify(wait_list);
         }
     }
