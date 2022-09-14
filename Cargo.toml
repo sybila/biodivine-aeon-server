@@ -16,7 +16,7 @@ rustdoc-args = ["--html-in-header", "docs-head.html"]
 lto = true
 
 [dependencies]
-biodivine-lib-bdd = "0.3.0"
+biodivine-lib-bdd = "0.4.0"
 biodivine-lib-param-bn = { git = "https://github.com/sybila/biodivine-lib-param-bn.git", branch = "hctl-experimental" }
 rocket = "0.4.10"
 lazy_static = "1.4.0"
