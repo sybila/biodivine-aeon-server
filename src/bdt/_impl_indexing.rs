@@ -11,6 +11,11 @@ impl BdtNodeId {
     pub fn try_from(index: usize, collection: &Bdt) -> Option<Self> {
         BdtNodeId(index).take_if(|i| collection.storage.contains_key(&i.0))
     }
+
+    pub fn try_from_str(string: &str, collection: &Bdt) -> Option<Self> {
+        let index = string.parse::<usize>().ok()?;
+        Self::try_from(index, collection)
+    }
 }
 
 impl AttributeId {
@@ -20,6 +25,11 @@ impl AttributeId {
 
     pub fn try_from(index: usize, collection: &Bdt) -> Option<Self> {
         AttributeId(index).take_if(|i| i.0 < collection.attributes.len())
+    }
+
+    pub fn try_from_str(string: &str, collection: &Bdt) -> Option<Self> {
+        let index = string.parse::<usize>().ok()?;
+        AttributeId::try_from(index, collection)
     }
 }
 

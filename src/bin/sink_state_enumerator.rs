@@ -24,11 +24,11 @@ fn main() {
     println!("Model loaded...");
     println!("{} variables: {:?}", model.num_vars(), names);
 
-    let graph = SymbolicAsyncGraph::new(model.clone()).unwrap();
+    let graph = SymbolicAsyncGraph::new(&model).unwrap();
 
     println!("Asynchronous graph ready...");
     println!(
-        "Admissible parametrisations: {}",
+        "Admissible parametrization set: {}",
         graph.unit_colors().approx_cardinality()
     );
     println!(
@@ -75,7 +75,7 @@ fn main() {
     );
     println!("Elapsed time: {}s", start.elapsed().unwrap().as_secs());
 
-    let mut all_sinks = graph.mk_empty_vertices();
+    let mut all_sinks = graph.mk_empty_colored_vertices();
     for (attractor, behaviours) in classifier.export_components() {
         if let Some(sink_colors) = behaviours.get(&Behaviour::Stability) {
             all_sinks = all_sinks.union(&attractor.intersect_colors(sink_colors));

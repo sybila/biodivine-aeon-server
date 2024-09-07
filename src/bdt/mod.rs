@@ -25,7 +25,7 @@ mod _impl_indexing;
 type BifurcationFunction = HashMap<Class, GraphColors>;
 
 /// Encodes one node of a bifurcation decision tree. A node can be either a leaf (fully classified
-/// set of parametrisations), a decision node with a fixed attribute, or an unprocessed node
+/// parametrization set), a decision node with a fixed attribute, or an unprocessed node
 /// with a remaining bifurcation function.
 #[derive(Clone)]
 pub enum BdtNode {
@@ -71,7 +71,7 @@ pub struct Bdt {
     storage: HashMap<usize, BdtNode>,
     attributes: Vec<Attribute>,
     next_id: usize,
-    // Represents a hundreds of a percent threshold (So 9350 means 95.30%) at which a mixed node
+    // Represents a hundred of a percent threshold (So 9350 means 95.30%) at which a mixed node
     // is assumed to be a leaf, or `None` is the tree is exact. We assume that this number is
     // always >50% to make sure the decision is unique.
     precision: Option<u32>,

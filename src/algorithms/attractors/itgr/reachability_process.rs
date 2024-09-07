@@ -1,8 +1,8 @@
+use crate::algorithms::non_constant_variables;
+use crate::algorithms::reachability::{bwd_step, fwd_step};
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
-use crate::algorithms::non_constant_variables;
-use crate::algorithms::reachability::{bwd_step, fwd_step};
 
 /// A simplified "process" object that computes the forward reachable states from an initial set.
 pub struct FwdProcess {
@@ -19,12 +19,11 @@ pub struct BwdProcess {
 }
 
 impl FwdProcess {
-
     pub fn new(stg: SymbolicAsyncGraph, set: GraphColoredVertices) -> FwdProcess {
         FwdProcess {
             variables: non_constant_variables(&stg),
             stg,
-            set
+            set,
         }
     }
 
@@ -50,16 +49,14 @@ impl FwdProcess {
     pub fn weight(&self) -> usize {
         self.set.symbolic_size()
     }
-
 }
 
 impl BwdProcess {
-
     pub fn new(stg: SymbolicAsyncGraph, set: GraphColoredVertices) -> BwdProcess {
         BwdProcess {
             variables: non_constant_variables(&stg),
             stg,
-            set
+            set,
         }
     }
 
@@ -85,5 +82,4 @@ impl BwdProcess {
     pub fn weight(&self) -> usize {
         self.set.symbolic_size()
     }
-
 }

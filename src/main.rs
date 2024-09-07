@@ -1,11 +1,9 @@
-#![feature(proc_macro_hygiene, decl_macro)]
 #[macro_use]
 extern crate rocket;
 
 #[macro_use]
 extern crate json;
 
-use rocket::http::hyper::header::AccessControlAllowOrigin;
 use rocket::http::{ContentType, Header};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
@@ -22,20 +20,23 @@ use biodivine_aeon_server::scc::algo_stability_analysis::{
 };
 use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
 use biodivine_aeon_server::util::functional::Functional;
-use biodivine_aeon_server::util::index_type::IndexType;
 use biodivine_aeon_server::GraphTaskContext;
 use biodivine_lib_param_bn::biodivine_std::bitvector::{ArrayBitVector, BitVector};
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
 use json::JsonValue;
-use rocket::config::Environment;
+use lazy_static::lazy_static;
+use rocket::data::ByteUnit;
 use rocket::{Config, Data};
+use rocket_cors::{AllowedOrigins, CorsOptions};
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
+use std::net::IpAddr;
+use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::io::AsyncReadExt;
 
 /// Computation keeps all information
 struct Computation {
@@ -81,7 +82,7 @@ lazy_static! {
 ///    node. (This can take a while for large models) Returns an array of attribute objects.
 ///    - /apply_attribute/<node_id>/<attribute_id>: Apply an attribute to an unprocessed node,
 ///    replacing it with a decision and adding two new child nodes. Returns an array of tree nodes
-///    that have changed (i.e. the unprocessed node is now a decision node and it has two children
+///    that have changed (i.e. the unprocessed node is now a decision node, and it has two children
 ///    now)
 ///    - /revert_decision/<node_id>: Turn a decision node back into unprocessed node. This is done
 ///    recursively, so any children are deleted as well. Returns a
@@ -187,10 +188,10 @@ fn get_stability_data(node_id: String, behaviour_str: String) -> BackendResponse
 
             let stability_data = compute_stability(graph, &components);
             let mut response = JsonValue::new_array();
-            for variable in graph.as_network().variables() {
+            for variable in graph.variables() {
                 response
                     .push(object! {
-                        "variable": graph.as_network().get_variable_name(variable).clone(),
+                        "variable": graph.get_variable_name(variable).clone(),
                         "data": stability_data[&variable].to_json(),
                     })
                     .unwrap();
@@ -208,7 +209,7 @@ fn get_stability_data(node_id: String, behaviour_str: String) -> BackendResponse
 fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
     let tree = TREE.clone();
     let mut tree = tree.write().unwrap();
-    return if let Some(tree) = tree.as_mut() {
+    if let Some(tree) = tree.as_mut() {
         let node = BdtNodeId::try_from_str(&node_id, tree);
         let node = if let Some(node) = node {
             node
@@ -233,7 +234,7 @@ fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
         }
     } else {
         BackendResponse::err("No tree present. Run computation first.")
-    };
+    }
 }
 
 #[post("/revert_decision/<node_id>")]
@@ -333,10 +334,10 @@ fn max_parameter_cardinality(function: &FnUpdate) -> usize {
 /// Return cardinality of such model (i.e. the number of instantiations of this update function)
 /// or error if the update function (or model) is invalid.
 #[post("/check_update_function", format = "plain", data = "<data>")]
-fn check_update_function(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000); // limit model size to 10MB
+async fn check_update_function(data: Data<'_>) -> BackendResponse {
+    let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model size to 10MB
     let mut model_string = String::new();
-    return match stream.read_to_string(&mut model_string) {
+    match stream.read_to_string(&mut model_string).await {
         Ok(_) => {
             let lock = CHECK_UPDATE_FUNCTION_LOCK.clone();
             let mut lock = lock.write().unwrap();
@@ -357,7 +358,7 @@ fn check_update_function(data: Data) -> BackendResponse {
                             model.num_vars(),
                             max_size
                         );
-                        SymbolicAsyncGraph::new(model)
+                        SymbolicAsyncGraph::new(&model)
                     } else {
                         Err("Function too large for on-the-fly analysis.".to_string())
                     }
@@ -368,7 +369,7 @@ fn check_update_function(data: Data) -> BackendResponse {
                 start.elapsed().unwrap().as_millis(),
                 graph
             );
-            (*lock) = !(*lock);
+            *lock = !(*lock);
             match graph {
                 Ok(cardinality) => {
                     BackendResponse::ok(&format!("{{\"cardinality\":\"{}\"}}", cardinality))
@@ -377,7 +378,7 @@ fn check_update_function(data: Data) -> BackendResponse {
             }
         }
         Err(error) => BackendResponse::err(&format!("{}", error)),
-    };
+    }
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -466,7 +467,7 @@ fn get_results() -> BackendResponse {
                     )
                 } else {
                     return BackendResponse::err(
-                        &"Classification running. Cannot export components right now.".to_string(),
+                        "Classification running. Cannot export components right now.",
                     );
                 }
             } else {
@@ -489,7 +490,7 @@ fn get_results() -> BackendResponse {
 
     println!("Result {:?}", lines);
 
-    let elapsed = if let Some(e) = elapsed { e } else { 0 };
+    let elapsed = elapsed.unwrap_or_default();
 
     let mut json = String::new();
     for line in lines.iter().take(lines.len() - 1) {
@@ -587,9 +588,8 @@ fn get_stability_witness(
         };
         if let Some(graph) = &cmp.graph {
             let variable = graph
-                .as_network()
-                .as_graph()
-                .find_variable(variable_str.as_str());
+                .symbolic_context()
+                .find_network_variable(variable_str.as_str());
             let variable = if let Some(variable) = variable {
                 variable
             } else {
@@ -613,9 +613,9 @@ fn get_stability_witness(
             if let Some(colors) = &variable_stability[vector] {
                 get_witness_network(colors)
             } else {
-                return BackendResponse::err(
+                BackendResponse::err(
                     format!("No witness available for vector `{}`.", vector_str).as_str(),
-                );
+                )
             }
         } else {
             BackendResponse::err("No attractor data found.")
@@ -651,8 +651,7 @@ fn get_witness(class_str: String) -> BackendResponse {
                     }
                 } else {
                     BackendResponse::err(
-                        &"Classification in progress. Cannot extract witness right now."
-                            .to_string(),
+                        "Classification in progress. Cannot extract witness right now.",
                     )
                 }
             } else {
@@ -773,9 +772,8 @@ fn get_stability_attractors(
         };
         if let Some(graph) = &cmp.graph {
             let variable = graph
-                .as_network()
-                .as_graph()
-                .find_variable(variable_str.as_str());
+                .symbolic_context()
+                .find_network_variable(variable_str.as_str());
             let variable = if let Some(variable) = variable {
                 variable
             } else {
@@ -799,9 +797,9 @@ fn get_stability_attractors(
             if let Some(colors) = &variable_stability[vector] {
                 get_witness_attractors(colors)
             } else {
-                return BackendResponse::err(
+                BackendResponse::err(
                     format!("No witness available for vector `{}`.", vector_str).as_str(),
-                );
+                )
             }
         } else {
             BackendResponse::err("No attractor data found.")
@@ -839,8 +837,7 @@ fn get_attractors(class_str: String) -> BackendResponse {
                     }
                 } else {
                     BackendResponse::err(
-                        &"Classification still in progress. Cannot explore attractors now."
-                            .to_string(),
+                        "Classification still in progress. Cannot explore attractors now.",
                     )
                 }
             } else {
@@ -862,7 +859,7 @@ fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
                 if let Some(graph) = &cmp.graph {
                     let f_witness_colour = f_colors.pick_singleton();
                     let witness_network: BooleanNetwork = graph.pick_witness(&f_witness_colour);
-                    let witness_graph = SymbolicAsyncGraph::new(witness_network.clone()).unwrap();
+                    let witness_graph = SymbolicAsyncGraph::new(&witness_network).unwrap();
                     let witness_str = witness_network.to_string();
                     let f_witness_attractors = f_classifier.attractors(&f_witness_colour);
                     let variable_name_strings = witness_network
@@ -897,11 +894,9 @@ fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
                         } else if f_attractor.approx_cardinality() >= 500.0 {
                             has_large_attractors = true;
                             // For large attractors, only show fixed values.
-                            let mut state_0 =
-                                ArrayBitVector::from(vec![false; graph.as_network().num_vars()]);
-                            let mut state_1 =
-                                ArrayBitVector::from(vec![true; graph.as_network().num_vars()]);
-                            for var in graph.as_network().variables() {
+                            let mut state_0 = ArrayBitVector::from(vec![false; graph.num_vars()]);
+                            let mut state_1 = ArrayBitVector::from(vec![true; graph.num_vars()]);
+                            for var in graph.variables() {
                                 let f_var_true = graph.fix_network_variable(var, true).vertices();
                                 let f_var_false = graph.fix_network_variable(var, false).vertices();
                                 let f_always_one = f_attractor.intersect(&f_var_false).is_empty();
@@ -919,8 +914,8 @@ fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
                         } else {
                             for source in f_attractor.materialize().iter() {
                                 let source_set = witness_graph.vertex(&source);
-                                let mut target_set = witness_graph.mk_empty_vertices();
-                                for v in witness_graph.as_network().variables() {
+                                let mut target_set = witness_graph.mk_empty_colored_vertices();
+                                for v in witness_graph.variables() {
                                     let post = witness_graph.var_post(v, &source_set);
                                     if !post.is_empty() {
                                         not_fixed_vars.insert(v.into());
@@ -998,10 +993,10 @@ fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
 
 /// Accept an Aeon model, parse it and start a new computation (if there is no computation running).
 #[post("/start_computation", format = "plain", data = "<data>")]
-fn start_computation(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000); // limit model to 10MB
+async fn start_computation(data: Data<'_>) -> BackendResponse {
+    let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model to 10MB
     let mut aeon_string = String::new();
-    return match stream.read_to_string(&mut aeon_string) {
+    return match stream.read_to_string(&mut aeon_string).await {
         Ok(_) => {
             // First, try to parse the network so that the user can at least verify it is correct...
             match BooleanNetwork::try_from(aeon_string.as_str()) {
@@ -1041,7 +1036,7 @@ fn start_computation(data: Data) -> BackendResponse {
                         // stuff.
                         let cmp_thread = std::thread::spawn(move || {
                             let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-                            match SymbolicAsyncGraph::new(network) {
+                            match SymbolicAsyncGraph::new(&network) {
                                 Ok(graph) => {
                                     // Now that we have graph, we can create classifier and progress
                                     // and save them into the computation.
@@ -1104,7 +1099,7 @@ fn start_computation(data: Data) -> BackendResponse {
                                         let result = classifier.export_result();
                                         let tree = TREE.clone();
                                         let mut tree = tree.write().unwrap();
-                                        *tree = Some(Bdt::new_from_graph(result, &graph));
+                                        *tree = Some(Bdt::new_from_graph(result, &graph, &network));
                                         println!("Saved decision tree");
                                     }
 
@@ -1169,7 +1164,7 @@ fn cancel_computation() -> BackendResponse {
             return BackendResponse::err("Nothing to cancel. Computation already done.");
         }
         if cmp.task.cancel() {
-            BackendResponse::ok(&"\"ok\"".to_string())
+            BackendResponse::ok("\"ok\"")
         } else {
             BackendResponse::err("Computation already cancelled.")
         }
@@ -1182,10 +1177,10 @@ fn cancel_computation() -> BackendResponse {
 /// If everything goes well, return a standard result object with a parsed model, or
 /// error if something fails.
 #[post("/sbml_to_aeon", format = "plain", data = "<data>")]
-fn sbml_to_aeon(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000); // limit model to 10MB
+async fn sbml_to_aeon(data: Data<'_>) -> BackendResponse {
+    let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model to 10MB
     let mut sbml_string = String::new();
-    match stream.read_to_string(&mut sbml_string) {
+    match stream.read_to_string(&mut sbml_string).await {
         Ok(_) => {
             match BooleanNetwork::try_from_sbml(&sbml_string) {
                 Ok((model, layout)) => {
@@ -1240,10 +1235,10 @@ fn read_metadata(aeon_string: &str) -> (Option<String>, Option<String>) {
 /// which will then be translated into SBML (XML) representation.
 /// Preserve layout metadata.
 #[post("/aeon_to_sbml", format = "plain", data = "<data>")]
-fn aeon_to_sbml(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000); // limit model to 10MB
+async fn aeon_to_sbml(data: Data<'_>) -> BackendResponse {
+    let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model to 10MB
     let mut aeon_string = String::new();
-    match stream.read_to_string(&mut aeon_string) {
+    match stream.read_to_string(&mut aeon_string).await {
         Ok(_) => match BooleanNetwork::try_from(aeon_string.as_str()) {
             Ok(network) => {
                 let layout = read_layout(&aeon_string);
@@ -1260,12 +1255,14 @@ fn aeon_to_sbml(data: Data) -> BackendResponse {
 /// Note that this can take quite a while for large models since we have to actually build
 /// the unit BDD right now (in the future, we might opt to use a SAT solver which might be faster).
 #[post("/aeon_to_sbml_instantiated", format = "plain", data = "<data>")]
-fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
-    let mut stream = data.open().take(10_000_000); // limit model to 10MB
+async fn aeon_to_sbml_instantiated(data: Data<'_>) -> BackendResponse {
+    let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model to 10MB
     let mut aeon_string = String::new();
-    return match stream.read_to_string(&mut aeon_string) {
+    match stream.read_to_string(&mut aeon_string).await {
         Ok(_) => {
-            match BooleanNetwork::try_from(aeon_string.as_str()).and_then(SymbolicAsyncGraph::new) {
+            match BooleanNetwork::try_from(aeon_string.as_str())
+                .and_then(|it| SymbolicAsyncGraph::new(&it))
+            {
                 Ok(graph) => {
                     let witness = graph.pick_witness(graph.unit_colors());
                     let layout = read_layout(&aeon_string);
@@ -1277,12 +1274,20 @@ fn aeon_to_sbml_instantiated(data: Data) -> BackendResponse {
             }
         }
         Err(error) => BackendResponse::err(&format!("{}", error)),
-    };
+    }
 }
 
-fn main() {
+// An empty endpoint that will respond to all OPTIONS requests positively,
+// since we accept all requests.
+#[options("/<_path..>")]
+fn all_options(_path: std::path::PathBuf) -> &'static str {
+    "" // Respond to all OPTIONS requests with an empty 200 response
+}
+
+#[launch]
+fn rocket() -> _ {
     //test_main::run();
-    let address = std::env::var("AEON_ADDR").unwrap_or_else(|_| "localhost".to_string());
+    let address = std::env::var("AEON_ADDR").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port_from_args = {
         let mut args = std::env::args();
         args.next(); // Skip binary path
@@ -1292,12 +1297,17 @@ fn main() {
         .ok()
         .and_then(|s| s.parse::<u16>().ok());
     let port: u16 = port_from_args.or(port_from_env).unwrap_or(8000);
-    let config = Config::build(Environment::Production)
-        .address(address)
-        .port(port)
-        .finalize();
 
-    rocket::custom(config.unwrap())
+    let config = Config {
+        address: IpAddr::from_str(address.as_str()).unwrap(),
+        port,
+        ..Default::default()
+    };
+
+    let cors = CorsOptions::default().allowed_origins(AllowedOrigins::all());
+
+    rocket::custom(config)
+        .attach(cors.to_cors().unwrap())
         .mount(
             "/",
             routes![
@@ -1323,9 +1333,9 @@ fn main() {
                 apply_tree_precision,
                 get_tree_precision,
                 auto_expand,
+                all_options,
             ],
         )
-        .launch();
 }
 
 struct BackendResponse {
@@ -1350,19 +1360,17 @@ impl BackendResponse {
     }
 }
 
-impl<'r> Responder<'r> for BackendResponse {
-    fn respond_to(self, _: &Request) -> response::Result<'r> {
+impl<'r, 's: 'r> Responder<'r, 's> for BackendResponse {
+    fn respond_to(self, _request: &'r Request<'_>) -> response::Result<'s> {
         use std::io::Cursor;
 
-        let cursor = Cursor::new(self.message);
         Response::build()
             .header(ContentType::Plain)
-            .header(AccessControlAllowOrigin::Any)
-            // This magic set of headers might fix some CROS issues, but we are not sure yet...
+            // This magic set of headers might fix some CORS issues, but we are not sure yet...
             .header(Header::new("Allow", "GET, POST, OPTIONS, PUT, DELETE"))
             .header(Header::new("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE"))
             .header(Header::new("Access-Control-Allow-Headers", "X-API-KEY, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method"))
-            .sized_body(cursor)
+            .sized_body(self.message.len(), Cursor::new(self.message))
             .ok()
     }
 }

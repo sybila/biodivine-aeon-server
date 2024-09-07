@@ -31,7 +31,7 @@ pub fn xie_beerel_attractors<F>(
         let mut pivot_component = pivots.clone();
 
         // Iteratively compute the pivot component. If some color leaves `pivot_basin`, it is
-        // removed from `pivot_component`, as it does not have to be processed any more.
+        // removed from `pivot_component`, as it does not have to be processed anymore.
         //
         // At the end of the loop, `pivot_component` contains only colors for which the component
         // is an attractor (other colors will leave the `pivot_basin` at some point).

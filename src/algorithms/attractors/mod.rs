@@ -1,7 +1,7 @@
-use biodivine_lib_param_bn::biodivine_std::traits::Set;
-use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use crate::algorithms::non_constant_variables;
 use crate::algorithms::reachability::{bwd, fwd_step};
+use biodivine_lib_param_bn::biodivine_std::traits::Set;
+use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 
 /// **(internal)** Implements interleaved transition guided reduction. This procedure attempts
 /// to eliminate a large portion of non-attractor states quickly. The module itself is private,
@@ -17,7 +17,7 @@ mod itgr;
 
 pub async fn transition_guided_reduction(
     stg: &SymbolicAsyncGraph,
-    fork_limit: usize
+    fork_limit: usize,
 ) -> GraphColoredVertices {
     itgr::schedule_reductions(stg.clone(), fork_limit).await
 }
@@ -25,14 +25,14 @@ pub async fn transition_guided_reduction(
 /// Forward-backward symbolic SCC detection algorithm modified to detect attractors (bottom SCCs).
 ///
 /// The algorithm can be parametrised by two callbacks:
-///  - First is called when an attractors is found. The argument represents the attractor set.
+///  - First is called when an attractor is found. The argument represents the attractor set.
 ///  - Second callback is called when a set of states is eliminated. This set may or may not
 ///    contain an attractor (however, if it does, the attractor is already reported).
 pub async fn attractors<OnAttractor, OnEliminated>(
     stg: &SymbolicAsyncGraph,
     set: &GraphColoredVertices,
     on_attractor: OnAttractor,
-    on_eliminated: OnEliminated
+    on_eliminated: OnEliminated,
 ) where
     OnAttractor: Fn(GraphColoredVertices) + Send + Sync,
     OnEliminated: Fn(GraphColoredVertices) + Send + Sync,
@@ -51,7 +51,9 @@ pub async fn attractors<OnAttractor, OnEliminated>(
 
         // Compute the rest of the pivot's SCC, stopping if it is not terminal.
         let mut pivot_component = pivot.clone();
-        while let Some(successors) = fwd_step(&active_stg, &pivot_component, &active_variables).await {
+        while let Some(successors) =
+            fwd_step(&active_stg, &pivot_component, &active_variables).await
+        {
             let non_terminal = successors.minus(&pivot_basin);
             if !non_terminal.is_empty() {
                 pivot_component = pivot_component.minus_colors(&non_terminal.colors());

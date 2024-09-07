@@ -58,7 +58,6 @@ pub fn compute_stability(
     components: &[GraphColoredVertices],
 ) -> StabilityData {
     graph
-        .as_network()
         .variables()
         .map(|id| (id, VariableStability::for_attractors(graph, components, id)))
         .collect()

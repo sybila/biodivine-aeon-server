@@ -28,6 +28,10 @@ impl<F: Feature, S: Set> IncrementalClassifier<F, S> {
         self.items.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
     /// Get the underlying list of features tracked by  this `IncrementalClassifier`.
     ///
     /// Note that the features may be ordered arbitrarily.
@@ -61,7 +65,7 @@ impl<F: Feature, S: Set> IncrementalClassifier<F, S> {
         for (f, s) in self.items.iter() {
             add(&mut new_items, (f.clone(), s.minus(&remaining)));
             add(&mut new_items, (f.extend(feature), s.intersect(&remaining)));
-            remaining = remaining.minus(&s);
+            remaining = remaining.minus(s);
         }
 
         assert!(remaining.is_empty());

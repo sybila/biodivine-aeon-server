@@ -1,8 +1,8 @@
+use crate::algorithms::attractors::itgr::itgr_process::ProcessState::*;
+use crate::algorithms::attractors::itgr::reachability_process::{BwdProcess, FwdProcess};
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use biodivine_lib_param_bn::VariableId;
-use crate::algorithms::attractors::itgr::itgr_process::ProcessState::*;
-use crate::algorithms::attractors::itgr::reachability_process::{BwdProcess, FwdProcess};
 
 pub struct ItgrProcess {
     last_timestamp: usize,
@@ -12,33 +12,32 @@ pub struct ItgrProcess {
 }
 
 enum ProcessState {
-    FwdPhase {
+    Fwd {
         fwd: FwdProcess,
     },
-    FwdBasinPhase {
+    FwdBasin {
         fwd: GraphColoredVertices,
         fwd_basin: BwdProcess,
     },
-    CmpPhase {
+    Cmp {
         fwd: GraphColoredVertices,
         cmp: BwdProcess,
     },
-    TrapPhase {
+    Trap {
         cmp: GraphColoredVertices,
         trap: GraphColoredVertices,
         trap_basin: BwdProcess,
-    }
+    },
 }
 
 impl ItgrProcess {
-
     pub fn new(stg: &SymbolicAsyncGraph, variable: VariableId) -> ItgrProcess {
         let pivots = stg.var_can_post(variable, stg.unit_colored_vertices());
         ItgrProcess {
             variable,
             root_stg: stg.clone(),
-            state: FwdPhase {
-                fwd: FwdProcess::new(stg.clone(), pivots)
+            state: Fwd {
+                fwd: FwdProcess::new(stg.clone(), pivots),
             },
             last_timestamp: 0,
         }
@@ -52,16 +51,20 @@ impl ItgrProcess {
         self.last_timestamp = timestamp;
         self.root_stg = self.root_stg.restrict(universe);
         match &mut self.state {
-            FwdPhase { fwd } => fwd.restrict(universe),
-            FwdBasinPhase { fwd, fwd_basin } => {
+            Fwd { fwd } => fwd.restrict(universe),
+            FwdBasin { fwd, fwd_basin } => {
                 *fwd = fwd.intersect(universe);
                 fwd_basin.restrict(universe);
-            },
-            CmpPhase { fwd, cmp } => {
+            }
+            Cmp { fwd, cmp } => {
                 *fwd = fwd.intersect(universe);
                 cmp.restrict(universe);
-            },
-            TrapPhase { cmp, trap, trap_basin } => {
+            }
+            Trap {
+                cmp,
+                trap,
+                trap_basin,
+            } => {
                 *cmp = cmp.intersect(universe);
                 *trap = trap.intersect(universe);
                 trap_basin.restrict(universe);
@@ -71,17 +74,17 @@ impl ItgrProcess {
 
     pub async fn step(&mut self) -> (bool, Option<GraphColoredVertices>) {
         match &mut self.state {
-            FwdPhase { fwd } => {
+            Fwd { fwd } => {
                 if fwd.step().await {
                     let fwd = fwd.finish();
-                    self.state = FwdBasinPhase {
+                    self.state = FwdBasin {
                         fwd: fwd.clone(),
                         fwd_basin: BwdProcess::new(self.root_stg.clone(), fwd),
                     }
                 }
                 (false, None)
-            },
-            FwdBasinPhase { fwd, fwd_basin} => {
+            }
+            FwdBasin { fwd, fwd_basin } => {
                 /*if fwd_basin.step().await {
                     let fwd_basin = fwd_basin.finish();
                     let to_remove = fwd_basin.minus(&fwd);
@@ -94,28 +97,31 @@ impl ItgrProcess {
                 } else {
                     (false, None)
                 }*/
-                while !fwd_basin.step().await { }
+                while !fwd_basin.step().await {}
                 let fwd_basin = fwd_basin.finish();
-                let to_remove = fwd_basin.minus(&fwd);
+                let to_remove = fwd_basin.minus(fwd);
                 let pivots = self.root_stg.var_can_post(self.variable, fwd);
-                self.state = CmpPhase {
+                self.state = Cmp {
                     fwd: fwd.clone(),
-                    cmp: BwdProcess::new(self.root_stg.restrict(&fwd), pivots),
+                    cmp: BwdProcess::new(self.root_stg.restrict(fwd), pivots),
                 };
                 (false, Some(to_remove))
-            },
-            CmpPhase { fwd, cmp } => {
+            }
+            Cmp { fwd, cmp } => {
                 if cmp.step().await {
                     let cmp = cmp.finish();
                     let trap = fwd.minus(&cmp);
-                    self.state = TrapPhase {
+                    self.state = Trap {
                         trap_basin: BwdProcess::new(self.root_stg.clone(), trap.clone()),
-                        cmp, trap,
+                        cmp,
+                        trap,
                     }
                 }
                 (false, None)
             }
-            TrapPhase { trap, trap_basin, .. } => {
+            Trap {
+                trap, trap_basin, ..
+            } => {
                 /*if trap_basin.step().await {
                     let trap_basin = trap_basin.finish();
                     let to_remove = trap_basin.minus(trap);
@@ -123,7 +129,7 @@ impl ItgrProcess {
                 } else {
                     (false, None)
                 }*/
-                while !trap_basin.step().await { }
+                while !trap_basin.step().await {}
                 let trap_basin = trap_basin.finish();
                 let to_remove = trap_basin.minus(trap);
                 (true, Some(to_remove))
@@ -133,11 +139,10 @@ impl ItgrProcess {
 
     pub fn weight(&self) -> usize {
         match &self.state {
-            FwdPhase { fwd } => fwd.weight(),
-            FwdBasinPhase { fwd_basin, .. } => fwd_basin.weight(),
-            CmpPhase { cmp, .. } => cmp.weight(),
-            TrapPhase { trap_basin, .. } => trap_basin.weight(),
+            Fwd { fwd } => fwd.weight(),
+            FwdBasin { fwd_basin, .. } => fwd_basin.weight(),
+            Cmp { cmp, .. } => cmp.weight(),
+            Trap { trap_basin, .. } => trap_basin.weight(),
         }
     }
-
 }

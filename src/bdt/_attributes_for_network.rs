@@ -3,17 +3,21 @@ use crate::util::functional::Functional;
 use biodivine_lib_bdd::Bdd;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
-use biodivine_lib_param_bn::{FnUpdate, VariableId};
+use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate, VariableId};
 
 impl Bdt {
-    pub fn new_from_graph(classes: BifurcationFunction, graph: &SymbolicAsyncGraph) -> Bdt {
+    pub fn new_from_graph(
+        classes: BifurcationFunction,
+        graph: &SymbolicAsyncGraph,
+        network: &BooleanNetwork,
+    ) -> Bdt {
         let mut attributes = Vec::new();
-        attributes_for_network_inputs(graph, &mut attributes);
-        attributes_for_constant_parameters(graph, &mut attributes);
-        attributes_for_missing_constraints(graph, &mut attributes);
-        attributes_for_implicit_function_tables(graph, &mut attributes);
-        attributes_for_explicit_function_tables(graph, &mut attributes);
-        attributes_for_conditional_observability(graph, &mut attributes);
+        attributes_for_network_inputs(network, graph, &mut attributes);
+        attributes_for_constant_parameters(network, graph, &mut attributes);
+        attributes_for_missing_constraints(network, graph, &mut attributes);
+        attributes_for_implicit_function_tables(network, graph, &mut attributes);
+        attributes_for_explicit_function_tables(network, graph, &mut attributes);
+        attributes_for_conditional_observability(network, graph, &mut attributes);
         let attributes = attributes
             .into_iter()
             .filter(|a| {
@@ -30,17 +34,21 @@ impl Bdt {
 }
 
 /// **(internal)** Construct basic attributes for all input variables.
-fn attributes_for_network_inputs(graph: &SymbolicAsyncGraph, out: &mut Vec<Attribute>) {
-    for v in graph.as_network().variables() {
+fn attributes_for_network_inputs(
+    network: &BooleanNetwork,
+    graph: &SymbolicAsyncGraph,
+    out: &mut Vec<Attribute>,
+) {
+    for v in network.variables() {
         // v is input if it has no update function and no regulators
-        let is_input = graph.as_network().regulators(v).is_empty();
-        let is_input = is_input && graph.as_network().get_update_function(v).is_none();
+        let is_input = network.regulators(v).is_empty();
+        let is_input = is_input && network.get_update_function(v).is_none();
         if is_input {
             let bdd = graph
                 .symbolic_context()
                 .mk_implicit_function_is_true(v, &[]);
             out.push(Attribute {
-                name: graph.as_network().get_variable_name(v).clone(),
+                name: network.get_variable_name(v).clone(),
                 negative: graph.empty_colors().copy(bdd.not()),
                 positive: graph.empty_colors().copy(bdd),
                 context: None,
@@ -50,15 +58,19 @@ fn attributes_for_network_inputs(graph: &SymbolicAsyncGraph, out: &mut Vec<Attri
 }
 
 /// **(internal)** Construct basic attributes for all constant parameters of the network.
-fn attributes_for_constant_parameters(graph: &SymbolicAsyncGraph, out: &mut Vec<Attribute>) {
-    for p in graph.as_network().parameters() {
-        if graph.as_network()[p].get_arity() == 0 {
+fn attributes_for_constant_parameters(
+    network: &BooleanNetwork,
+    graph: &SymbolicAsyncGraph,
+    out: &mut Vec<Attribute>,
+) {
+    for p in network.parameters() {
+        if network[p].get_arity() == 0 {
             // Parameter is a constant
             let bdd = graph
                 .symbolic_context()
                 .mk_uninterpreted_function_is_true(p, &[]);
             out.push(Attribute {
-                name: graph.as_network()[p].get_name().clone(),
+                name: network[p].get_name().clone(),
                 negative: graph.empty_colors().copy(bdd.not()),
                 positive: graph.empty_colors().copy(bdd),
                 context: None,
@@ -69,10 +81,13 @@ fn attributes_for_constant_parameters(graph: &SymbolicAsyncGraph, out: &mut Vec<
 
 /// **(internal)** If some regulation has a missing static constraint, try to build it
 /// and add it as an attribute.
-fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<Attribute>) {
-    let network = graph.as_network();
+fn attributes_for_missing_constraints(
+    network: &BooleanNetwork,
+    graph: &SymbolicAsyncGraph,
+    out: &mut Vec<Attribute>,
+) {
     let context = graph.symbolic_context();
-    for reg in graph.as_network().as_graph().regulations() {
+    for reg in network.as_graph().regulations() {
         // This is straight up copied from static constraint analysis in lib-param-bn.
         // For more context, go there.
         let target = reg.get_target();
@@ -89,11 +104,11 @@ fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<
         let regulator_is_false = context.mk_state_variable_is_true(reg.get_regulator()).not();
 
         if !reg.is_observable() {
-            let fn_x1_to_1 = fn_is_true.and(&regulator_is_true).var_project(regulator);
-            let fn_x0_to_1 = fn_is_true.and(&regulator_is_false).var_project(regulator);
+            let fn_x1_to_1 = fn_is_true.and(&regulator_is_true).var_exists(regulator);
+            let fn_x0_to_1 = fn_is_true.and(&regulator_is_false).var_exists(regulator);
             let observability = fn_x1_to_1
                 .xor(&fn_x0_to_1)
-                .project(context.state_variables());
+                .exists(context.state_variables());
 
             out.push(Attribute {
                 name: format!(
@@ -112,17 +127,17 @@ fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<
         }
 
         if reg.get_monotonicity().is_none() {
-            let fn_x1_to_0 = fn_is_false.and(&regulator_is_true).var_project(regulator);
-            let fn_x0_to_1 = fn_is_true.and(&regulator_is_false).var_project(regulator);
+            let fn_x1_to_0 = fn_is_false.and(&regulator_is_true).var_exists(regulator);
+            let fn_x0_to_1 = fn_is_true.and(&regulator_is_false).var_exists(regulator);
             let non_activation = fn_x0_to_1
                 .and(&fn_x1_to_0)
-                .project(context.state_variables());
+                .exists(context.state_variables());
 
-            let fn_x0_to_0 = fn_is_false.and(&regulator_is_false).var_project(regulator);
-            let fn_x1_to_1 = fn_is_true.and(&regulator_is_true).var_project(regulator);
+            let fn_x0_to_0 = fn_is_false.and(&regulator_is_false).var_exists(regulator);
+            let fn_x1_to_1 = fn_is_true.and(&regulator_is_true).var_exists(regulator);
             let non_inhibition = fn_x0_to_0
                 .and(&fn_x1_to_1)
-                .project(context.state_variables());
+                .exists(context.state_variables());
 
             out.push(Attribute {
                 name: format!(
@@ -159,27 +174,33 @@ fn attributes_for_missing_constraints(graph: &SymbolicAsyncGraph, out: &mut Vec<
 
 /// **(internal)** Make an explicit attributes (like `f[1,0,1] = 1`) for every implicit update
 /// function row in the network.
-fn attributes_for_implicit_function_tables(graph: &SymbolicAsyncGraph, out: &mut Vec<Attribute>) {
-    for v in graph.as_network().variables() {
-        let is_implicit_function = graph.as_network().get_update_function(v).is_none();
-        let is_implicit_function =
-            is_implicit_function && !graph.as_network().regulators(v).is_empty();
+fn attributes_for_implicit_function_tables(
+    network: &BooleanNetwork,
+    graph: &SymbolicAsyncGraph,
+    out: &mut Vec<Attribute>,
+) {
+    for v in network.variables() {
+        let is_implicit_function = network.get_update_function(v).is_none();
+        let is_implicit_function = is_implicit_function && !network.regulators(v).is_empty();
         if is_implicit_function {
-            let table = graph.symbolic_context().get_implicit_function_table(v);
+            let table = graph
+                .symbolic_context()
+                .get_implicit_function_table(v)
+                .unwrap();
             for (ctx, var) in table {
                 let bdd = graph.symbolic_context().bdd_variable_set().mk_var(var);
                 let ctx: Vec<String> = ctx
                     .into_iter()
-                    .zip(graph.as_network().regulators(v))
+                    .zip(network.regulators(v))
                     .map(|(b, r)| {
                         format!(
                             "{}{}",
                             if b { "" } else { "¬" },
-                            graph.as_network().get_variable_name(r)
+                            network.get_variable_name(r)
                         )
                     })
                     .collect();
-                let name = format!("{}{:?}", graph.as_network().get_variable_name(v), ctx);
+                let name = format!("{}{:?}", network.get_variable_name(v), ctx);
                 out.push(Attribute {
                     name: name.replace("\"", ""),
                     negative: graph.mk_empty_colors().copy(bdd.not()),
@@ -192,9 +213,13 @@ fn attributes_for_implicit_function_tables(graph: &SymbolicAsyncGraph, out: &mut
 }
 
 /// **(internal)** Make an explicit argument for every explicit parameter function row in the network.
-fn attributes_for_explicit_function_tables(graph: &SymbolicAsyncGraph, out: &mut Vec<Attribute>) {
-    for p in graph.as_network().parameters() {
-        let parameter = graph.as_network().get_parameter(p);
+fn attributes_for_explicit_function_tables(
+    network: &BooleanNetwork,
+    graph: &SymbolicAsyncGraph,
+    out: &mut Vec<Attribute>,
+) {
+    for p in network.parameters() {
+        let parameter = network.get_parameter(p);
         if parameter.get_arity() > 0 {
             let table = graph.symbolic_context().get_explicit_function_table(p);
             let arg_names = (0..parameter.get_arity())
@@ -220,11 +245,14 @@ fn attributes_for_explicit_function_tables(graph: &SymbolicAsyncGraph, out: &mut
 }
 
 /// Create "conditional observability" attributes for both implicit and explicit update functions.
-fn attributes_for_conditional_observability(graph: &SymbolicAsyncGraph, out: &mut Vec<Attribute>) {
+fn attributes_for_conditional_observability(
+    network: &BooleanNetwork,
+    graph: &SymbolicAsyncGraph,
+    out: &mut Vec<Attribute>,
+) {
     let context = graph.symbolic_context();
-    let network = graph.as_network();
-    for v in graph.as_network().variables() {
-        let regulators = graph.as_network().regulators(v);
+    for v in network.variables() {
+        let regulators = network.regulators(v);
 
         // Bdd that is true when update function for this variable is true
         let fn_is_true = if let Some(function) = network.get_update_function(v) {
@@ -268,11 +296,11 @@ fn attributes_for_conditional_observability(graph: &SymbolicAsyncGraph, out: &mu
                 for (condition_name, condition_list, condition_bdd) in contexts {
                     // Restrict to values that satisfy conditions
                     let fn_is_true = fn_is_true.and(&condition_bdd);
-                    let fn_x1_to_1 = fn_is_true.and(&regulator_is_true).var_project(r_var);
-                    let fn_x0_to_1 = fn_is_true.and(&regulator_is_false).var_project(r_var);
+                    let fn_x1_to_1 = fn_is_true.and(&regulator_is_true).var_exists(r_var);
+                    let fn_x0_to_1 = fn_is_true.and(&regulator_is_false).var_exists(r_var);
                     let observability = fn_x1_to_1
                         .xor(&fn_x0_to_1)
-                        .project(context.state_variables());
+                        .exists(context.state_variables());
 
                     out.push(Attribute {
                         name: format!(
@@ -301,7 +329,17 @@ fn variable_contexts(function: &FnUpdate) -> Vec<Vec<VariableId>> {
     match function {
         FnUpdate::Const(_) => vec![],
         FnUpdate::Var(_) => vec![],
-        FnUpdate::Param(_, args) => vec![args.clone()],
+        FnUpdate::Param(_, args) => {
+            let mut arg_ids = Vec::new();
+            for arg in args {
+                if let FnUpdate::Var(id) = arg {
+                    arg_ids.push(*id);
+                } else {
+                    panic!("Arguments must be variables, not complex expressions.")
+                }
+            }
+            vec![arg_ids]
+        }
         FnUpdate::Not(inner) => variable_contexts(inner),
         FnUpdate::Binary(_, l, r) => variable_contexts(l)
             .apply(|list| variable_contexts(r).into_iter().for_each(|c| list.push(c))),
@@ -316,7 +354,7 @@ fn variable_contexts(function: &FnUpdate) -> Vec<Vec<VariableId>> {
 /// XYZ
 ///
 /// This should also automatically filter out empty results, so you can
-/// include A and !A in the conditions without problems.
+/// include `A` and `!A` in the conditions without problems.
 fn make_contexts(conditions: &[(String, Bdd)]) -> Vec<(String, Vec<String>, Bdd)> {
     fn recursion(
         conditions: &[(String, Bdd)],

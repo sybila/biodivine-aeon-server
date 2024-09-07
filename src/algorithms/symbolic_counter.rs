@@ -3,7 +3,7 @@ use crate::util::functional::Functional;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 
 /// Basic `SymbolicCounter` object that uses `IncrementalClassifier` to count how many times
-/// a a particular set member has been observed.
+/// a particular set member has been observed.
 #[derive(Clone)]
 pub struct SymbolicCounter<S: Set> {
     counter: IncrementalClassifier<Count, S>,

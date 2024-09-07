@@ -3,7 +3,7 @@ pub trait Functional: Sized {
     ///
     /// It takes ownership of the given value and returns it back once the action
     /// has been applied. Note that it cannot change the output type (output of
-    /// `action` is ignored.
+    /// `action` is ignored).
     fn apply<F, R>(mut self, action: F) -> Self
     where
         F: FnOnce(&mut Self) -> R,
@@ -23,7 +23,7 @@ pub trait Functional: Sized {
         action(self)
     }
 
-    /// Run an non-modifying action with the given value. The return value
+    /// Run a non-modifying action with the given value. The return value
     /// is dropped.
     fn also<F, R>(self, action: F) -> Self
     where
@@ -36,7 +36,7 @@ pub trait Functional: Sized {
     /// Conditionally wrap item in `Some`.
     ///
     /// Note that this always evaluates the value in question and shouldn't be thus
-    /// used when side-effects are important or items are large.
+    /// used when side effects are important or items are large.
     fn take_if<F>(self, test: F) -> Option<Self>
     where
         F: FnOnce(&Self) -> bool,

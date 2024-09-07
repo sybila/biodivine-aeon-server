@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 /// Describes a possible asymptotic behaviour of a discrete system.
 /// Intuitively:
-///     - `Stability` is when all of the system variables reach a fixed state.
+///     - `Stability` is when all the system variables reach a fixed state.
 ///     - `Oscillation` is when some system variables change predictably and the rest
 ///     has a fixed state.
 ///     - `Disorder` is when some system variables change in a non-deterministic, unpredictable
@@ -127,7 +127,7 @@ impl AsymptoticBehaviour {
     ///
     /// Note that it doesn't matter whether the variable update leaves the `set` or stays within.
     /// Both count as unstable. However, you can use `SymbolicAsyncGraph::restrict` to disregard
-    /// updates leading outside of the provided `set`.
+    /// updates leading outside the provided `set`.
     pub fn check_variable_stability(
         stg: &SymbolicAsyncGraph,
         set: &GraphColoredVertices,
@@ -147,8 +147,7 @@ impl AsymptoticBehaviour {
     /// This method should be slightly faster than computing `AsymptoticBehaviour::classify`
     /// in full.
     pub fn check_stability(stg: &SymbolicAsyncGraph, set: &GraphColoredVertices) -> GraphColors {
-        stg.as_network()
-            .variables()
+        stg.variables()
             .map(|var| Self::check_variable_stability(stg, set, var))
             .fold(set.colors(), |a, b| a.intersect(&b))
     }
@@ -199,10 +198,10 @@ impl AsymptoticBehaviour {
         // transitions are discovered. Any color that appears in `successor_zero` or
         // `successor_more` is guaranteed to not have only deterministic cycles.
         let mut successors_zero = set.clone();
-        let mut successors_one = stg.mk_empty_vertices();
-        let mut successors_more = stg.mk_empty_vertices();
+        let mut successors_one = stg.mk_empty_colored_vertices();
+        let mut successors_more = stg.mk_empty_colored_vertices();
 
-        for var in stg.as_network().variables() {
+        for var in stg.variables() {
             let can_change = stg.var_can_post(var, set);
 
             let move_to_one = successors_zero.intersect(&can_change);
@@ -242,7 +241,7 @@ impl AsymptoticBehaviour {
         set: Arc<GraphColoredVertices>,
     ) -> AsymptoticBehaviourMap {
         let all_colors = set.colors();
-        let variables = stg.as_network().variables().collect();
+        let variables = stg.variables().collect();
         let [zero, one, more] = Self::classify_recursive(stg.clone(), set.clone(), variables).await;
 
         let stability = zero.colors().minus(&one.colors()).minus(&more.colors());
@@ -261,14 +260,18 @@ impl AsymptoticBehaviour {
         set: Arc<GraphColoredVertices>,
         variables: Vec<VariableId>,
     ) -> BoxFuture<'static, [GraphColoredVertices; 3]> {
-        return if variables.len() == 1 {
+        if variables.len() == 1 {
             // If there is only one variable remaining, compute states that can perform transition
             // with this variable. These are marked as "one transition", remaining are
             // "zero transitions".
             let var = variables[0];
             Box::pin(async move {
                 let can_post = stg.var_can_post(var, &set);
-                [set.minus(&can_post), can_post, stg.mk_empty_vertices()]
+                [
+                    set.minus(&can_post),
+                    can_post,
+                    stg.mk_empty_colored_vertices(),
+                ]
             })
         } else {
             // If there are more variables, split into two branches and continue each
@@ -289,7 +292,7 @@ impl AsymptoticBehaviour {
                 let zero = l_zero.intersect(&r_zero);
                 [zero, one, more]
             })
-        };
+        }
     }
 }
 
@@ -322,7 +325,7 @@ mod tests {
         )
         .unwrap();
 
-        let stg = SymbolicAsyncGraph::new(bn).unwrap();
+        let stg = SymbolicAsyncGraph::new(&bn).unwrap();
         let all_colors = stg.mk_unit_colors();
 
         let t_state = stg.vertex(&ArrayBitVector::from(vec![true, true]));
@@ -343,10 +346,7 @@ mod tests {
             );
         }
 
-        assert_symbolic_eq!(
-            sink_colors.as_bdd(),
-            classification.get(AsymptoticBehaviour::Stability).as_bdd()
-        );
+        assert_symbolic_eq!(sink_colors.as_bdd(), classification.get(Stability).as_bdd());
     }
 
     #[tokio::test]
@@ -361,7 +361,7 @@ mod tests {
         )
         .unwrap();
 
-        let stg = SymbolicAsyncGraph::new(bn).unwrap();
+        let stg = SymbolicAsyncGraph::new(&bn).unwrap();
         let all_colors = stg.mk_unit_colors();
 
         let t_state = stg.vertex(&ArrayBitVector::from(vec![true, true]));
@@ -383,10 +383,7 @@ mod tests {
             );
         }
 
-        assert_symbolic_eq!(
-            sink_colors.as_bdd(),
-            classification.get(AsymptoticBehaviour::Stability).as_bdd()
-        );
+        assert_symbolic_eq!(sink_colors.as_bdd(), classification.get(Stability).as_bdd());
     }
 
     #[tokio::test]
@@ -402,7 +399,7 @@ mod tests {
         )
         .unwrap();
 
-        let stg = SymbolicAsyncGraph::new(bn).unwrap();
+        let stg = SymbolicAsyncGraph::new(&bn).unwrap();
         let all_colors = stg.mk_unit_colors();
 
         let t_state = stg.vertex(&ArrayBitVector::from(vec![true, true]));
@@ -426,9 +423,7 @@ mod tests {
 
         assert_symbolic_eq!(
             oscillation_colors.as_bdd(),
-            classification
-                .get(AsymptoticBehaviour::Oscillation)
-                .as_bdd()
+            classification.get(Oscillation).as_bdd()
         );
     }
 
@@ -443,7 +438,7 @@ mod tests {
         )
         .unwrap();
 
-        let stg = SymbolicAsyncGraph::new(bn).unwrap();
+        let stg = SymbolicAsyncGraph::new(&bn).unwrap();
         let all_states = stg.mk_unit_colored_vertices();
         let all_colors = stg.mk_unit_colors();
 
@@ -463,7 +458,7 @@ mod tests {
 
         assert_symbolic_eq!(
             disordered_colors.as_bdd(),
-            classification.get(AsymptoticBehaviour::Disorder).as_bdd()
+            classification.get(Disorder).as_bdd()
         );
     }
 
@@ -480,7 +475,7 @@ mod tests {
         )
         .unwrap();
 
-        let stg = SymbolicAsyncGraph::new(bn).unwrap();
+        let stg = SymbolicAsyncGraph::new(&bn).unwrap();
         let all_states = stg.mk_unit_colored_vertices();
         let all_colors = stg.mk_unit_colors();
 

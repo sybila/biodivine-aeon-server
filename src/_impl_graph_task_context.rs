@@ -29,7 +29,7 @@ impl GraphTaskContext {
         self.is_cancelled.load(Ordering::SeqCst)
     }
 
-    /// Set the status of this task to cancelled.
+    /// Set the status of this task to cancel.
     ///
     /// Return true if the computation was set to cancelled by this call, false if it was
     /// cancelled previously.

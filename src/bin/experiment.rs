@@ -25,11 +25,11 @@ fn main() {
     println!("Model loaded...");
     println!("{} variables: {:?}", model.num_vars(), names);
 
-    let graph = SymbolicAsyncGraph::new(model).unwrap();
+    let graph = SymbolicAsyncGraph::new(&model).unwrap();
 
     println!("Asynchronous graph ready...");
     println!(
-        "Admissible parametrisations: {}",
+        "Admissible parametrization set: {}",
         graph.unit_colors().approx_cardinality()
     );
     println!(

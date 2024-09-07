@@ -1,18 +1,19 @@
-use std::time::{Duration, SystemTime};
+use crate::algorithms::attractors::itgr::itgr_process::ItgrProcess;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use crate::algorithms::attractors::itgr::itgr_process::ItgrProcess;
+use std::time::{Duration, SystemTime};
 
-mod reachability_process;
 mod itgr_process;
+mod reachability_process;
 
 pub async fn schedule_reductions(
     stg: SymbolicAsyncGraph,
     fork_limit: usize,
 ) -> GraphColoredVertices {
-    let mut processes = stg.as_network().variables()
+    let mut processes = stg
+        .variables()
         .map(|var| ItgrProcess::new(&stg, var))
         .collect::<Vec<_>>();
 
@@ -24,7 +25,7 @@ pub async fn schedule_reductions(
         // Put processes with the smallest weight at the end of the vector.
         processes.sort_by_cached_key(|p| -(p.weight() as isize));
 
-        while futures.len() < fork_limit && processes.len() > 0 {
+        while futures.len() < fork_limit && !processes.is_empty() {
             let mut process = processes.pop().unwrap();
 
             // Before queueing up the process, check if it has all the latest updates.
@@ -38,9 +39,12 @@ pub async fn schedule_reductions(
                 loop {
                     iter += 1;
                     let (done, to_remove) = process.step().await;
-                    if done || to_remove.is_some() || start.elapsed().unwrap() > Duration::from_secs(30) {
+                    if done
+                        || to_remove.is_some()
+                        || start.elapsed().unwrap() > Duration::from_secs(30)
+                    {
                         println!("Task completed {} iterations.", iter);
-                        return (done, to_remove, process)
+                        return (done, to_remove, process);
                     }
                 }
             }));
@@ -51,7 +55,7 @@ pub async fn schedule_reductions(
 
         if let Some(to_remove) = to_remove {
             universe.0 = universe.0.minus(&to_remove);
-            universe.1 = universe.1 + 1;
+            universe.1 += 1;
         }
 
         if !done {
@@ -60,7 +64,6 @@ pub async fn schedule_reductions(
 
         println!("Remaining: {} + {}", processes.len(), futures.len());
     }
-
 
     universe.0
     /*let mut futures = Vec::new();

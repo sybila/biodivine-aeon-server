@@ -15,7 +15,7 @@ pub struct Count(Map<AsymptoticBehaviour, usize>);
 
 impl Feature for Count {
     fn extend(&self, other: &Self) -> Self {
-        let mut map = self.0.clone();
+        let mut map = self.0;
         for (key, value) in other.0.iter() {
             if let Some(current) = map.get(key) {
                 let new_count = *value + *current;
@@ -103,6 +103,10 @@ impl AsymptoticBehaviourCounter {
         self.counter.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.counter.is_empty()
+    }
+
     /// Extend this classifier using a full behaviour classification map.
     pub fn add_classification(&mut self, classification: &AsymptoticBehaviourMap) {
         for (behaviour, colors) in classification.clone().to_vec() {
@@ -146,7 +150,7 @@ mod tests {
         // works as expected.
 
         let a = bn.as_graph().find_variable("a").unwrap();
-        let stg = SymbolicAsyncGraph::new(bn).unwrap();
+        let stg = SymbolicAsyncGraph::new(&bn).unwrap();
 
         let a_true = stg.fix_network_variable(a, true);
         let a_false = stg.fix_network_variable(a, false);
