@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 pub mod algorithms;
 
 pub mod bdt;
+pub mod control;
 pub mod scc;
 /// Some utility methods which we can later move to std-lib
 pub mod util;

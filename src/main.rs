@@ -9,11 +9,12 @@ use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
 use biodivine_aeon_server::scc::{Behaviour, Class, Classifier};
-use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate};
+use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate, ModelAnnotation};
 use regex::Regex;
 use std::convert::TryFrom;
 
 use biodivine_aeon_server::bdt::{AttributeId, Bdt, BdtNodeId};
+use biodivine_aeon_server::control::ControlComputation;
 use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
 use biodivine_aeon_server::scc::algo_stability_analysis::{
     compute_stability, StabilityVector, VariableStability,
@@ -24,6 +25,8 @@ use biodivine_aeon_server::GraphTaskContext;
 use biodivine_lib_param_bn::biodivine_std::bitvector::{ArrayBitVector, BitVector};
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
+use biodivine_pbn_control::control::PhenotypeOscillationType;
+use biodivine_pbn_control::perturbation::PerturbationGraph;
 use json::JsonValue;
 use lazy_static::lazy_static;
 use rocket::data::ByteUnit;
@@ -41,10 +44,10 @@ use tokio::io::AsyncReadExt;
 /// Computation keeps all information
 struct Computation {
     timestamp: SystemTime,
-    input_model: String,    // .aeon string representation of the model
+    input_model: String,            // .aeon string representation of the model
     task: GraphTaskContext, // A task context which keeps track of progress and cancellation.
-    graph: Option<Arc<SymbolicAsyncGraph>>, // Model graph - used to create witnesses
-    classifier: Option<Arc<Classifier>>, // Classifier used to store the results of the computation
+    graph: Arc<SymbolicAsyncGraph>, // Model graph - used to create witnesses
+    classifier: Arc<Classifier>, // Classifier used to store the results of the computation
     thread: Option<JoinHandle<()>>, // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
     error: Option<String>,          // A string error from the computation
     finished_timestamp: Option<SystemTime>, // A timestamp when the computation was completed (if done)
@@ -69,6 +72,8 @@ impl Computation {
 
 lazy_static! {
     static ref COMPUTATION: Arc<RwLock<Option<Computation>>> = Arc::new(RwLock::new(None));
+    static ref CONTROL_COMPUTATION: Arc<RwLock<Option<ControlComputation>>> =
+        Arc::new(RwLock::new(None));
     static ref CHECK_UPDATE_FUNCTION_LOCK: Arc<RwLock<bool>> = Arc::new(RwLock::new(true));
     static ref TREE: Arc<RwLock<Option<Bdt>>> = Arc::new(RwLock::new(None));
 }
@@ -158,48 +163,42 @@ fn get_stability_data(node_id: String, behaviour_str: String) -> BackendResponse
     // Then find all attractors of the graph
     let cmp = COMPUTATION.read().unwrap();
     if let Some(cmp) = &*cmp {
-        let components = if let Some(classifier) = &cmp.classifier {
-            if let Some(behaviour) = behaviour {
-                classifier.export_components_with_class(behaviour)
-            } else {
-                classifier
-                    .export_components()
-                    .into_iter()
-                    .map(|(c, _)| c)
-                    .collect()
-            }
+        let classifier = &cmp.classifier;
+        let components = if let Some(behaviour) = behaviour {
+            classifier.export_components_with_class(behaviour)
         } else {
-            return BackendResponse::err("No attractor data found.");
-        };
-        if let Some(graph) = &cmp.graph {
-            // Now compute which attractors are actually relevant for the node colors
-            let components = components
+            classifier
+                .export_components()
                 .into_iter()
-                .filter_map(|attractor| {
-                    attractor
-                        .intersect_colors(&node_params)
-                        .take_if(|it| !it.is_empty())
-                })
-                .collect::<Vec<_>>();
+                .map(|(c, _)| c)
+                .collect()
+        };
+        let graph = &cmp.graph;
+        // Now compute which attractors are actually relevant for the node colors
+        let components = components
+            .into_iter()
+            .filter_map(|attractor| {
+                attractor
+                    .intersect_colors(&node_params)
+                    .take_if(|it| !it.is_empty())
+            })
+            .collect::<Vec<_>>();
 
-            if components.is_empty() {
-                return BackendResponse::err("No attractors with this property.");
-            }
-
-            let stability_data = compute_stability(graph, &components);
-            let mut response = JsonValue::new_array();
-            for variable in graph.variables() {
-                response
-                    .push(object! {
-                        "variable": graph.get_variable_name(variable).clone(),
-                        "data": stability_data[&variable].to_json(),
-                    })
-                    .unwrap();
-            }
-            BackendResponse::ok(&response.to_string())
-        } else {
-            BackendResponse::err("No attractor data found.")
+        if components.is_empty() {
+            return BackendResponse::err("No attractors with this property.");
         }
+
+        let stability_data = compute_stability(graph, &components);
+        let mut response = JsonValue::new_array();
+        for variable in graph.variables() {
+            response
+                .push(object! {
+                    "variable": graph.get_variable_name(variable).clone(),
+                    "data": stability_data[&variable].to_json(),
+                })
+                .unwrap();
+        }
+        BackendResponse::ok(&response.to_string())
     } else {
         BackendResponse::err("No attractor data found.")
     }
@@ -407,11 +406,7 @@ fn ping() -> BackendResponse {
             if let Some(error) = &computation.error {
                 response["error"] = error.clone().into();
             }
-            if let Some(classes) = computation
-                .classifier
-                .as_ref()
-                .map(|c| c.try_get_num_classes())
-            {
+            if let Some(classes) = computation.classifier.try_get_num_classes() {
                 response["num_classes"] = classes.into();
             }
         }
@@ -450,28 +445,25 @@ fn get_results() -> BackendResponse {
         let cmp = cmp.read().unwrap();
         if let Some(cmp) = &*cmp {
             is_partial = cmp.thread.is_some();
-            if let Some(classes) = &cmp.classifier {
-                let mut result = None;
-                for _ in 0..5 {
-                    if let Some(data) = classes.try_export_result() {
-                        result = Some(data);
-                        break;
-                    }
-                    // wait a little - maybe the lock will become free
-                    std::thread::sleep(Duration::new(1, 0));
+            let classes = &cmp.classifier;
+            let mut result = None;
+            for _ in 0..5 {
+                if let Some(data) = classes.try_export_result() {
+                    result = Some(data);
+                    break;
                 }
-                if let Some(result) = result {
-                    (
-                        result,
-                        cmp.end_timestamp().map(|t| t - cmp.start_timestamp()),
-                    )
-                } else {
-                    return BackendResponse::err(
-                        "Classification running. Cannot export components right now.",
-                    );
-                }
+                // wait a little - maybe the lock will become free
+                std::thread::sleep(Duration::new(1, 0));
+            }
+            if let Some(result) = result {
+                (
+                    result,
+                    cmp.end_timestamp().map(|t| t - cmp.start_timestamp()),
+                )
             } else {
-                return BackendResponse::err("Results not available yet.");
+                return BackendResponse::err(
+                    "Classification running. Cannot export components right now.",
+                );
             }
         } else {
             return BackendResponse::err("No results available.");
@@ -573,52 +565,45 @@ fn get_stability_witness(
     // Then find all attractors of the graph
     let cmp = COMPUTATION.read().unwrap();
     if let Some(cmp) = &*cmp {
-        let components = if let Some(classifier) = &cmp.classifier {
-            if let Some(behaviour) = behaviour {
-                classifier.export_components_with_class(behaviour)
-            } else {
-                classifier
-                    .export_components()
-                    .into_iter()
-                    .map(|(c, _)| c)
-                    .collect()
-            }
+        let classifier = &cmp.classifier;
+        let components = if let Some(behaviour) = behaviour {
+            classifier.export_components_with_class(behaviour)
         } else {
-            return BackendResponse::err("No attractor data found.");
-        };
-        if let Some(graph) = &cmp.graph {
-            let variable = graph
-                .symbolic_context()
-                .find_network_variable(variable_str.as_str());
-            let variable = if let Some(variable) = variable {
-                variable
-            } else {
-                return BackendResponse::err(
-                    format!("Unknown graph variable `{}`.", variable_str).as_str(),
-                );
-            };
-
-            // Now compute which attractors are actually relevant for the node colors
-            let components = components
+            classifier
+                .export_components()
                 .into_iter()
-                .filter_map(|attractor| {
-                    attractor
-                        .intersect_colors(&node_params)
-                        .take_if(|it| !it.is_empty())
-                })
-                .collect::<Vec<_>>();
-
-            let variable_stability =
-                VariableStability::for_attractors(graph, &components, variable);
-            if let Some(colors) = &variable_stability[vector] {
-                get_witness_network(colors)
-            } else {
-                BackendResponse::err(
-                    format!("No witness available for vector `{}`.", vector_str).as_str(),
-                )
-            }
+                .map(|(c, _)| c)
+                .collect()
+        };
+        let graph = &cmp.graph;
+        let variable = graph
+            .symbolic_context()
+            .find_network_variable(variable_str.as_str());
+        let variable = if let Some(variable) = variable {
+            variable
         } else {
-            BackendResponse::err("No attractor data found.")
+            return BackendResponse::err(
+                format!("Unknown graph variable `{}`.", variable_str).as_str(),
+            );
+        };
+
+        // Now compute which attractors are actually relevant for the node colors
+        let components = components
+            .into_iter()
+            .filter_map(|attractor| {
+                attractor
+                    .intersect_colors(&node_params)
+                    .take_if(|it| !it.is_empty())
+            })
+            .collect::<Vec<_>>();
+
+        let variable_stability = VariableStability::for_attractors(graph, &components, variable);
+        if let Some(colors) = &variable_stability[vector] {
+            get_witness_network(colors)
+        } else {
+            BackendResponse::err(
+                format!("No witness available for vector `{}`.", vector_str).as_str(),
+            )
         }
     } else {
         BackendResponse::err("No attractor data found.")
@@ -642,20 +627,17 @@ fn get_witness(class_str: String) -> BackendResponse {
         let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
         let cmp = cmp.read().unwrap();
         if let Some(cmp) = &*cmp {
-            if let Some(classifier) = &cmp.classifier {
-                if let Some(has_class) = try_get_class_params(classifier, &class) {
-                    if let Some(class) = has_class {
-                        get_witness_network(&class)
-                    } else {
-                        BackendResponse::err("Specified class has no witness.")
-                    }
+            let classifier = &cmp.classifier;
+            if let Some(has_class) = try_get_class_params(classifier, &class) {
+                if let Some(class) = has_class {
+                    get_witness_network(&class)
                 } else {
-                    BackendResponse::err(
-                        "Classification in progress. Cannot extract witness right now.",
-                    )
+                    BackendResponse::err("Specified class has no witness.")
                 }
             } else {
-                BackendResponse::err("No results available.")
+                BackendResponse::err(
+                    "Classification in progress. Cannot extract witness right now.",
+                )
             }
         } else {
             BackendResponse::err("No results available.")
@@ -667,25 +649,22 @@ fn get_witness_network(colors: &GraphColors) -> BackendResponse {
     let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
     let cmp = cmp.read().unwrap();
     if let Some(cmp) = &*cmp {
-        if let Some(graph) = &cmp.graph {
-            let witness = graph.pick_witness(colors);
-            let layout = read_layout(cmp.input_model.as_str());
-            let mut model_string = format!("{}", witness); // convert back to aeon
-            model_string += "\n";
-            for (var, (x, y)) in layout {
-                model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
-            }
-            let (name, description) = read_metadata(cmp.input_model.as_str());
-            if let Some(name) = name {
-                model_string += format!("#name:{}\n", name).as_str();
-            }
-            if let Some(description) = description {
-                model_string += format!("#description:{}\n", description).as_str();
-            }
-            BackendResponse::ok(&object! { "model" => model_string }.to_string())
-        } else {
-            BackendResponse::err("No results available.")
+        let graph = &cmp.graph;
+        let witness = graph.pick_witness(colors);
+        let layout = read_layout(cmp.input_model.as_str());
+        let mut model_string = format!("{}", witness); // convert back to aeon
+        model_string += "\n";
+        for (var, (x, y)) in layout {
+            model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
         }
+        let (name, description) = read_metadata(cmp.input_model.as_str());
+        if let Some(name) = name {
+            model_string += format!("#name:{}\n", name).as_str();
+        }
+        if let Some(description) = description {
+            model_string += format!("#description:{}\n", description).as_str();
+        }
+        BackendResponse::ok(&object! { "model" => model_string }.to_string())
     } else {
         BackendResponse::err("No results available.")
     }
@@ -757,52 +736,45 @@ fn get_stability_attractors(
     // Then find all attractors of the graph
     let cmp = COMPUTATION.read().unwrap();
     if let Some(cmp) = &*cmp {
-        let components = if let Some(classifier) = &cmp.classifier {
-            if let Some(behaviour) = behaviour {
-                classifier.export_components_with_class(behaviour)
-            } else {
-                classifier
-                    .export_components()
-                    .into_iter()
-                    .map(|(c, _)| c)
-                    .collect()
-            }
+        let classifier = &cmp.classifier;
+        let components = if let Some(behaviour) = behaviour {
+            classifier.export_components_with_class(behaviour)
         } else {
-            return BackendResponse::err("No attractor data found.");
-        };
-        if let Some(graph) = &cmp.graph {
-            let variable = graph
-                .symbolic_context()
-                .find_network_variable(variable_str.as_str());
-            let variable = if let Some(variable) = variable {
-                variable
-            } else {
-                return BackendResponse::err(
-                    format!("Unknown graph variable `{}`.", variable_str).as_str(),
-                );
-            };
-
-            // Now compute which attractors are actually relevant for the node colors
-            let components = components
+            classifier
+                .export_components()
                 .into_iter()
-                .filter_map(|attractor| {
-                    attractor
-                        .intersect_colors(&node_params)
-                        .take_if(|it| !it.is_empty())
-                })
-                .collect::<Vec<_>>();
-
-            let variable_stability =
-                VariableStability::for_attractors(graph, &components, variable);
-            if let Some(colors) = &variable_stability[vector] {
-                get_witness_attractors(colors)
-            } else {
-                BackendResponse::err(
-                    format!("No witness available for vector `{}`.", vector_str).as_str(),
-                )
-            }
+                .map(|(c, _)| c)
+                .collect()
+        };
+        let graph = &cmp.graph;
+        let variable = graph
+            .symbolic_context()
+            .find_network_variable(variable_str.as_str());
+        let variable = if let Some(variable) = variable {
+            variable
         } else {
-            BackendResponse::err("No attractor data found.")
+            return BackendResponse::err(
+                format!("Unknown graph variable `{}`.", variable_str).as_str(),
+            );
+        };
+
+        // Now compute which attractors are actually relevant for the node colors
+        let components = components
+            .into_iter()
+            .filter_map(|attractor| {
+                attractor
+                    .intersect_colors(&node_params)
+                    .take_if(|it| !it.is_empty())
+            })
+            .collect::<Vec<_>>();
+
+        let variable_stability = VariableStability::for_attractors(graph, &components, variable);
+        if let Some(colors) = &variable_stability[vector] {
+            get_witness_attractors(colors)
+        } else {
+            BackendResponse::err(
+                format!("No witness available for vector `{}`.", vector_str).as_str(),
+            )
         }
     } else {
         BackendResponse::err("No attractor data found.")
@@ -828,20 +800,17 @@ fn get_attractors(class_str: String) -> BackendResponse {
         let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
         let cmp = cmp.read().unwrap();
         if let Some(cmp) = &*cmp {
-            if let Some(classifier) = &cmp.classifier {
-                if let Some(has_class) = try_get_class_params(classifier, &class) {
-                    if let Some(class) = has_class {
-                        get_witness_attractors(&class)
-                    } else {
-                        BackendResponse::err("Specified class has no witness.")
-                    }
+            let classifier = &cmp.classifier;
+            if let Some(has_class) = try_get_class_params(classifier, &class) {
+                if let Some(class) = has_class {
+                    get_witness_attractors(&class)
                 } else {
-                    BackendResponse::err(
-                        "Classification still in progress. Cannot explore attractors now.",
-                    )
+                    BackendResponse::err("Specified class has no witness.")
                 }
             } else {
-                BackendResponse::err("No results available.")
+                BackendResponse::err(
+                    "Classification still in progress. Cannot explore attractors now.",
+                )
             }
         } else {
             BackendResponse::err("No results available.")
@@ -855,139 +824,276 @@ fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
         let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
         let cmp = cmp.read().unwrap();
         if let Some(cmp) = &*cmp {
-            if let Some(f_classifier) = &cmp.classifier {
-                if let Some(graph) = &cmp.graph {
-                    let f_witness_colour = f_colors.pick_singleton();
-                    let witness_network: BooleanNetwork = graph.pick_witness(&f_witness_colour);
-                    let witness_graph = SymbolicAsyncGraph::new(&witness_network).unwrap();
-                    let witness_str = witness_network.to_string();
-                    let f_witness_attractors = f_classifier.attractors(&f_witness_colour);
-                    let variable_name_strings = witness_network
-                        .variables()
-                        .map(|id| format!("\"{}\"", witness_network.get_variable_name(id)));
+            let f_classifier = &cmp.classifier;
+            let graph = &cmp.graph;
+            let f_witness_colour = f_colors.pick_singleton();
+            let witness_network: BooleanNetwork = graph.pick_witness(&f_witness_colour);
+            let witness_graph = SymbolicAsyncGraph::new(&witness_network).unwrap();
+            let witness_str = witness_network.to_string();
+            let f_witness_attractors = f_classifier.attractors(&f_witness_colour);
+            let variable_name_strings = witness_network
+                .variables()
+                .map(|id| format!("\"{}\"", witness_network.get_variable_name(id)));
 
-                    let mut all_attractors: Vec<(Behaviour, EdgeList, HashSet<usize>)> = Vec::new();
+            let mut all_attractors: Vec<(Behaviour, EdgeList, HashSet<usize>)> = Vec::new();
 
-                    // Note that the choice of graph/witness_graph is not arbitrary.
-                    // The attractor set is from the original graph, but source_set/target_set
-                    // are based on the witness_graph. This means they have different number
-                    // of BDD variables inside!
-                    let mut has_large_attractors = false;
-                    for (f_attractor, behaviour) in f_witness_attractors.iter() {
-                        println!(
-                            "Attractor {:?} state count: {}",
-                            behaviour,
-                            f_attractor.approx_cardinality()
-                        );
-                        let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> = Vec::new();
-                        let mut not_fixed_vars: HashSet<usize> = HashSet::new();
-                        if *behaviour == Behaviour::Stability {
-                            // This is a sink - no edges
-                            assert_eq!(f_attractor.materialize().iter().count(), 1);
-                            let sink: ArrayBitVector =
-                                f_attractor.materialize().iter().next().unwrap();
-                            attractor_graph.push((sink.clone(), sink));
-                            for i in 0..witness_network.num_vars() {
-                                // In sink, we mark everything as "not-fixed" because we want to just display it normally.
-                                not_fixed_vars.insert(i);
-                            }
-                        } else if f_attractor.approx_cardinality() >= 500.0 {
-                            has_large_attractors = true;
-                            // For large attractors, only show fixed values.
-                            let mut state_0 = ArrayBitVector::from(vec![false; graph.num_vars()]);
-                            let mut state_1 = ArrayBitVector::from(vec![true; graph.num_vars()]);
-                            for var in graph.variables() {
-                                let f_var_true = graph.fix_network_variable(var, true).vertices();
-                                let f_var_false = graph.fix_network_variable(var, false).vertices();
-                                let f_always_one = f_attractor.intersect(&f_var_false).is_empty();
-                                let f_always_zero = f_attractor.intersect(&f_var_true).is_empty();
-                                if f_always_one {
-                                    state_0.set(var.into(), true);
-                                } else if f_always_zero {
-                                    state_1.set(var.into(), false);
-                                } else {
-                                    not_fixed_vars.insert(var.into());
-                                }
-                            }
-                            attractor_graph.push((state_0.clone(), state_1.clone()));
-                            attractor_graph.push((state_1, state_0));
+            // Note that the choice of graph/witness_graph is not arbitrary.
+            // The attractor set is from the original graph, but source_set/target_set
+            // are based on the witness_graph. This means they have different number
+            // of BDD variables inside!
+            let mut has_large_attractors = false;
+            for (f_attractor, behaviour) in f_witness_attractors.iter() {
+                println!(
+                    "Attractor {:?} state count: {}",
+                    behaviour,
+                    f_attractor.approx_cardinality()
+                );
+                let mut attractor_graph: Vec<(ArrayBitVector, ArrayBitVector)> = Vec::new();
+                let mut not_fixed_vars: HashSet<usize> = HashSet::new();
+                if *behaviour == Behaviour::Stability {
+                    // This is a sink - no edges
+                    assert_eq!(f_attractor.materialize().iter().count(), 1);
+                    let sink: ArrayBitVector = f_attractor.materialize().iter().next().unwrap();
+                    attractor_graph.push((sink.clone(), sink));
+                    for i in 0..witness_network.num_vars() {
+                        // In sink, we mark everything as "not-fixed" because we want to just display it normally.
+                        not_fixed_vars.insert(i);
+                    }
+                } else if f_attractor.approx_cardinality() >= 500.0 {
+                    has_large_attractors = true;
+                    // For large attractors, only show fixed values.
+                    let mut state_0 = ArrayBitVector::from(vec![false; graph.num_vars()]);
+                    let mut state_1 = ArrayBitVector::from(vec![true; graph.num_vars()]);
+                    for var in graph.variables() {
+                        let f_var_true = graph.fix_network_variable(var, true).vertices();
+                        let f_var_false = graph.fix_network_variable(var, false).vertices();
+                        let f_always_one = f_attractor.intersect(&f_var_false).is_empty();
+                        let f_always_zero = f_attractor.intersect(&f_var_true).is_empty();
+                        if f_always_one {
+                            state_0.set(var.into(), true);
+                        } else if f_always_zero {
+                            state_1.set(var.into(), false);
                         } else {
-                            for source in f_attractor.materialize().iter() {
-                                let source_set = witness_graph.vertex(&source);
-                                let mut target_set = witness_graph.mk_empty_colored_vertices();
-                                for v in witness_graph.variables() {
-                                    let post = witness_graph.var_post(v, &source_set);
-                                    if !post.is_empty() {
-                                        not_fixed_vars.insert(v.into());
-                                        target_set = target_set.union(&post);
-                                    }
-                                }
-
-                                for target in target_set.vertices().materialize().iter() {
-                                    attractor_graph.push((source.clone(), target));
-                                }
-                            }
+                            not_fixed_vars.insert(var.into());
                         }
-
-                        all_attractors.push((*behaviour, attractor_graph, not_fixed_vars));
                     }
-
-                    // now the data is stored in `all_attractors`, just convert it to json:
-                    let mut json = String::new();
-
-                    for (i, (behavior, graph, not_fixed)) in all_attractors.iter().enumerate() {
-                        if i != 0 {
-                            json += ",";
-                        } // json? no trailing commas for you
-                        json += &format!("{{\"class\":\"{:?}\", \"graph\":[", behavior);
-                        let mut edge_count = 0;
-                        for (j, edge) in graph.iter().enumerate() {
-                            fn state_to_binary(
-                                state: &ArrayBitVector,
-                                not_fixed: &HashSet<usize>,
-                            ) -> String {
-                                let mut result = String::new();
-                                for i in 0..state.len() {
-                                    if not_fixed.contains(&i) {
-                                        result.push(if state.get(i) { '1' } else { '0' });
-                                    } else {
-                                        result.push(if state.get(i) { '⊤' } else { '⊥' });
-                                    }
-                                }
-                                result
-                            }
-                            let from: String = state_to_binary(&edge.0, not_fixed);
-                            let to: String = state_to_binary(&edge.1, not_fixed);
-                            if j != 0 {
-                                json += ","
-                            }
-                            json += &format!("[\"{}\", \"{}\"]", from, to);
-                            edge_count += 1;
-                        }
-                        json += &format!("], \"edges\":{}}}", edge_count);
-                    }
-                    json = "{ \"attractors\":[".to_owned() + &json + "], \"variables\":[";
-                    for (i, var) in variable_name_strings.enumerate() {
-                        if i != 0 {
-                            json += ",";
-                        }
-                        json += var.as_str();
-                    }
-                    json += &format!(
-                        "], \"model\":{}, \"has_large_attractors\": {}",
-                        &object! { "model" => witness_str }.to_string(),
-                        has_large_attractors
-                    );
-                    BackendResponse::ok(&(json + "}"))
+                    attractor_graph.push((state_0.clone(), state_1.clone()));
+                    attractor_graph.push((state_1, state_0));
                 } else {
-                    BackendResponse::err("No results available.")
+                    for source in f_attractor.materialize().iter() {
+                        let source_set = witness_graph.vertex(&source);
+                        let mut target_set = witness_graph.mk_empty_colored_vertices();
+                        for v in witness_graph.variables() {
+                            let post = witness_graph.var_post(v, &source_set);
+                            if !post.is_empty() {
+                                not_fixed_vars.insert(v.into());
+                                target_set = target_set.union(&post);
+                            }
+                        }
+
+                        for target in target_set.vertices().materialize().iter() {
+                            attractor_graph.push((source.clone(), target));
+                        }
+                    }
                 }
-            } else {
-                BackendResponse::err("No results available.")
+
+                all_attractors.push((*behaviour, attractor_graph, not_fixed_vars));
             }
+
+            // now the data is stored in `all_attractors`, just convert it to json:
+            let mut json = String::new();
+
+            for (i, (behavior, graph, not_fixed)) in all_attractors.iter().enumerate() {
+                if i != 0 {
+                    json += ",";
+                } // json? no trailing commas for you
+                json += &format!("{{\"class\":\"{:?}\", \"graph\":[", behavior);
+                let mut edge_count = 0;
+                for (j, edge) in graph.iter().enumerate() {
+                    fn state_to_binary(
+                        state: &ArrayBitVector,
+                        not_fixed: &HashSet<usize>,
+                    ) -> String {
+                        let mut result = String::new();
+                        for i in 0..state.len() {
+                            if not_fixed.contains(&i) {
+                                result.push(if state.get(i) { '1' } else { '0' });
+                            } else {
+                                result.push(if state.get(i) { '⊤' } else { '⊥' });
+                            }
+                        }
+                        result
+                    }
+                    let from: String = state_to_binary(&edge.0, not_fixed);
+                    let to: String = state_to_binary(&edge.1, not_fixed);
+                    if j != 0 {
+                        json += ","
+                    }
+                    json += &format!("[\"{}\", \"{}\"]", from, to);
+                    edge_count += 1;
+                }
+                json += &format!("], \"edges\":{}}}", edge_count);
+            }
+            json = "{ \"attractors\":[".to_owned() + &json + "], \"variables\":[";
+            for (i, var) in variable_name_strings.enumerate() {
+                if i != 0 {
+                    json += ",";
+                }
+                json += var.as_str();
+            }
+            json += &format!(
+                "], \"model\":{}, \"has_large_attractors\": {}",
+                &object! { "model" => witness_str }.to_string(),
+                has_large_attractors
+            );
+            BackendResponse::ok(&(json + "}"))
         } else {
             BackendResponse::err("No results available.")
         }
+    }
+}
+
+#[post(
+    "/start_control_computation/<oscillation>/<min_cardinality>/<max_size>/<result_count>",
+    format = "plain",
+    data = "<data>"
+)]
+async fn start_control_computation(
+    data: Data<'_>,
+    oscillation: &str,
+    min_cardinality: usize,
+    max_size: usize,
+    result_count: usize,
+) -> BackendResponse {
+    // These two values are unused for now. We need to add support for this into the Rust dependency.
+    assert!(result_count > 0);
+    assert!(min_cardinality > 0);
+
+    let mut stream = data.open(ByteUnit::Megabyte(10));
+    let mut aeon_string = String::new();
+    if let Err(error) = stream.read_to_string(&mut aeon_string).await {
+        return BackendResponse::err(&format!("Cannot read model: {}", error));
+    }
+    let network = match BooleanNetwork::try_from(aeon_string.as_str()) {
+        Ok(network) => network,
+        Err(error) => {
+            return BackendResponse::err(&format!("Invalid network: {}", error));
+        }
+    };
+
+    // Read the input for the control procedure.
+    let network_annotations = ModelAnnotation::from_model_string(aeon_string.as_str());
+    let mut controllable_vars = Vec::new();
+    let mut phenotype_subspace = Vec::new();
+    for var in network.variables() {
+        let name = network.get_variable_name(var);
+        if let Some(value) = network_annotations.get_value(&["control", name.as_str()]) {
+            let mut vals = value.split(",");
+            let is_controllable = vals.next();
+            let phenotype_value = vals.next();
+            if vals.next().is_some() {
+                return BackendResponse::err(
+                    format!("Invalid control annotation for variable {name}: {value}").as_str(),
+                );
+            }
+            match is_controllable {
+                Some("true") => controllable_vars.push(var),
+                Some("false") => (),
+                _ => {
+                    return BackendResponse::err(
+                        format!("Invalid control annotation for variable {name}: {value}").as_str(),
+                    )
+                }
+            }
+            match phenotype_value {
+                Some("true") => phenotype_subspace.push((var, true)),
+                Some("false") => phenotype_subspace.push((var, false)),
+                Some("null") => (),
+                _ => {
+                    return BackendResponse::err(
+                        format!("Invalid control annotation for variable {name}: {value}").as_str(),
+                    )
+                }
+            }
+        }
+    }
+    let oscillation = match oscillation {
+        "true" => PhenotypeOscillationType::Required,
+        "false" => PhenotypeOscillationType::Forbidden,
+        "null" => PhenotypeOscillationType::Allowed,
+        _ => {
+            return BackendResponse::err(
+                format!("Invalid oscillation value {oscillation}.").as_str(),
+            )
+        }
+    };
+
+    println!("Phenotype subset: {:?}", phenotype_subspace);
+    println!("Controllable variables: {:?}", controllable_vars);
+
+    let cmp = CONTROL_COMPUTATION.clone();
+    // First, check if some other experiment is already running.
+    {
+        let cmp = cmp.read().unwrap();
+        if let Some(computation) = &*cmp {
+            if computation.thread.is_some() {
+                return BackendResponse::err(
+                    "Previous computation is still running. Cancel it before starting a new one.",
+                );
+            }
+        }
+    }
+    {
+        let mut cmp = cmp.write().unwrap();
+        if let Some(computation) = &*cmp {
+            // I know we just checked this, but there could be a race condition...
+            if computation.thread.is_some() {
+                return BackendResponse::err(
+                    "Previous computation is still running. Cancel it before starting a new one.",
+                );
+            }
+        }
+
+        let pstg = PerturbationGraph::with_restricted_variables(&network, controllable_vars);
+
+        let mut computation = ControlComputation {
+            timestamp: SystemTime::now(),
+            finished_timestamp: None,
+            input_model: aeon_string,
+            graph: Arc::new(pstg),
+            thread: None,
+            results: None,
+        };
+
+        let thread_pstg = computation.graph.clone();
+
+        computation.thread = Some(std::thread::spawn(move || {
+            let pstg = thread_pstg;
+
+            let phenotype = pstg.as_original().mk_subspace(&phenotype_subspace);
+            let map = pstg.ceiled_phenotype_permanent_control(
+                phenotype.vertices(),
+                max_size,
+                oscillation,
+                true,
+                true,
+            );
+
+            let cmp = CONTROL_COMPUTATION.clone();
+            let mut cmp = cmp.write().unwrap();
+            if let Some(computation) = cmp.as_mut() {
+                computation.results = Some(map);
+            } else {
+                panic!("Computation disappeared!");
+            }
+        }));
+
+        let start = computation.start_timestamp();
+        // Now write the new computation to the global state...
+        *cmp = Some(computation);
+
+        BackendResponse::ok(&object! { "timestamp" => start as u64 }.to_string())
+        // status of the computation can be obtained via ping...
     }
 }
 
@@ -996,149 +1102,131 @@ fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
 async fn start_computation(data: Data<'_>) -> BackendResponse {
     let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model to 10MB
     let mut aeon_string = String::new();
-    return match stream.read_to_string(&mut aeon_string).await {
-        Ok(_) => {
-            // First, try to parse the network so that the user can at least verify it is correct...
-            match BooleanNetwork::try_from(aeon_string.as_str()) {
-                Ok(network) => {
-                    // Now we can try to start the computation...
-                    let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-                    {
-                        // First, just try to read the computation, if there is something
-                        // there, we just want to quit fast...
-                        let cmp = cmp.read().unwrap();
-                        if let Some(computation) = &*cmp {
-                            if computation.thread.is_some() {
-                                return BackendResponse::err("Previous computation is still running. Cancel it before starting a new one.");
-                            }
-                        }
-                    }
-                    {
-                        // Now actually get the write lock, but check again because race conditions...
-                        let mut cmp = cmp.write().unwrap();
-                        if let Some(computation) = &*cmp {
-                            if computation.thread.is_some() {
-                                return BackendResponse::err("Previous computation is still running. Cancel it before starting a new one.");
-                            }
-                        }
-                        let mut new_cmp = Computation {
-                            timestamp: SystemTime::now(),
-                            task: GraphTaskContext::new(),
-                            input_model: aeon_string.clone(),
-                            graph: None,
-                            classifier: None,
-                            thread: None,
-                            error: None,
-                            finished_timestamp: None,
-                        };
-                        // Prepare thread - not that we have computation locked, so the thread
-                        // will have to wait for us to end before writing down the graph and other
-                        // stuff.
-                        let cmp_thread = std::thread::spawn(move || {
-                            let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-                            match SymbolicAsyncGraph::new(&network) {
-                                Ok(graph) => {
-                                    // Now that we have graph, we can create classifier and progress
-                                    // and save them into the computation.
-                                    let classifier = Arc::new(Classifier::new(&graph));
-                                    let graph = Arc::new(graph);
-                                    {
-                                        if let Some(cmp) = cmp.write().unwrap().as_mut() {
-                                            cmp.graph = Some(graph.clone());
-                                            cmp.classifier = Some(classifier.clone());
-                                        } else {
-                                            panic!("Cannot save graph. No computation found.")
-                                        }
-                                    }
-
-                                    if let Some(cmp) = cmp.read().unwrap().as_ref() {
-                                        // TODO: Note that this holds the read-lock on computation
-                                        // for the  whole time, which is mostly ok because it can be
-                                        // cancelled without write-lock, but we should find a
-                                        // way to avoid this!
-                                        let task_context = &cmp.task;
-                                        task_context.restart(&graph);
-
-                                        // Now we can actually start the computation...
-
-                                        // First, perform ITGR reduction.
-                                        let (universe, active_variables) =
-                                            interleaved_transition_guided_reduction(
-                                                task_context,
-                                                &graph,
-                                                graph.mk_unit_colored_vertices(),
-                                            );
-
-                                        // Then run Xie-Beerel to actually detect the components.
-                                        xie_beerel_attractors(
-                                            task_context,
-                                            &graph,
-                                            &universe,
-                                            &active_variables,
-                                            |component| {
-                                                println!(
-                                                    "Component {}",
-                                                    component.approx_cardinality()
-                                                );
-                                                classifier.add_component(component, &graph);
-                                            },
-                                        );
-                                    }
-
-                                    {
-                                        if let Some(cmp) = cmp.write().unwrap().as_mut() {
-                                            cmp.finished_timestamp = Some(SystemTime::now());
-                                        } else {
-                                            panic!(
-                                                "Cannot finish computation. No computation found."
-                                            )
-                                        }
-                                    }
-
-                                    {
-                                        let result = classifier.export_result();
-                                        let tree = TREE.clone();
-                                        let mut tree = tree.write().unwrap();
-                                        *tree = Some(Bdt::new_from_graph(result, &graph, &network));
-                                        println!("Saved decision tree");
-                                    }
-
-                                    println!("Component search done...");
-                                }
-                                Err(error) => {
-                                    if let Some(cmp) = cmp.write().unwrap().as_mut() {
-                                        cmp.error = Some(error);
-                                    } else {
-                                        panic!(
-                                            "Cannot save computation error. No computation found."
-                                        )
-                                    }
-                                }
-                            }
-                            {
-                                // Remove reference to thread, since we are done now...
-                                if let Some(cmp) = cmp.write().unwrap().as_mut() {
-                                    cmp.thread = None;
-                                } else {
-                                    panic!("Cannot finalize thread. No computation found.");
-                                };
-                            }
-                        });
-                        new_cmp.thread = Some(cmp_thread);
-
-                        let start = new_cmp.start_timestamp();
-                        // Now write the new computation to the global state...
-                        *cmp = Some(new_cmp);
-
-                        BackendResponse::ok(&object! { "timestamp" => start as u64 }.to_string())
-                        // status of the computation can be obtained via ping...
-                    }
-                }
-                Err(error) => BackendResponse::err(&error),
+    if let Err(error) = stream.read_to_string(&mut aeon_string).await {
+        return BackendResponse::err(&format!("Cannot read model: {}", error));
+    }
+    let network = match BooleanNetwork::try_from(aeon_string.as_str()) {
+        Ok(network) => network,
+        Err(error) => {
+            return BackendResponse::err(&format!("Invalid network: {}", error));
+        }
+    };
+    let graph = match SymbolicAsyncGraph::new(&network) {
+        Ok(graph) => graph,
+        Err(error) => {
+            return BackendResponse::err(&format!("Cannot create graph: {}", error));
+        }
+    };
+    // Now we can try to start the computation...
+    let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+    // First, check if some other experiment is already running.
+    {
+        let cmp = cmp.read().unwrap();
+        if let Some(computation) = &*cmp {
+            if computation.thread.is_some() {
+                return BackendResponse::err(
+                    "Previous computation is still running. Cancel it before starting a new one.",
+                );
             }
         }
-        Err(error) => BackendResponse::err(&format!("{}", error)),
-    };
+    }
+    {
+        // Now actually get the write lock, but check again because race conditions...
+        let mut cmp = cmp.write().unwrap();
+        if let Some(computation) = &*cmp {
+            if computation.thread.is_some() {
+                return BackendResponse::err(
+                    "Previous computation is still running. Cancel it before starting a new one.",
+                );
+            }
+        }
+        let mut new_cmp = Computation {
+            timestamp: SystemTime::now(),
+            task: GraphTaskContext::new(),
+            input_model: aeon_string.clone(),
+            classifier: Arc::new(Classifier::new(&graph)),
+            graph: Arc::new(graph),
+            thread: None,
+            error: None,
+            finished_timestamp: None,
+        };
+        // Prepare thread - not that we have computation locked, so the thread
+        // will have to wait for us to end before writing down the graph and other
+        // stuff.
+        let thread_graph = new_cmp.graph.clone();
+        let thread_classifier = new_cmp.classifier.clone();
+        let cmp_thread = std::thread::spawn(move || {
+            let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+
+            let graph = thread_graph;
+            let classifier = thread_classifier;
+
+            if let Some(cmp) = cmp.read().unwrap().as_ref() {
+                // TODO: Note that this holds the read-lock on computation
+                // for the  whole time, which is mostly ok because it can be
+                // cancelled without write-lock, but we should find a
+                // way to avoid this!
+                let task_context = &cmp.task;
+                task_context.restart(&graph);
+
+                // Now we can actually start the computation...
+
+                // First, perform ITGR reduction.
+                let (universe, active_variables) = interleaved_transition_guided_reduction(
+                    task_context,
+                    &graph,
+                    graph.mk_unit_colored_vertices(),
+                );
+
+                // Then run Xie-Beerel to actually detect the components.
+                xie_beerel_attractors(
+                    task_context,
+                    &graph,
+                    &universe,
+                    &active_variables,
+                    |component| {
+                        println!("Component {}", component.approx_cardinality());
+                        classifier.add_component(component, &graph);
+                    },
+                );
+            }
+
+            {
+                if let Some(cmp) = cmp.write().unwrap().as_mut() {
+                    cmp.finished_timestamp = Some(SystemTime::now());
+                } else {
+                    panic!("Cannot finish computation. No computation found.")
+                }
+            }
+
+            {
+                let result = classifier.export_result();
+                let tree = TREE.clone();
+                let mut tree = tree.write().unwrap();
+                *tree = Some(Bdt::new_from_graph(result, &graph, &network));
+                println!("Saved decision tree");
+            }
+
+            println!("Component search done...");
+
+            {
+                // Remove reference to thread, since we are done now...
+                if let Some(cmp) = cmp.write().unwrap().as_mut() {
+                    cmp.thread = None;
+                } else {
+                    panic!("Cannot finalize thread. No computation found.");
+                };
+            }
+        });
+        new_cmp.thread = Some(cmp_thread);
+
+        let start = new_cmp.start_timestamp();
+        // Now write the new computation to the global state...
+        *cmp = Some(new_cmp);
+
+        BackendResponse::ok(&object! { "timestamp" => start as u64 }.to_string())
+        // status of the computation can be obtained via ping...
+    }
 }
 
 #[post("/cancel_computation", format = "plain")]
@@ -1334,6 +1422,7 @@ fn rocket() -> _ {
                 get_tree_precision,
                 auto_expand,
                 all_options,
+                start_control_computation,
             ],
         )
 }
