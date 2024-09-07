@@ -4,7 +4,7 @@ env:
   # A fixed version used for testing, so that the builds don't
   # spontaneously break after a few years.
   # Make sure to update this from time to time.
-  RUST_VERSION: "nightly-2021-09-06"
+  RUST_VERSION: "1.80.1"
 
 ## At the moment, everything is running on nightly. Once Rocket 0.5 is out, stable/beta can be enabled.
 
@@ -16,17 +16,12 @@ jobs:
     env:
       RUSTFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
           toolchain: ${{ env.RUST_VERSION }}
-          override: true
-      - run: rustup component add rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+          components: rustfmt
+      - run: cargo fmt --all -- --check
 
 
   # Run basic code validity check.
@@ -37,15 +32,11 @@ jobs:
     env:
       RUSTFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
           toolchain: ${{ env.RUST_VERSION }}
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
+      - run: cargo check --all-features
 
   # Run all tests
   #test:
@@ -85,24 +76,20 @@ jobs:
   #        command: test
   #        args: --features "shields_up"
 
-  # Run all tests, but with nightly
+  # Run all tests
   test-nightly:
     needs: check
-    name: Test Suite (Nightly)
+    name: Test Suite
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
           toolchain: ${{ env.RUST_VERSION }}
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features "shields_up"
+          components: rustfmt
+      - run: cargo test --all-features
 
   # Check code style
   clippy:
@@ -112,13 +99,9 @@ jobs:
     env:
       RUSTFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
           toolchain: ${{ env.RUST_VERSION }}
-          override: true
-      - run: rustup component add clippy
-      - uses: actions-rs/cargo@v1
-        with:
-          command: clippy
+          components: clippy
+      - run: cargo clippy --all-features
