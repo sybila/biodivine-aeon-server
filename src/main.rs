@@ -112,7 +112,7 @@ fn get_bifurcation_tree() -> BackendResponse {
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
     if let Some(tree) = &*tree {
-        BackendResponse::ok(&tree.to_json().to_string())
+        BackendResponse::ok(tree.to_json().to_string())
     } else {
         BackendResponse::err("No tree present. Run computation first.")
     }
@@ -129,7 +129,7 @@ fn get_attributes(node_id: String) -> BackendResponse {
         } else {
             return BackendResponse::err(&format!("Invalid node id {}.", node_id));
         };
-        BackendResponse::ok(&tree.attribute_gains_json(node).to_string())
+        BackendResponse::ok(tree.attribute_gains_json(node).to_string())
     } else {
         BackendResponse::err("No tree present. Run computation first.")
     }
@@ -202,7 +202,7 @@ fn get_stability_data(node_id: String, behaviour_str: String) -> BackendResponse
                 })
                 .unwrap();
         }
-        BackendResponse::ok(&response.to_string())
+        BackendResponse::ok(response.to_string())
     } else {
         BackendResponse::err("No attractor data found.")
     }
@@ -231,7 +231,7 @@ fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
                 tree.node_to_json(left),
                 tree.node_to_json(right),
             ];
-            BackendResponse::ok(&changes.to_string())
+            BackendResponse::ok(changes.to_string())
         } else {
             BackendResponse::err("Invalid node or attribute id.")
         }
@@ -260,7 +260,7 @@ fn revert_decision(node_id: String) -> BackendResponse {
                 "node": tree.node_to_json(node),
                 "removed": JsonValue::from(removed)
         };
-        BackendResponse::ok(&response.to_string())
+        BackendResponse::ok(response.to_string())
     } else {
         BackendResponse::err("No tree present. Run computation first.")
     };
@@ -288,7 +288,7 @@ fn auto_expand(node_id: String, depth: String) -> BackendResponse {
             return BackendResponse::err(&format!("Invalid node id {}.", node_id));
         };
         let changed = tree.auto_expand(node_id, depth);
-        BackendResponse::ok(&tree.to_json_partial(&changed).to_string())
+        BackendResponse::ok(tree.to_json_partial(&changed).to_string())
     } else {
         BackendResponse::err("Cannot modify decision tree.")
     }
@@ -415,7 +415,7 @@ fn ping() -> BackendResponse {
             }
         }
     }
-    BackendResponse::ok(&response.to_string())
+    BackendResponse::ok(response.to_string())
 }
 
 // Try to obtain current class data or none if classifier is busy
@@ -668,7 +668,7 @@ fn get_witness_network(colors: &GraphColors) -> BackendResponse {
         if let Some(description) = description {
             model_string += format!("#description:{}\n", description).as_str();
         }
-        BackendResponse::ok(&object! { "model" => model_string }.to_string())
+        BackendResponse::ok(object! { "model" => model_string }.to_string())
     } else {
         BackendResponse::err("No results available.")
     }
@@ -1246,7 +1246,7 @@ async fn start_control_computation(
         // Now write the new computation to the global state...
         *cmp = Some(computation);
 
-        BackendResponse::ok(&object! { "timestamp" => start as u64 }.to_string())
+        BackendResponse::ok(object! { "timestamp" => start as u64 }.to_string())
         // status of the computation can be obtained via ping...
     }
 }
@@ -1378,7 +1378,7 @@ async fn start_computation(data: Data<'_>) -> BackendResponse {
         // Now write the new computation to the global state...
         *cmp = Some(new_cmp);
 
-        BackendResponse::ok(&object! { "timestamp" => start as u64 }.to_string())
+        BackendResponse::ok(object! { "timestamp" => start as u64 }.to_string())
         // status of the computation can be obtained via ping...
     }
 }
@@ -1431,7 +1431,7 @@ async fn sbml_to_aeon(data: Data<'_>) -> BackendResponse {
                     for (var, (x, y)) in layout {
                         model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
                     }
-                    BackendResponse::ok(&object! { "model" => model_string }.to_string())
+                    BackendResponse::ok(object! { "model" => model_string }.to_string())
                 }
                 Err(error) => BackendResponse::err(&error),
             }
@@ -1485,7 +1485,7 @@ async fn aeon_to_sbml(data: Data<'_>) -> BackendResponse {
             Ok(network) => {
                 let layout = read_layout(&aeon_string);
                 let sbml_string = network.to_sbml(Some(&layout));
-                BackendResponse::ok(&object! { "model" => sbml_string }.to_string())
+                BackendResponse::ok(object! { "model" => sbml_string }.to_string())
             }
             Err(error) => BackendResponse::err(&error),
         },
@@ -1509,7 +1509,7 @@ async fn aeon_to_sbml_instantiated(data: Data<'_>) -> BackendResponse {
                     let witness = graph.pick_witness(graph.unit_colors());
                     let layout = read_layout(&aeon_string);
                     BackendResponse::ok(
-                        &object! { "model" => witness.to_sbml(Some(&layout)) }.to_string(),
+                        object! { "model" => witness.to_sbml(Some(&layout)) }.to_string(),
                     )
                 }
                 Err(error) => BackendResponse::err(&error),

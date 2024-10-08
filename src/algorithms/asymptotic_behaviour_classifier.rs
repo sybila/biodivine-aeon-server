@@ -172,7 +172,7 @@ mod tests {
         for (a1, b1) in &classes {
             for (a2, b2) in &classes {
                 if a1 != a2 {
-                    assert!(b1.intersect(&b2).is_empty());
+                    assert!(b1.intersect(b2).is_empty());
                 }
             }
             all = all.union(b1);
