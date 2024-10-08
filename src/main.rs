@@ -1051,11 +1051,13 @@ async fn get_control_results() -> BackendResponse {
 
                 let robustness: BigInt = p_card / u_card;
                 let robustness: f64 = robustness.to_f64().unwrap_or(f64::NAN) / 1_000_000.0;
-                response.push(object! {
-                    "perturbation": key.clone(),
-                    "interpretation_count": value.exact_cardinality().to_u64().unwrap_or(u64::MAX),
-                    "robustness": robustness,
-                }).unwrap();
+                response
+                    .push(object! {
+                        "perturbation": key.clone(),
+                        "color_count": value.exact_cardinality().to_u64().unwrap_or(u64::MAX),
+                        "robustness": robustness,
+                    })
+                    .unwrap();
             }
             BackendResponse::ok(response.to_string())
         } else {
