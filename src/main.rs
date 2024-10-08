@@ -29,6 +29,8 @@ use biodivine_pbn_control::control::PhenotypeOscillationType;
 use biodivine_pbn_control::perturbation::PerturbationGraph;
 use json::JsonValue;
 use lazy_static::lazy_static;
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 use rocket::data::ByteUnit;
 use rocket::{Config, Data};
 use rocket_cors::{AllowedOrigins, CorsOptions};
@@ -36,6 +38,8 @@ use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -953,31 +957,164 @@ fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
     }
 }
 
+#[get("/get_control_computation_status")]
+async fn get_control_computation_status() -> BackendResponse {
+    let cmp = CONTROL_COMPUTATION.clone();
+    let cmp = cmp.read().unwrap();
+    if let Some(computation) = &*cmp {
+        let elapsed = computation
+            .finished_timestamp
+            .unwrap() // Should be present if results are computed.
+            .duration_since(computation.timestamp)
+            .unwrap();
+        let elapsed = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+        let unix_timestamp = computation
+            .timestamp
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let stats = object! {
+            "computationStarted" => u64::try_from(unix_timestamp).unwrap_or(u64::MAX),
+            "computationCancelled" => computation.is_cancelled.load(Relaxed),
+            "isRunning" => computation.thread.is_some(),
+            "elapsed" => elapsed,
+            "version" => VERSION.to_string(),
+        };
+        BackendResponse::ok(stats.to_string())
+    } else {
+        BackendResponse::err("No computation found.")
+    }
+}
+
+#[get("/get_control_stats")]
+async fn get_control_stats() -> BackendResponse {
+    let cmp = CONTROL_COMPUTATION.clone();
+    let cmp = cmp.read().unwrap();
+    if let Some(computation) = &*cmp {
+        let pstg = computation.graph.as_ref();
+        let unit = pstg.mk_unit_colors();
+        if let Some(results) = computation.results.as_ref() {
+            let mut minimal_perturbation: Option<usize> = None;
+            let mut max_robustness: Option<f64> = None;
+            for (k, value) in results {
+                if k.len() < minimal_perturbation.unwrap_or(usize::MAX) {
+                    minimal_perturbation = Some(k.len());
+                }
+
+                let p_card = value.exact_cardinality() * 1_000_000;
+                let u_card = unit.exact_cardinality();
+
+                let robustness: BigInt = p_card / u_card;
+                let robustness: f64 = robustness.to_f64().unwrap_or(f64::NAN) / 1_000_000.0;
+
+                if robustness > max_robustness.unwrap_or(0.0) {
+                    max_robustness = Some(robustness);
+                }
+            }
+            let elapsed = computation
+                .finished_timestamp
+                .unwrap() // Should be present if results are computed.
+                .duration_since(computation.timestamp)
+                .unwrap();
+            let elapsed = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+            let stats = object! {
+                "allColorsCount": unit.exact_cardinality().to_usize().unwrap_or(usize::MAX),
+                "perturbationCount": results.len(),
+                "minimalPerturbationSize": minimal_perturbation,
+                "maximalPerturbationRobustness": max_robustness,
+                "elapsed": elapsed
+            };
+            BackendResponse::ok(stats.to_string())
+        } else {
+            BackendResponse::err("No results found.")
+        }
+    } else {
+        BackendResponse::err("No computation found.")
+    }
+}
+
+#[get("/get_control_results")]
+async fn get_control_results() -> BackendResponse {
+    let cmp = CONTROL_COMPUTATION.clone();
+    let cmp = cmp.read().unwrap();
+    if let Some(computation) = &*cmp {
+        let pstg = computation.graph.as_ref();
+        let unit = pstg.mk_unit_colors();
+        if let Some(results) = computation.results.as_ref() {
+            let mut response = JsonValue::new_array();
+            for (key, value) in results {
+                // The following method always give an approximation up to 6 decimal places, even if the
+                // cardinality would overflow to f64::infinity.
+
+                let p_card = value.exact_cardinality() * 1_000_000;
+                let u_card = unit.exact_cardinality();
+
+                let robustness: BigInt = p_card / u_card;
+                let robustness: f64 = robustness.to_f64().unwrap_or(f64::NAN) / 1_000_000.0;
+                response.push(object! {
+                    "perturbation": key.clone(),
+                    "interpretation_count": value.exact_cardinality().to_u64().unwrap_or(u64::MAX),
+                    "robustness": robustness,
+                }).unwrap();
+            }
+            BackendResponse::ok(response.to_string())
+        } else {
+            BackendResponse::err("No results found.")
+        }
+    } else {
+        BackendResponse::err("No computation found.")
+    }
+}
+
+#[post("/cancel_control_computation")]
+async fn cancel_control_computation() -> BackendResponse {
+    let cmp = CONTROL_COMPUTATION.clone();
+    let cmp = cmp.read().unwrap();
+    if let Some(computation) = &*cmp {
+        computation
+            .is_cancelled
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        BackendResponse::ok("Cancelled")
+    } else {
+        BackendResponse::err("No computation is running.")
+    }
+}
+
 #[post(
-    "/start_control_computation/<oscillation>/<min_cardinality>/<max_size>/<result_count>",
+    "/start_control_computation/<oscillation>/<min_robustness>/<max_size>/<result_count>",
     format = "plain",
     data = "<data>"
 )]
 async fn start_control_computation(
     data: Data<'_>,
+    // Type of oscillation that is admissible for the phenotype (allowed, required, forbidden).
     oscillation: &str,
-    min_cardinality: usize,
+    // Only compute perturbations with robustness greater than this.
+    min_robustness: f64,
+    // Only compute perturbations with at most this many perturbed variables.
     max_size: usize,
+    // Only compute this many results.
     result_count: usize,
 ) -> BackendResponse {
+    // This method:
+    // 1. Reads a BN from the data stream.
+    // 2. Reads algorithm configuration from arguments.
+    // 3. Reads perturbable variables from model annotations.
+    // 4. Starts a new computation thread assuming a computation isn't running yet.
+
     // These two values are unused for now. We need to add support for this into the Rust dependency.
     assert!(result_count > 0);
-    assert!(min_cardinality > 0);
+    assert!(min_robustness >= 0.0);
 
     let mut stream = data.open(ByteUnit::Megabyte(10));
     let mut aeon_string = String::new();
     if let Err(error) = stream.read_to_string(&mut aeon_string).await {
-        return BackendResponse::err(&format!("Cannot read model: {}", error));
+        return BackendResponse::err(format!("Cannot read model: {}", error));
     }
     let network = match BooleanNetwork::try_from(aeon_string.as_str()) {
         Ok(network) => network,
         Err(error) => {
-            return BackendResponse::err(&format!("Invalid network: {}", error));
+            return BackendResponse::err(format!("Invalid network: {}", error));
         }
     };
 
@@ -992,17 +1129,17 @@ async fn start_control_computation(
             let is_controllable = vals.next();
             let phenotype_value = vals.next();
             if vals.next().is_some() {
-                return BackendResponse::err(
-                    format!("Invalid control annotation for variable {name}: {value}").as_str(),
-                );
+                return BackendResponse::err(format!(
+                    "Invalid control annotation for variable {name}: {value}"
+                ));
             }
             match is_controllable {
                 Some("true") => controllable_vars.push(var),
                 Some("false") => (),
                 _ => {
-                    return BackendResponse::err(
-                        format!("Invalid control annotation for variable {name}: {value}").as_str(),
-                    )
+                    return BackendResponse::err(format!(
+                        "Invalid control annotation for variable {name}: {value}"
+                    ))
                 }
             }
             match phenotype_value {
@@ -1010,22 +1147,18 @@ async fn start_control_computation(
                 Some("false") => phenotype_subspace.push((var, false)),
                 Some("null") => (),
                 _ => {
-                    return BackendResponse::err(
-                        format!("Invalid control annotation for variable {name}: {value}").as_str(),
-                    )
+                    return BackendResponse::err(format!(
+                        "Invalid control annotation for variable {name}: {value}"
+                    ))
                 }
             }
         }
     }
     let oscillation = match oscillation {
-        "true" => PhenotypeOscillationType::Required,
-        "false" => PhenotypeOscillationType::Forbidden,
-        "null" => PhenotypeOscillationType::Allowed,
-        _ => {
-            return BackendResponse::err(
-                format!("Invalid oscillation value {oscillation}.").as_str(),
-            )
-        }
+        "required" => PhenotypeOscillationType::Required,
+        "forbidden" => PhenotypeOscillationType::Forbidden,
+        "allowed" => PhenotypeOscillationType::Allowed,
+        _ => return BackendResponse::err(format!("Invalid oscillation value {oscillation}.")),
     };
 
     println!("Phenotype subset: {:?}", phenotype_subspace);
@@ -1037,9 +1170,7 @@ async fn start_control_computation(
         let cmp = cmp.read().unwrap();
         if let Some(computation) = &*cmp {
             if computation.thread.is_some() {
-                return BackendResponse::err(
-                    "Previous computation is still running. Cancel it before starting a new one.",
-                );
+                return BackendResponse::err("Previous computation is still running.");
             }
         }
     }
@@ -1048,14 +1179,13 @@ async fn start_control_computation(
         if let Some(computation) = &*cmp {
             // I know we just checked this, but there could be a race condition...
             if computation.thread.is_some() {
-                return BackendResponse::err(
-                    "Previous computation is still running. Cancel it before starting a new one.",
-                );
+                return BackendResponse::err("Previous computation is still running.");
             }
         }
 
         let pstg = PerturbationGraph::with_restricted_variables(&network, controllable_vars);
 
+        let cancel_flag = Arc::new(AtomicBool::new(false));
         let mut computation = ControlComputation {
             timestamp: SystemTime::now(),
             finished_timestamp: None,
@@ -1063,26 +1193,50 @@ async fn start_control_computation(
             graph: Arc::new(pstg),
             thread: None,
             results: None,
+            is_cancelled: cancel_flag.clone(),
         };
 
         let thread_pstg = computation.graph.clone();
 
         computation.thread = Some(std::thread::spawn(move || {
+            let cancel_flag = cancel_flag.clone();
             let pstg = thread_pstg;
 
-            let phenotype = pstg.as_original().mk_subspace(&phenotype_subspace);
-            let map = pstg.ceiled_phenotype_permanent_control(
-                phenotype.vertices(),
-                max_size,
+            let phenotype = pstg
+                .as_original()
+                .mk_subspace(&phenotype_subspace)
+                .vertices();
+
+            let mut admissible_perturbations = pstg.mk_empty_colors();
+            for _i in 0..=max_size {
+                let size_perturbations = pstg.create_perturbation_colors(max_size, true);
+                admissible_perturbations = admissible_perturbations.union(&size_perturbations);
+            }
+
+            let results = pstg.phenotype_permanent_control_iterated(
+                &phenotype,
                 oscillation,
+                Some(&admissible_perturbations),
+                Some(min_robustness),
+                Some(result_count),
                 true,
-                true,
+                |partial| {
+                    if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        Err(partial.clone())
+                    } else {
+                        Ok(())
+                    }
+                },
             );
+
+            let results = results.unwrap_or_else(|partial| partial);
 
             let cmp = CONTROL_COMPUTATION.clone();
             let mut cmp = cmp.write().unwrap();
             if let Some(computation) = cmp.as_mut() {
-                computation.results = Some(map);
+                computation.results = Some(results);
+                computation.finished_timestamp = Some(SystemTime::now());
+                computation.thread = None;
             } else {
                 panic!("Computation disappeared!");
             }
@@ -1423,6 +1577,10 @@ fn rocket() -> _ {
                 auto_expand,
                 all_options,
                 start_control_computation,
+                cancel_control_computation,
+                get_control_computation_status,
+                get_control_results,
+                get_control_stats,
             ],
         )
 }
@@ -1432,17 +1590,17 @@ struct BackendResponse {
 }
 
 impl BackendResponse {
-    fn ok(message: &str) -> Self {
+    fn ok<S: AsRef<str>>(message: S) -> Self {
         BackendResponse {
-            message: format!("{{ \"status\": true, \"result\": {} }}", message),
+            message: format!("{{ \"status\": true, \"result\": {} }}", message.as_ref()),
         }
     }
 
-    fn err(message: &str) -> Self {
+    fn err<S: AsRef<str>>(message: S) -> Self {
         BackendResponse {
             message: object! {
             "status" => false,
-            "message" => message.replace("\n", "<br>"),
+            "message" => message.as_ref().replace("\n", "<br>"),
             }
             .to_string(),
         }
