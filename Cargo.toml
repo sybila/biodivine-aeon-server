@@ -27,7 +27,7 @@ futures = "0.3.30"
 tokio = "1.40.0"
 fixed-map = "0.9.5"
 lazy_static = "1.5.0"
-biodivine-pbn-control = { git = "https://github.com/sybila/biodivine-pbn-control", rev = "edc5d0b155f2a5df599b3d6364ae5003f9cc1e25" }
+biodivine-pbn-control = { git = "https://github.com/sybila/biodivine-pbn-control", rev = "bae48c10e62c217c047bd7b92f4a9861c51560c3" }
 serde = { version = "1.0.210", features = ["derive"] }
 num-bigint = "0.4.6"
 num-traits = "0.2.19"
