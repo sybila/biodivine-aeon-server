@@ -1210,8 +1210,8 @@ async fn start_control_computation(
                 .vertices();
 
             let mut admissible_perturbations = pstg.mk_empty_colors();
-            for _i in 0..=max_size {
-                let size_perturbations = pstg.create_perturbation_colors(max_size, true);
+            for i in 0..=max_size {
+                let size_perturbations = pstg.create_perturbation_colors(i, true);
                 admissible_perturbations = admissible_perturbations.union(&size_perturbations);
             }
 
