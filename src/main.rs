@@ -127,7 +127,7 @@ fn get_attributes(node_id: String) -> BackendResponse {
         let node = if let Some(node) = node {
             node
         } else {
-            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+            return BackendResponse::err(format!("Invalid node id {}.", node_id));
         };
         BackendResponse::ok(tree.attribute_gains_json(node).to_string())
     } else {
@@ -157,7 +157,7 @@ fn get_stability_data(node_id: String, behaviour_str: String) -> BackendResponse
             let node = if let Some(n) = node {
                 n
             } else {
-                return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+                return BackendResponse::err(format!("Invalid node id {}.", node_id));
             };
             tree.all_node_params(node)
         } else {
@@ -217,13 +217,13 @@ fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
         let node = if let Some(node) = node {
             node
         } else {
-            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+            return BackendResponse::err(format!("Invalid node id {}.", node_id));
         };
         let attribute = AttributeId::try_from_str(&attribute_id, tree);
         let attribute = if let Some(val) = attribute {
             val
         } else {
-            return BackendResponse::err(&format!("Invalid attribute id {}.", attribute_id));
+            return BackendResponse::err(format!("Invalid attribute id {}.", attribute_id));
         };
         if let Ok((left, right)) = tree.make_decision(node, attribute) {
             let changes = array![
@@ -249,7 +249,7 @@ fn revert_decision(node_id: String) -> BackendResponse {
         let node = if let Some(node) = node {
             node
         } else {
-            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+            return BackendResponse::err(format!("Invalid node id {}.", node_id));
         };
         let removed = tree.revert_decision(node);
         let removed = removed
@@ -273,7 +273,7 @@ fn auto_expand(node_id: String, depth: String) -> BackendResponse {
         if let Ok(depth) = parsed {
             depth
         } else {
-            return BackendResponse::err(&format!("Invalid tree depth: {}", depth));
+            return BackendResponse::err(format!("Invalid tree depth: {}", depth));
         }
     };
     if depth > 10 {
@@ -285,7 +285,7 @@ fn auto_expand(node_id: String, depth: String) -> BackendResponse {
         let node_id: BdtNodeId = if let Some(node_id) = BdtNodeId::try_from_str(&node_id, tree) {
             node_id
         } else {
-            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+            return BackendResponse::err(format!("Invalid node id {}.", node_id));
         };
         let changed = tree.auto_expand(node_id, depth);
         BackendResponse::ok(tree.to_json_partial(&changed).to_string())
@@ -315,7 +315,7 @@ fn get_tree_precision() -> BackendResponse {
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
     if let Some(tree) = tree.as_ref() {
-        BackendResponse::ok(&format!("{}", tree.get_precision()))
+        BackendResponse::ok(format!("{}", tree.get_precision()))
     } else {
         BackendResponse::err("Cannot modify decision tree.")
     }
@@ -375,12 +375,12 @@ async fn check_update_function(data: Data<'_>) -> BackendResponse {
             *lock = !(*lock);
             match graph {
                 Ok(cardinality) => {
-                    BackendResponse::ok(&format!("{{\"cardinality\":\"{}\"}}", cardinality))
+                    BackendResponse::ok(format!("{{\"cardinality\":\"{}\"}}", cardinality))
                 }
                 Err(error) => BackendResponse::err(&error),
             }
         }
-        Err(error) => BackendResponse::err(&format!("{}", error)),
+        Err(error) => BackendResponse::err(format!("{}", error)),
     }
 }
 
@@ -512,7 +512,7 @@ fn get_tree_witness(node_id: String) -> BackendResponse {
         let node = if let Some(node) = node {
             node
         } else {
-            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+            return BackendResponse::err(format!("Invalid node id {}.", node_id));
         };
 
         if let Some(params) = tree.params_for_leaf(node) {
@@ -559,7 +559,7 @@ fn get_stability_witness(
             let node = if let Some(n) = node {
                 n
             } else {
-                return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+                return BackendResponse::err(format!("Invalid node id {}.", node_id));
             };
             tree.all_node_params(node)
         } else {
@@ -683,7 +683,7 @@ fn get_tree_attractors(node_id: String) -> BackendResponse {
         let node = if let Some(value) = node {
             value
         } else {
-            return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+            return BackendResponse::err(format!("Invalid node id {}.", node_id));
         };
 
         if let Some(params) = tree.params_for_leaf(node) {
@@ -730,7 +730,7 @@ fn get_stability_attractors(
             let node = if let Some(n) = node {
                 n
             } else {
-                return BackendResponse::err(&format!("Invalid node id {}.", node_id));
+                return BackendResponse::err(format!("Invalid node id {}.", node_id));
             };
             tree.all_node_params(node)
         } else {
@@ -964,7 +964,7 @@ async fn get_control_computation_status() -> BackendResponse {
     if let Some(computation) = &*cmp {
         let elapsed = computation
             .finished_timestamp
-            .unwrap_or_else(|| SystemTime::now())
+            .unwrap_or_else(SystemTime::now)
             .duration_since(computation.timestamp)
             .unwrap();
         let elapsed = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
@@ -1259,18 +1259,18 @@ async fn start_computation(data: Data<'_>) -> BackendResponse {
     let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model to 10MB
     let mut aeon_string = String::new();
     if let Err(error) = stream.read_to_string(&mut aeon_string).await {
-        return BackendResponse::err(&format!("Cannot read model: {}", error));
+        return BackendResponse::err(format!("Cannot read model: {}", error));
     }
     let network = match BooleanNetwork::try_from(aeon_string.as_str()) {
         Ok(network) => network,
         Err(error) => {
-            return BackendResponse::err(&format!("Invalid network: {}", error));
+            return BackendResponse::err(format!("Invalid network: {}", error));
         }
     };
     let graph = match SymbolicAsyncGraph::new(&network) {
         Ok(graph) => graph,
         Err(error) => {
-            return BackendResponse::err(&format!("Cannot create graph: {}", error));
+            return BackendResponse::err(format!("Cannot create graph: {}", error));
         }
     };
     // Now we can try to start the computation...
@@ -1438,7 +1438,7 @@ async fn sbml_to_aeon(data: Data<'_>) -> BackendResponse {
                 Err(error) => BackendResponse::err(&error),
             }
         }
-        Err(error) => BackendResponse::err(&format!("{}", error)),
+        Err(error) => BackendResponse::err(format!("{}", error)),
     }
 }
 
@@ -1491,7 +1491,7 @@ async fn aeon_to_sbml(data: Data<'_>) -> BackendResponse {
             }
             Err(error) => BackendResponse::err(&error),
         },
-        Err(error) => BackendResponse::err(&format!("{}", error)),
+        Err(error) => BackendResponse::err(format!("{}", error)),
     }
 }
 
@@ -1517,7 +1517,7 @@ async fn aeon_to_sbml_instantiated(data: Data<'_>) -> BackendResponse {
                 Err(error) => BackendResponse::err(&error),
             }
         }
-        Err(error) => BackendResponse::err(&format!("{}", error)),
+        Err(error) => BackendResponse::err(format!("{}", error)),
     }
 }
 

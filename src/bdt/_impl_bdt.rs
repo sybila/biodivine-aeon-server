@@ -38,11 +38,7 @@ impl Bdt {
     }
 
     pub fn get_precision(&self) -> u32 {
-        if let Some(precision) = self.precision {
-            precision
-        } else {
-            10000
-        }
+        self.precision.unwrap_or(10000)
     }
 
     /// Node ID of the tree root.

@@ -22,7 +22,7 @@ fn main() {
         let model = erase_regulation_bounds(&sbml_model);
 
         let bench_name = bench_dir.file_name().to_str().unwrap().to_string();
-        let aeon_file = aeon_benchmarks.join(&format!("{}_{}.aeon", i, bench_name));
+        let aeon_file = aeon_benchmarks.join(format!("{}_{}.aeon", i, bench_name));
         std::fs::write(aeon_file, model.to_string()).unwrap();
     }
 }
