@@ -964,7 +964,7 @@ async fn get_control_computation_status() -> BackendResponse {
     if let Some(computation) = &*cmp {
         let elapsed = computation
             .finished_timestamp
-            .unwrap() // Should be present if results are computed.
+            .unwrap_or_else(|| SystemTime::now())
             .duration_since(computation.timestamp)
             .unwrap();
         let elapsed = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
