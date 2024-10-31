@@ -992,7 +992,7 @@ async fn get_control_stats() -> BackendResponse {
     let cmp = cmp.read().unwrap();
     if let Some(computation) = &*cmp {
         let pstg = computation.graph.as_ref();
-        let unit = pstg.mk_unit_colors();
+        let unit = pstg.as_non_perturbable().mk_unit_colors();
         if let Some(results) = computation.results.as_ref() {
             let mut minimal_perturbation: Option<usize> = None;
             let mut max_robustness: Option<f64> = None;
@@ -1039,7 +1039,7 @@ async fn get_control_results() -> BackendResponse {
     let cmp = cmp.read().unwrap();
     if let Some(computation) = &*cmp {
         let pstg = computation.graph.as_ref();
-        let unit = pstg.mk_unit_colors();
+        let unit = pstg.as_non_perturbable().mk_unit_colors();
         if let Some(results) = computation.results.as_ref() {
             let mut response = JsonValue::new_array();
             for (key, value) in results {
