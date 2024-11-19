@@ -1,0 +1,36 @@
+name: build
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build-classifier:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-20.04
+            artifact_name: bn-classifier
+            asset_name: aeon-compute-engine-linux
+          - platform: windows-latest
+            artifact_name: bn-classifier.exe
+            asset_name: aeon-compute-engine-windows
+          - platform: macos-latest
+            artifact_name: bn-classifier
+            asset_name: aeon-compute-engine-macos
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: compile binary
+        run: cargo build --release
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/release/${{ matrix.artifact_name }}
+          asset_name: ${{ matrix.asset_name }}
+          tag: ${{ github.ref }}

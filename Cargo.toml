@@ -16,19 +16,19 @@ rustdoc-args = ["--html-in-header", "docs-head.html"]
 #lto = true
 
 [dependencies]
-biodivine-lib-bdd = "0.5.19"
-biodivine-lib-param-bn = "0.5.11"
+biodivine-lib-bdd = "0.5.22"
+biodivine-lib-param-bn = "0.5.13"
 rocket = "0.5.1"
 rocket_cors = "0.6.0"
 json = "0.12.4"
-regex = "1.10.6"
+regex = "1.11.1"
 rand = "0.8.5"
-futures = "0.3.30"
-tokio = "1.40.0"
+futures = "0.3.31"
+tokio = "1.41.1"
 fixed-map = "0.9.5"
 lazy_static = "1.5.0"
 biodivine-pbn-control = { git = "https://github.com/sybila/biodivine-pbn-control", rev = "bae48c10e62c217c047bd7b92f4a9861c51560c3" }
-serde = { version = "1.0.210", features = ["derive"] }
+serde = { version = "1.0.215", features = ["derive"] }
 num-bigint = "0.4.6"
 num-traits = "0.2.19"
 
