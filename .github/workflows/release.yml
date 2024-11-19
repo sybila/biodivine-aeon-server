@@ -1,23 +1,23 @@
-name: build
+name: release
 on:
   push:
     tags:
       - '*'
 
 jobs:
-  build-classifier:
+  build-server:
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: ubuntu-20.04
-            artifact_name: bn-classifier
+            artifact_name: biodivine-aeon-server
             asset_name: aeon-compute-engine-linux
           - platform: windows-latest
-            artifact_name: bn-classifier.exe
+            artifact_name: biodivine-aeon-server.exe
             asset_name: aeon-compute-engine-windows
           - platform: macos-latest
-            artifact_name: bn-classifier
+            artifact_name: biodivine-aeon-server
             asset_name: aeon-compute-engine-macos
 
     runs-on: ${{ matrix.platform }}
