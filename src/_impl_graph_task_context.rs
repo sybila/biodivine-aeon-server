@@ -1,5 +1,5 @@
-use crate::scc::ProgressTracker;
 use crate::GraphTaskContext;
+use crate::scc::ProgressTracker;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, SymbolicAsyncGraph};
 use cancel_this::CancellationTrigger;
 

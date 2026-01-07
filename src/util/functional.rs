@@ -41,11 +41,7 @@ pub trait Functional: Sized {
     where
         F: FnOnce(&Self) -> bool,
     {
-        if test(&self) {
-            Some(self)
-        } else {
-            None
-        }
+        if test(&self) { Some(self) } else { None }
     }
 }
 

@@ -1,8 +1,8 @@
 use crate::scc::Class;
-use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use biodivine_lib_param_bn::VariableId;
-use std::collections::hash_map::Keys;
+use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use std::collections::HashMap;
+use std::collections::hash_map::Keys;
 use std::iter::Map;
 use std::ops::Range;
 

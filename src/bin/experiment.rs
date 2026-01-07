@@ -1,10 +1,10 @@
-use biodivine_aeon_server::scc::Classifier;
 use biodivine_aeon_server::GraphTaskContext;
+use biodivine_aeon_server::scc::Classifier;
 use biodivine_algo_bdd_scc::attractor::{
     AttractorConfig, InterleavedTransitionGuidedReduction, ItgrState, XieBeerelAttractors,
 };
-use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
+use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use computation_process::{Computable, Stateful};
 use std::collections::BTreeSet;
 use std::convert::TryFrom;

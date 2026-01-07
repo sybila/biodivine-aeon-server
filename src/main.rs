@@ -13,13 +13,13 @@ use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate, ModelAnnotation};
 use regex::Regex;
 use std::convert::TryFrom;
 
+use biodivine_aeon_server::GraphTaskContext;
 use biodivine_aeon_server::bdt::{AttributeId, Bdt, BdtNodeId};
 use biodivine_aeon_server::control::ControlComputation;
 use biodivine_aeon_server::scc::algo_stability_analysis::{
-    compute_stability, StabilityVector, VariableStability,
+    StabilityVector, VariableStability, compute_stability,
 };
 use biodivine_aeon_server::util::functional::Functional;
-use biodivine_aeon_server::GraphTaskContext;
 use biodivine_algo_bdd_scc::attractor::{
     AttractorConfig, InterleavedTransitionGuidedReduction, ItgrState, XieBeerelAttractors,
 };
@@ -35,6 +35,7 @@ use lazy_static::lazy_static;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 use rocket::data::ByteUnit;
+use rocket::log::private::LevelFilter;
 use rocket::{Config, Data};
 use rocket_cors::{AllowedOrigins, CorsOptions};
 use std::cmp::max;
@@ -1140,7 +1141,7 @@ async fn start_control_computation(
                 _ => {
                     return BackendResponse::err(format!(
                         "Invalid control annotation for variable {name}: {value}"
-                    ))
+                    ));
                 }
             }
             match phenotype_value {
@@ -1150,7 +1151,7 @@ async fn start_control_computation(
                 _ => {
                     return BackendResponse::err(format!(
                         "Invalid control annotation for variable {name}: {value}"
-                    ))
+                    ));
                 }
             }
         }
@@ -1558,7 +1559,7 @@ fn all_options(_path: std::path::PathBuf) -> &'static str {
 fn rocket() -> _ {
     // Log all info events.
     env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(LevelFilter::Info)
         .init();
 
     let address = std::env::var("AEON_ADDR").unwrap_or_else(|_| "127.0.0.1".to_string());

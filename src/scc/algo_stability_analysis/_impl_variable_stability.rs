@@ -2,11 +2,11 @@ use crate::scc::algo_stability_analysis::{
     AttractorStabilityData, Stability, StabilityVector, VariableStability,
 };
 use crate::util::functional::Functional;
+use biodivine_lib_param_bn::VariableId;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{
     GraphColoredVertices, GraphColors, SymbolicAsyncGraph,
 };
-use biodivine_lib_param_bn::VariableId;
 use json::JsonValue;
 use std::convert::TryFrom;
 use std::ops::{Index, IndexMut};

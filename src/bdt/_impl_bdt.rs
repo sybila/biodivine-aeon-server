@@ -1,6 +1,6 @@
 use crate::bdt::{
-    entropy, information_gain, AppliedAttribute, Attribute, AttributeId, AttributeIds, Bdt,
-    BdtNode, BdtNodeId, BdtNodeIds, BifurcationFunction,
+    AppliedAttribute, Attribute, AttributeId, AttributeIds, Bdt, BdtNode, BdtNodeId, BdtNodeIds,
+    BifurcationFunction, entropy, information_gain,
 };
 use crate::scc::Class;
 use crate::util::functional::Functional;
