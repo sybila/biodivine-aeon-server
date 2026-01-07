@@ -1500,7 +1500,7 @@ fn rocket() -> _ {
 
     let session_storage: Cache<SessionKey, Arc<SessionState>> = Cache::builder()
         .max_capacity(1000) // 1000 sessions should be fine for local usage.
-        .time_to_idle(Duration::from_mins(10)) // 10-minute idle time should hopefully be ok, we'll see.
+        .time_to_idle(Duration::from_secs(10 * 60)) // 10-minute idle time should hopefully be ok, we'll see.
         .build();
 
     rocket::custom(config)
