@@ -15,7 +15,7 @@ mod _impl_attribute;
 mod _impl_bdt;
 /// **(internal)** Implementation of .dot export utilities for a decision tree.
 mod _impl_bdt_dot_export;
-/// **(internal)** Implementation of json serialization of BDT structures.
+/// **(internal)** Implementation of JSON serialization of BDT structures.
 mod _impl_bdt_json;
 /// **(internal)** Implementation of general convenience methods for BDT nodes.
 mod _impl_bdt_node;
@@ -44,7 +44,7 @@ pub enum BdtNode {
     },
 }
 
-/// An identifier of a BDT node. These are used to quickly refer to parts of a BDT, for example
+/// An identifier of a BDT node. These are used to quickly refer to parts of a BDT, for example,
 /// from GUI.
 ///
 /// I might want to delete a node - to avoid specifying a full path from root to the deleted node,
@@ -63,16 +63,16 @@ pub struct AttributeId(usize);
 ///
 /// It is the owner of the tree memory, so every addition/deletion in the tree must happen here.
 ///
-/// To implement precisions, we do not actually modify the tree. Instead, we set a precision
+/// To implement precisions, we do not modify the tree. Instead, we set a precision
 /// value in the tree attributes, and then we only display the tree with the specified precision.
-/// This means the editor is not losing any information when precision is applied and by disabling
+/// This means the editor is not losing any information when precision is applied, and by disabling
 /// precision, the original state is restored.
 pub struct Bdt {
     storage: HashMap<usize, BdtNode>,
     attributes: Vec<Attribute>,
     next_id: usize,
     // Represents a hundred of a percent threshold (So 9350 means 95.30%) at which a mixed node
-    // is assumed to be a leaf, or `None` is the tree is exact. We assume that this number is
+    // is assumed to be a leaf, or `None` is the tree exact. We assume that this number is
     // always >50% to make sure the decision is unique.
     precision: Option<u32>,
 }
@@ -81,7 +81,7 @@ type BdtNodeIds<'a> = Map<Keys<'a, usize, BdtNode>, fn(&usize) -> BdtNodeId>;
 type AttributeIds<'a> = Map<Range<usize>, fn(usize) -> AttributeId>;
 
 /// Attribute is an abstract property of the boolean network that can be applied to partition
-/// the parameter space into two sub-spaces.
+/// the parameter space into two subspaces.
 #[derive(Clone)]
 pub struct Attribute {
     name: String,
@@ -112,7 +112,7 @@ pub struct AppliedAttribute {
     pub information_gain: f64,
 }
 
-/// Compute entropy of the behaviour class data set
+/// Compute entropy of the behavior class data set
 pub fn entropy(classes: &BifurcationFunction) -> f64 {
     if classes.is_empty() {
         return f64::INFINITY;

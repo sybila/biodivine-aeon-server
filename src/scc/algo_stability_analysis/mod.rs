@@ -11,7 +11,7 @@ mod _impl_variable_stability;
 
 /// A basic enum which defines the stability of a particular variable in one attractor.
 ///
-/// In such case, a variable can be stable, with either true or false as a value, or unstable.
+/// In such a case, a variable can be stable, with either true or false as a value, or unstable.
 /// That is, the value of the variable is changing in the attractor.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum Stability {
@@ -20,7 +20,7 @@ pub enum Stability {
     Unstable,
 }
 
-/// For a given attractor, this struct stores the parametrised data about stability of a
+/// For a given attractor, this struct stores the parametrized data about the stability of a
 /// particular variable.
 ///
 /// Essentially, it is a mapping from `Stability` values to `GraphColors`. Since there are only

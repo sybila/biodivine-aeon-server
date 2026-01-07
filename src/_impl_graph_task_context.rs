@@ -22,7 +22,7 @@ impl GraphTaskContext {
         self.progress.init_from_graph(graph);
     }
 
-    /// True if the task is cancelled.
+    /// True if the task is canceled.
     pub fn is_cancelled(&self) -> bool {
         self.is_cancelled.is_cancelled()
     }
@@ -37,7 +37,7 @@ impl GraphTaskContext {
         self.progress.update_remaining(remaining);
     }
 
-    /// Output a string which represent the percentage of remaining state space.
+    /// Output a string that represents the percentage of remaining state space.
     pub fn get_percent_string(&self) -> String {
         self.progress.get_percent_string()
     }

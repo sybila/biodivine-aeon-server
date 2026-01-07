@@ -28,7 +28,7 @@ impl IndexMut<StabilityVector> for VariableStability {
 }
 
 impl VariableStability {
-    /// Add a value for behaviour if not present, otherwise union with current value.
+    /// Add a value for behavior if not present, otherwise union with the current value.
     pub fn push(&mut self, behaviour: StabilityVector, colors: GraphColors) {
         if let Some(current) = self[behaviour].as_mut() {
             *current = colors.union(current);

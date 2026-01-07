@@ -104,7 +104,7 @@ impl TryFrom<&str> for StabilityVector {
 impl StabilityVector {
     /// Create a new stability vector which includes the given stability value.
     ///
-    /// If the value is already present, current vector is only copied.
+    /// If the value is already present, the current vector is only copied.
     pub fn add(&self, stability: Stability) -> StabilityVector {
         (*self).apply(|out| match stability {
             Stability::True => out.has_true = true,

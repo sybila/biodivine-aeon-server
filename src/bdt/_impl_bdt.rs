@@ -21,7 +21,7 @@ impl Bdt {
         .apply(|t| t.insert_node_with_classes(classes))
     }
 
-    /// Sets the precision of this tree in the hundreds of percent (i.e. 9753 becomes 97.53%).
+    /// Sets the precision of this tree in the hundreds of percent (i.e., 9753 becomes 97.53%).
     ///
     /// If the value truncated to 50-100%.
     ///
@@ -83,7 +83,7 @@ impl Bdt {
         result
     }
 
-    /// **(internal)** Get next available node id in this tree.
+    /// **(internal)** Get the next available node id in this tree.
     fn next_id(&mut self) -> BdtNodeId {
         BdtNodeId(self.next_id).also(|_| self.next_id += 1)
     }
@@ -199,9 +199,9 @@ impl Bdt {
         }
     }
 
-    /// Replace given decision node with an unprocessed node and delete all child nodes.
+    /// Replace the given decision node with an unprocessed node and delete all child nodes.
     ///
-    /// Returns list of deleted nodes.
+    /// Returns a list of deleted nodes.
     pub fn revert_decision(&mut self, node: BdtNodeId) -> Vec<BdtNodeId> {
         let mut deleted = vec![];
         if let BdtNode::Decision { classes, .. } = self[node].clone() {
@@ -241,7 +241,7 @@ impl Bdt {
         if depth == 0 {
             return;
         }
-        // If this is unprocessed node, make a default decision.
+        // If this is an unprocessed node, make a default decision.
         if self[node].is_unprocessed() {
             let attr = self.applied_attributes(node).into_iter().next();
             if let Some(attr) = attr {

@@ -57,7 +57,7 @@ impl ProgressTracker {
         remaining.log2() / total.log2()
     }
 
-    /// Output a string which represent the percentage of remaining state space.
+    /// Output a string that represents the percentage of remaining state space.
     pub fn get_percent_string(&self) -> String {
         format!(
             "{:.2} log(%) ({:.2}% states)",

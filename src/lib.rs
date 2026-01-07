@@ -6,7 +6,7 @@ use crate::scc::ProgressTracker;
 pub mod bdt;
 pub mod control;
 pub mod scc;
-/// Some utility methods which we can later move to std-lib
+/// Some utility methods that we can later move to std-lib
 pub mod util;
 
 mod _impl_graph_task_context;

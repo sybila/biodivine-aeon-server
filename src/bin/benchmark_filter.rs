@@ -27,7 +27,7 @@ fn main() {
     }
 }
 
-/// This will erase the observability/monotonicity requirements for regulations, because we don't
+/// This will erase the observability/monotonicity requirements for regulations because we don't
 /// need them in systems without parameters.
 ///
 /// Also erases any pre-set input constants.

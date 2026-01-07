@@ -87,7 +87,7 @@ fn attributes_for_missing_constraints(
 ) {
     let context = graph.symbolic_context();
     for reg in network.as_graph().regulations() {
-        // This is straight up copied from static constraint analysis in lib-param-bn.
+        // This is straight-up copied from static constraint analysis in lib-param-bn.
         // For more context, go there.
         let target = reg.get_target();
         let update_function = network.get_update_function(target);
@@ -171,7 +171,7 @@ fn attributes_for_missing_constraints(
     }
 }
 
-/// **(internal)** Make an explicit attributes (like `f[1,0,1] = 1`) for every implicit update
+/// **(internal)** Make an explicit attribute (like `f[1,0,1] = 1`) for every implicit update
 /// function row in the network.
 fn attributes_for_implicit_function_tables(
     network: &BooleanNetwork,
@@ -253,7 +253,7 @@ fn attributes_for_conditional_observability(
     for v in network.variables() {
         let regulators = network.regulators(v);
 
-        // Bdd that is true when update function for this variable is true
+        // Bdd that is true when the update function for this variable is true
         let fn_is_true = if let Some(function) = network.get_update_function(v) {
             context.mk_fn_update_true(function)
         } else {
@@ -268,9 +268,9 @@ fn attributes_for_conditional_observability(
 
         // Go through all variable combinations for the given context
         for fn_context in contexts {
-            // Regulator whose observability are we dealing with
+            // Regulator whose observability are dealing with
             for r in fn_context.iter().cloned() {
-                // Remaining regulators form the "context variables"
+                // The remaining regulators form the "context variables"
                 let context_vars: Vec<VariableId> =
                     fn_context.iter().filter(|v| **v != r).cloned().collect();
                 // X and !X conditions based on context_vars
@@ -345,7 +345,7 @@ fn variable_contexts(function: &FnUpdate) -> Vec<Vec<VariableId>> {
     }
 }
 
-/// Build all combinations of labelled conditions.
+/// Build all combinations of labeled conditions.
 ///
 /// For example, given X, Y, Z, this will produce:
 /// X, Y, Z

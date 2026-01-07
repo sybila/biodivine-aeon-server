@@ -1,7 +1,7 @@
 pub trait Functional: Sized {
     /// Function `apply` can be used as a dedicated "initializer" for the given value.
     ///
-    /// It takes ownership of the given value and returns it back once the action
+    /// It takes ownership of the given value and returns it once the action
     /// has been applied. Note that it cannot change the output type (output of
     /// `action` is ignored).
     fn apply<F, R>(mut self, action: F) -> Self

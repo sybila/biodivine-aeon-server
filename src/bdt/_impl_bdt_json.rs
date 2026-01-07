@@ -7,7 +7,7 @@ use json::JsonValue;
 use std::collections::{HashMap, HashSet};
 
 impl BdtNode {
-    /// Convert this BDT node to json value with all available information stored in the node.
+    /// Convert this BDT node to a JSON value with all available information stored in the node.
     ///
     /// The conversion accepts a precision attribute (see `Bdt` documentation) which can turn
     /// a mixed/decision node into a leaf node during conversion.
@@ -63,7 +63,7 @@ impl BdtNode {
 }
 
 impl Bdt {
-    /// Convert the whole tree into one json array.
+    /// Convert the whole tree into one JSON array.
     pub fn to_json(&self) -> JsonValue {
         let ids = self
             .storage
@@ -73,7 +73,7 @@ impl Bdt {
         self.to_json_partial(&ids)
     }
 
-    /// A variant of `to_json` which allows to specify a subset of IDs that are considered during
+    /// A variant of `to_json` which allows specifying a subset of IDs that are considered during
     /// export. Other nodes are not included in the result.
     pub fn to_json_partial(&self, ids: &HashSet<BdtNodeId>) -> JsonValue {
         // The order of nodes is irrelevant, but we only want to include nodes that are relevant
@@ -99,7 +99,7 @@ impl Bdt {
         json_array
     }
 
-    /// Convert a BDT node to json, including extra info compared to `BDTNode::to_json`.
+    /// Convert a BDT node to JSON, including extra info compared to `BDTNode::to_json`.
     ///
     /// The extra info covers the node id as well as attribute name for decision nodes.
     pub fn node_to_json(&self, id: BdtNodeId) -> JsonValue {

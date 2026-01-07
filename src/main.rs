@@ -172,16 +172,16 @@ impl AttractorComputation {
 
 // Decision tree API design:
 //    - /get_bifurcation_tree: Obtain the full tree currently managed by the server.
-//    Initially, this is just the root node, however, it can also be a full tree, because
-//    the client can be refreshed and then it loads the correct data again. Returns array of Tree
+//    Initially, this is just the root node, however, it can also be a full tree because
+//    the client can be refreshed, and then it loads the correct data again. Returns array of Tree
 //    node objects.
 //    - /get_attributes/<node_id>: Obtain a list of attributes that can be applied to an unprocessed
 //    node. (This can take a while for large models) Returns an array of attribute objects.
 //    - /apply_attribute/<node_id>/<attribute_id>: Apply an attribute to an unprocessed node,
 //    replacing it with a decision and adding two new child nodes. Returns an array of tree nodes
-//    that have changed (i.e. the unprocessed node is now a decision node, and it has two children
+//    that have changed (i.e., the unprocessed node is now a decision node, and it has two children
 //    now)
-//    - /revert_decision/<node_id>: Turn a decision node back into unprocessed node. This is done
+//    - /revert_decision/<node_id>: Turn a decision node back into an unprocessed node. This is done
 //    recursively, so any children are deleted as well. Returns a
 //    { node: UnprocessedNode, removed: array(usize) } - unprocessed node is the new node that
 //    replaces the decision node, removed is an array of node ids that are deleted from the tree.
@@ -700,7 +700,7 @@ fn get_witness_network(state: &SessionState, colors: &GraphColors) -> BackendRes
 
     let witness = cmp.graph.pick_witness(colors);
     let layout = read_layout(cmp.input_model.as_str());
-    let mut model_string = format!("{}", witness); // convert back to aeon
+    let mut model_string = format!("{}", witness); // convert back to AEON
     model_string += "\n";
     for (var, (x, y)) in layout {
         model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
@@ -833,7 +833,7 @@ fn get_attractors(
 
 fn get_witness_attractors(state: &SessionState, f_colors: &GraphColors) -> BackendResponse {
     {
-        // Variables prefixed with f_ are from the original fully parametrised graph.
+        // Variables prefixed with f_ are from the original fully parametrized graph.
         let cmp = state.attractor_computation_read();
         if let Some(cmp) = &*cmp {
             let f_classifier = &cmp.classifier;
@@ -851,7 +851,7 @@ fn get_witness_attractors(state: &SessionState, f_colors: &GraphColors) -> Backe
 
             // Note that the choice of graph/witness_graph is not arbitrary.
             // The attractor set is from the original graph, but source_set/target_set
-            // are based on the witness_graph. This means they have different number
+            // are based on the witness_graph. This means they have different numbers
             // of BDD variables inside!
             let mut has_large_attractors = false;
             for (f_attractor, behaviour) in f_witness_attractors.iter() {
@@ -912,7 +912,7 @@ fn get_witness_attractors(state: &SessionState, f_colors: &GraphColors) -> Backe
                 all_attractors.push((*behaviour, attractor_graph, not_fixed_vars));
             }
 
-            // now the data is stored in `all_attractors`, just convert it to json:
+            // now the data is stored in `all_attractors`, just convert it to JSON:
             let mut json = String::new();
 
             for (i, (behavior, graph, not_fixed)) in all_attractors.iter().enumerate() {
@@ -1500,7 +1500,7 @@ fn rocket() -> _ {
 
     let session_storage: Cache<SessionKey, Arc<SessionState>> = Cache::builder()
         .max_capacity(1000) // 1000 sessions should be fine for local usage.
-        .time_to_idle(Duration::from_mins(10)) // 10 minutes idle time should hopefully by ok, we'll see..
+        .time_to_idle(Duration::from_mins(10)) // 10-minute idle time should hopefully be ok, we'll see.
         .build();
 
     rocket::custom(config)

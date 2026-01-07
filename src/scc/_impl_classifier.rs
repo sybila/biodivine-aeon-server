@@ -24,7 +24,7 @@ impl Classifier {
         }
     }
 
-    // Try to obtain a copy of data in a non-blocking manner (useful if we want to check
+    // Try to get a copy of data in a non-blocking manner (useful if we want to check
     // results but the computation is still running).
     pub fn try_export_result(&self) -> Option<HashMap<Class, GraphColors>> {
         match self.classes.try_lock() {
@@ -183,7 +183,7 @@ impl Classifier {
             if !should_move_up.is_empty() {
                 let extended_class = class.clone_extended(behaviour);
 
-                // remove moving params from class
+                // remove moving params from a class
                 let new_c_p = class_params.minus(&should_move_up);
                 if new_c_p.is_empty() {
                     (*classes).remove(&class);
