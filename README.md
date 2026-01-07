@@ -64,6 +64,15 @@ cargo run --release
 
 By default, the server listens on `127.0.0.1:8000`. The server will print the address and port when it starts.
 
+### Remote access
+
+Since this is a normal HTTP server, you can also access it over the internet. However, due to CORS,
+you won't be able to do that from the official HTTPS client. And you really should not expose the
+HTTP server to open internet anyway.
+
+*Currently, for remote deployments, we recommend running AEON server behind a reverse proxy like `nginx` 
+or `cuddy`, implementing HTTPS and authentication at the level of the reverse proxy service.*
+
 ### Configuration
 
 The server can be configured using environment variables:
