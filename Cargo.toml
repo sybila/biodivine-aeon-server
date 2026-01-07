@@ -1,6 +1,6 @@
 [package]
 name = "biodivine-aeon-server"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Samuel Pastva <daemontus@gmail.com>"]
 edition = "2024"
 default-run = "biodivine-aeon-server"
