@@ -24,9 +24,8 @@ impl Bdt {
                 let is_not_empty = !a.positive.is_empty() && !a.negative.is_empty();
                 let is_not_empty =
                     is_not_empty && !a.positive.intersect(graph.unit_colors()).is_empty();
-                let is_not_empty =
-                    is_not_empty && !a.negative.intersect(graph.unit_colors()).is_empty();
-                is_not_empty
+
+                is_not_empty && !a.negative.intersect(graph.unit_colors()).is_empty()
             })
             .collect();
         Bdt::new(classes, attributes)

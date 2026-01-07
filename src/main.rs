@@ -1170,10 +1170,10 @@ async fn start_control_computation(
     // First, check if some other experiment is already running.
     {
         let cmp = cmp.read().unwrap();
-        if let Some(computation) = &*cmp {
-            if computation.thread.is_some() {
-                return BackendResponse::err("Previous computation is still running.");
-            }
+        if let Some(computation) = &*cmp
+            && computation.thread.is_some()
+        {
+            return BackendResponse::err("Previous computation is still running.");
         }
     }
     {
@@ -1278,23 +1278,23 @@ async fn start_computation(data: Data<'_>) -> BackendResponse {
     // First, check if some other experiment is already running.
     {
         let cmp = cmp.read().unwrap();
-        if let Some(computation) = &*cmp {
-            if computation.thread.is_some() {
-                return BackendResponse::err(
-                    "Previous computation is still running. Cancel it before starting a new one.",
-                );
-            }
+        if let Some(computation) = &*cmp
+            && computation.thread.is_some()
+        {
+            return BackendResponse::err(
+                "Previous computation is still running. Cancel it before starting a new one.",
+            );
         }
     }
     {
         // Now actually get the write lock, but check again because race conditions...
         let mut cmp = cmp.write().unwrap();
-        if let Some(computation) = &*cmp {
-            if computation.thread.is_some() {
-                return BackendResponse::err(
-                    "Previous computation is still running. Cancel it before starting a new one.",
-                );
-            }
+        if let Some(computation) = &*cmp
+            && computation.thread.is_some()
+        {
+            return BackendResponse::err(
+                "Previous computation is still running. Cancel it before starting a new one.",
+            );
         }
         let mut new_cmp = Computation {
             timestamp: SystemTime::now(),
