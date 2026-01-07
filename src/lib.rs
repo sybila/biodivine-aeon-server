@@ -3,9 +3,6 @@ extern crate json;
 
 use crate::scc::ProgressTracker;
 
-/// Contains all non-trivial long-running symbolic algorithms that are used within AEON.
-pub mod algorithms;
-
 pub mod bdt;
 pub mod control;
 pub mod scc;
