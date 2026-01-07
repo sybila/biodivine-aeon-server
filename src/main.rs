@@ -80,13 +80,15 @@ struct SessionState {
     update_function_lock: RwLock<bool>,
     /// Stores the current metadata, state, or result of the attractor computation.
     attractor_computation: RwLock<Option<AttractorComputation>>,
+    /// Store the bifurcation tree that is a result of attractor computation.
+    bifurcation_tree: RwLock<Option<Bdt>>,
 }
 
 impl SessionState {
     pub fn attractor_computation_read(&self) -> RwLockReadGuard<'_, Option<AttractorComputation>> {
         self.attractor_computation
             .read()
-            .expect("Correctness violation: Computation lock invalid.")
+            .expect("Correctness violation: lock tainted.")
     }
 
     pub fn attractor_computation_write(
@@ -94,7 +96,33 @@ impl SessionState {
     ) -> RwLockWriteGuard<'_, Option<AttractorComputation>> {
         self.attractor_computation
             .write()
-            .expect("Correctness violation: Computation lock invalid.")
+            .expect("Correctness violation: lock tainted.")
+    }
+
+    pub fn bifurcation_tree_read(&self) -> RwLockReadGuard<'_, Option<Bdt>> {
+        self.bifurcation_tree
+            .read()
+            .expect("Correctness violation: lock tainted.")
+    }
+
+    pub fn bifurcation_tree_write(&self) -> RwLockWriteGuard<'_, Option<Bdt>> {
+        self.bifurcation_tree
+            .write()
+            .expect("Correctness violation: lock tainted.")
+    }
+
+    /// A helper function used to retrieve colors stored in a specific BDT node (if any).
+    pub fn extract_tree_node_colors(&self, node_id: &str) -> Result<GraphColors, String> {
+        let tree_guard = self.bifurcation_tree_read();
+        let Some(tree) = tree_guard.as_ref() else {
+            return Err("No bifurcation tree found".to_string());
+        };
+
+        let Some(node) = BdtNodeId::try_from_str(node_id, tree) else {
+            return Err(format!("Invalid node id {}.", node_id));
+        };
+
+        Ok(tree.all_node_params(node))
     }
 }
 
@@ -132,7 +160,6 @@ impl AttractorComputation {
 lazy_static! {
     static ref CONTROL_COMPUTATION: Arc<RwLock<Option<ControlComputation>>> =
         Arc::new(RwLock::new(None));
-    static ref TREE: Arc<RwLock<Option<Bdt>>> = Arc::new(RwLock::new(None));
 }
 
 // Decision tree API design:
@@ -161,31 +188,33 @@ lazy_static! {
 
 /// Obtain the graph structure of the decision tree as a list of nodes.
 #[get("/get_bifurcation_tree")]
-fn get_bifurcation_tree() -> BackendResponse {
-    let tree = TREE.clone();
-    let tree = tree.read().unwrap();
-    if let Some(tree) = &*tree {
-        BackendResponse::ok(tree.to_json().to_string())
-    } else {
-        BackendResponse::err("No tree present. Run computation first.")
-    }
+fn get_bifurcation_tree(key: SessionKey, storage: &State<SessionStorage>) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+    let tree_guard = state.bifurcation_tree_read();
+    let Some(tree) = tree_guard.as_ref() else {
+        return BackendResponse::err("Decision tree not found.");
+    };
+
+    BackendResponse::ok_json(tree.to_json())
 }
 
 #[get("/get_attributes/<node_id>")]
-fn get_attributes(node_id: String) -> BackendResponse {
-    let tree = TREE.clone();
-    let tree = tree.read().unwrap();
-    if let Some(tree) = &*tree {
-        let node = BdtNodeId::try_from_str(&node_id, tree);
-        let node = if let Some(node) = node {
-            node
-        } else {
-            return BackendResponse::err(format!("Invalid node id {}.", node_id));
-        };
-        BackendResponse::ok(tree.attribute_gains_json(node).to_string())
-    } else {
-        BackendResponse::err("No tree present. Run computation first.")
-    }
+fn get_attributes(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    node_id: String,
+) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+    let tree_guard = state.bifurcation_tree_read();
+    let Some(tree) = tree_guard.as_ref() else {
+        return BackendResponse::err("Decision tree not found.");
+    };
+
+    let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
+        return BackendResponse::err(format!("Invalid node id {node_id}."));
+    };
+
+    BackendResponse::ok_json(tree.attribute_gains_json(node))
 }
 
 #[get("/get_stability_data/<node_id>/<behaviour_str>")]
@@ -204,19 +233,9 @@ fn get_stability_data(
     };
 
     // First, extract all colors in that tree node.
-    let node_params = {
-        let tree = TREE.clone();
-        let tree = tree.read()?;
-        let Some(tree) = tree.as_ref() else {
-            return BackendResponse::err_result("No bifurcation tree found.");
-        };
-
-        let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
-            return BackendResponse::err_result(format!("Invalid node id {}.", node_id));
-        };
-
-        tree.all_node_params(node)
-    };
+    let node_params = state
+        .extract_tree_node_colors(node_id.as_str())
+        .map_err(BackendResponse::err)?;
 
     // Then find all attractors of the graph
     let cmp_guard = state.attractor_computation_read();
@@ -257,115 +276,126 @@ fn get_stability_data(
 }
 
 #[post("/apply_attribute/<node_id>/<attribute_id>")]
-fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
-    let tree = TREE.clone();
-    let mut tree = tree.write().unwrap();
-    if let Some(tree) = tree.as_mut() {
-        let node = BdtNodeId::try_from_str(&node_id, tree);
-        let node = if let Some(node) = node {
-            node
-        } else {
-            return BackendResponse::err(format!("Invalid node id {}.", node_id));
-        };
-        let attribute = AttributeId::try_from_str(&attribute_id, tree);
-        let attribute = if let Some(val) = attribute {
-            val
-        } else {
-            return BackendResponse::err(format!("Invalid attribute id {}.", attribute_id));
-        };
-        if let Ok((left, right)) = tree.make_decision(node, attribute) {
-            let changes = array![
-                tree.node_to_json(node),
-                tree.node_to_json(left),
-                tree.node_to_json(right),
-            ];
-            BackendResponse::ok(changes.to_string())
-        } else {
-            BackendResponse::err("Invalid node or attribute id.")
-        }
+fn apply_attribute(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    node_id: String,
+    attribute_id: String,
+) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+    let mut tree_guard = state.bifurcation_tree_write();
+    let Some(tree) = tree_guard.as_mut() else {
+        return BackendResponse::err("Decision tree not found.");
+    };
+
+    let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
+        return BackendResponse::err(format!("Invalid node id {node_id}."));
+    };
+
+    let Some(attribute) = AttributeId::try_from_str(&attribute_id, tree) else {
+        return BackendResponse::err(format!("Invalid attribute id {node_id}."));
+    };
+
+    if let Ok((left, right)) = tree.make_decision(node, attribute) {
+        let changes = array![
+            tree.node_to_json(node),
+            tree.node_to_json(left),
+            tree.node_to_json(right),
+        ];
+        BackendResponse::ok(changes.to_string())
     } else {
-        BackendResponse::err("No tree present. Run computation first.")
+        BackendResponse::err("Invalid node or attribute id.")
     }
 }
 
 #[post("/revert_decision/<node_id>")]
-fn revert_decision(node_id: String) -> BackendResponse {
-    let tree = TREE.clone();
-    let mut tree = tree.write().unwrap();
-    if let Some(tree) = tree.as_mut() {
-        let node = BdtNodeId::try_from_str(&node_id, tree);
-        let node = if let Some(node) = node {
-            node
-        } else {
-            return BackendResponse::err(format!("Invalid node id {}.", node_id));
-        };
-        let removed = tree.revert_decision(node);
-        let removed = removed
-            .into_iter()
-            .map(|v| v.to_index())
-            .collect::<Vec<_>>();
-        let response = object! {
-                "node": tree.node_to_json(node),
-                "removed": JsonValue::from(removed)
-        };
-        BackendResponse::ok(response.to_string())
-    } else {
-        BackendResponse::err("No tree present. Run computation first.")
-    }
+fn revert_decision(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    node_id: String,
+) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+    let mut tree_guard = state.bifurcation_tree_write();
+    let Some(tree) = tree_guard.as_mut() else {
+        return BackendResponse::err("Decision tree not found.");
+    };
+
+    let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
+        return BackendResponse::err(format!("Invalid node id {node_id}."));
+    };
+
+    let removed = tree
+        .revert_decision(node)
+        .into_iter()
+        .map(|v| v.to_index())
+        .collect::<Vec<_>>();
+
+    let response = object! {
+            "node": tree.node_to_json(node),
+            "removed": JsonValue::from(removed)
+    };
+
+    BackendResponse::ok(response.to_string())
 }
 
 #[post("/auto_expand/<node_id>/<depth>")]
-fn auto_expand(node_id: String, depth: String) -> BackendResponse {
-    let depth: u32 = {
-        let parsed = depth.parse::<u32>();
-        if let Ok(depth) = parsed {
-            depth
-        } else {
-            return BackendResponse::err(format!("Invalid tree depth: {}", depth));
-        }
-    };
+fn auto_expand(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    node_id: String,
+    depth: String,
+) -> BackendResult {
+    let depth = depth
+        .parse::<u32>()
+        .map_err(|_| BackendResponse::err(format!("Invalid tree depth: {depth}")))?;
+
     if depth > 10 {
-        return BackendResponse::err("Maximum allowed depth is 10.");
+        return BackendResponse::err_result("Maximum allowed depth is 10.");
     }
-    let tree = TREE.clone();
-    let mut tree = tree.write().unwrap();
-    if let Some(tree) = tree.as_mut() {
-        let node_id: BdtNodeId = if let Some(node_id) = BdtNodeId::try_from_str(&node_id, tree) {
-            node_id
-        } else {
-            return BackendResponse::err(format!("Invalid node id {}.", node_id));
-        };
-        let changed = tree.auto_expand(node_id, depth);
-        BackendResponse::ok(tree.to_json_partial(&changed).to_string())
-    } else {
-        BackendResponse::err("Cannot modify decision tree.")
-    }
+
+    let state = storage.get_with(key, Default::default);
+    let mut tree_guard = state.bifurcation_tree_write();
+    let Some(tree) = tree_guard.as_mut() else {
+        return BackendResponse::err_result("Decision tree not found.");
+    };
+
+    let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
+        return BackendResponse::err_result(format!("Invalid node id {node_id}."));
+    };
+
+    let changed = tree.auto_expand(node, depth);
+    BackendResponse::ok_json_result(tree.to_json_partial(&changed))
 }
 
 #[post("/apply_tree_precision/<precision>")]
-fn apply_tree_precision(precision: String) -> BackendResponse {
-    if let Ok(precision) = precision.parse::<u32>() {
-        let tree = TREE.clone();
-        let mut tree = tree.write().unwrap();
-        if let Some(tree) = tree.as_mut() {
+fn apply_tree_precision(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    precision: String,
+) -> BackendResponse {
+    let Ok(precision) = precision.parse::<u32>() else {
+        return BackendResponse::err(format!("Precision {precision} is not a number."));
+    };
+
+    let state = storage.get_with(key, Default::default);
+    let mut tree_guard = state.bifurcation_tree_write();
+
+    match tree_guard.as_mut() {
+        None => BackendResponse::err("Decision tree not found."),
+        Some(tree) => {
             tree.set_precision(precision);
             BackendResponse::ok("\"ok\"")
-        } else {
-            BackendResponse::err("Cannot modify decision tree.")
         }
-    } else {
-        BackendResponse::err("Given precision is not a number.")
     }
 }
 
 #[get("/get_tree_precision")]
-fn get_tree_precision() -> BackendResponse {
-    let tree = TREE.clone();
-    let tree = tree.read().unwrap();
-    if let Some(tree) = tree.as_ref() {
-        BackendResponse::ok(format!("{}", tree.get_precision()))
-    } else {
-        BackendResponse::err("Cannot modify decision tree.")
+fn get_tree_precision(key: SessionKey, storage: &State<SessionStorage>) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+    let tree_guard = state.bifurcation_tree_read();
+    match tree_guard.as_ref().map(|it| it.get_precision()) {
+        None => BackendResponse::err("Decision tree not found."),
+        Some(value) => BackendResponse::ok(value.to_string()),
     }
 }
 
@@ -549,24 +579,19 @@ fn get_tree_witness(
     node_id: String,
 ) -> BackendResponse {
     let state = storage.get_with(key, Default::default);
+    let tree_guard = state.bifurcation_tree_read();
+    let Some(tree) = tree_guard.as_ref() else {
+        return BackendResponse::err("No tree present. Run computation first.");
+    };
 
-    let tree = TREE.clone();
-    let tree = tree.read().unwrap();
-    if let Some(tree) = &*tree {
-        let node = BdtNodeId::try_from_str(&node_id, tree);
-        let node = if let Some(node) = node {
-            node
-        } else {
-            return BackendResponse::err(format!("Invalid node id {}.", node_id));
-        };
+    let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
+        return BackendResponse::err(format!("Invalid node id {node_id}."));
+    };
 
-        if let Some(params) = tree.params_for_leaf(node) {
-            get_witness_network(&state, params)
-        } else {
-            BackendResponse::err("Given node is not an unprocessed node.")
-        }
+    if let Some(params) = tree.params_for_leaf(node) {
+        get_witness_network(&state, params)
     } else {
-        BackendResponse::err("No tree present. Run computation first.")
+        BackendResponse::err("Given node is not an unprocessed node.")
     }
 }
 
@@ -590,19 +615,9 @@ fn get_stability_witness(
     let vector = StabilityVector::try_from(vector_str.as_str()).map_err(BackendResponse::err)?;
 
     // First, extract all colors in that tree node.
-    let node_params = {
-        let tree = TREE.clone();
-        let tree = tree.read()?;
-        let Some(tree) = tree.as_ref() else {
-            return BackendResponse::err_result("No bifurcation tree found.");
-        };
-
-        let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
-            return BackendResponse::err_result(format!("Invalid node id {}.", node_id));
-        };
-
-        tree.all_node_params(node)
-    };
+    let node_params = state
+        .extract_tree_node_colors(node_id.as_str())
+        .map_err(BackendResponse::err)?;
 
     let cmp_guard = state.attractor_computation_read();
     let Some(cmp) = cmp_guard.as_ref() else {
@@ -699,24 +714,19 @@ fn get_tree_attractors(
     node_id: String,
 ) -> BackendResponse {
     let state = storage.get_with(key, Default::default);
+    let tree_guard = state.bifurcation_tree_read();
+    let Some(tree) = tree_guard.as_ref() else {
+        return BackendResponse::err("No tree present. Run computation first.");
+    };
 
-    let tree = TREE.clone();
-    let tree = tree.read().unwrap();
-    if let Some(tree) = &*tree {
-        let node = BdtNodeId::try_from_str(&node_id, tree);
-        let node = if let Some(value) = node {
-            value
-        } else {
-            return BackendResponse::err(format!("Invalid node id {}.", node_id));
-        };
+    let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
+        return BackendResponse::err(format!("Invalid node id {node_id}."));
+    };
 
-        if let Some(params) = tree.params_for_leaf(node) {
-            get_witness_attractors(&state, params)
-        } else {
-            BackendResponse::err("Given node is not an unprocessed node.")
-        }
+    if let Some(params) = tree.params_for_leaf(node) {
+        get_witness_attractors(&state, params)
     } else {
-        BackendResponse::err("No tree present. Run computation first.")
+        BackendResponse::err("Given node is not an unprocessed node.")
     }
 }
 
@@ -740,19 +750,9 @@ fn get_stability_attractors(
     let vector = StabilityVector::try_from(vector_str.as_str()).map_err(BackendResponse::err)?;
 
     // First, extract all colors in that tree node.
-    let node_params = {
-        let tree = TREE.clone();
-        let tree = tree.read()?;
-        let Some(tree) = tree.as_ref() else {
-            return BackendResponse::err_result("No bifurcation tree found.");
-        };
-
-        let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
-            return BackendResponse::err_result(format!("Invalid node id {}.", node_id));
-        };
-
-        tree.all_node_params(node)
-    };
+    let node_params = state
+        .extract_tree_node_colors(node_id.as_str())
+        .map_err(BackendResponse::err)?;
 
     // Then find all attractors of the graph
     let cmp_guard = state.attractor_computation_read();
@@ -1346,8 +1346,7 @@ async fn start_computation(
 
             // Once computation is complete, we can convert the result into a decision tree:
             let result = classifier.export_result();
-            let tree = TREE.clone();
-            let mut tree = tree.write().unwrap();
+            let mut tree = thread_state.bifurcation_tree_write();
             *tree = Some(Bdt::new_from_graph(result, graph, &network));
             println!("Saved decision tree");
         } else {
