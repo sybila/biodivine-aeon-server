@@ -31,7 +31,6 @@ use biodivine_pbn_control::perturbation::PerturbationGraph;
 use cancel_this::{Cancellable, CancellationTrigger};
 use computation_process::{Computable, Generatable, Incomplete, Stateful};
 use json::JsonValue;
-use lazy_static::lazy_static;
 use moka::sync::Cache;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
@@ -82,6 +81,8 @@ struct SessionState {
     attractor_computation: RwLock<Option<AttractorComputation>>,
     /// Store the bifurcation tree that is a result of attractor computation.
     bifurcation_tree: RwLock<Option<Bdt>>,
+    /// Stores the current metadata, state, or result of the control computation.
+    control_computation: RwLock<Option<ControlComputation>>,
 }
 
 impl SessionState {
@@ -95,6 +96,18 @@ impl SessionState {
         &self,
     ) -> RwLockWriteGuard<'_, Option<AttractorComputation>> {
         self.attractor_computation
+            .write()
+            .expect("Correctness violation: lock tainted.")
+    }
+
+    pub fn control_computation_read(&self) -> RwLockReadGuard<'_, Option<ControlComputation>> {
+        self.control_computation
+            .read()
+            .expect("Correctness violation: lock tainted.")
+    }
+
+    pub fn control_computation_write(&self) -> RwLockWriteGuard<'_, Option<ControlComputation>> {
+        self.control_computation
             .write()
             .expect("Correctness violation: lock tainted.")
     }
@@ -155,11 +168,6 @@ impl AttractorComputation {
                 .as_millis()
         })
     }
-}
-
-lazy_static! {
-    static ref CONTROL_COMPUTATION: Arc<RwLock<Option<ControlComputation>>> =
-        Arc::new(RwLock::new(None));
 }
 
 // Decision tree API design:
@@ -958,126 +966,119 @@ fn get_witness_attractors(state: &SessionState, f_colors: &GraphColors) -> Backe
 }
 
 #[get("/get_control_computation_status")]
-async fn get_control_computation_status() -> BackendResponse {
-    let cmp = CONTROL_COMPUTATION.clone();
-    let cmp = cmp.read().unwrap();
-    if let Some(computation) = &*cmp {
-        let elapsed = computation
-            .finished_timestamp
-            .unwrap_or_else(SystemTime::now)
-            .duration_since(computation.timestamp)
-            .unwrap();
-        let elapsed = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
-        let unix_timestamp = computation
-            .timestamp
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let stats = object! {
-            "computationStarted" => u64::try_from(unix_timestamp).unwrap_or(u64::MAX),
-            "computationCancelled" => computation.is_cancelled.is_cancelled(),
-            "isRunning" => computation.thread.is_some(),
-            "elapsed" => elapsed,
-            "version" => VERSION.to_string(),
-        };
-        BackendResponse::ok(stats.to_string())
-    } else {
-        BackendResponse::err("No computation found.")
-    }
+async fn get_control_computation_status(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+    let cmp_guard = state.control_computation_read();
+    let Some(cmp) = cmp_guard.as_ref() else {
+        return BackendResponse::err("No computation found.");
+    };
+
+    let unix_timestamp = cmp
+        .timestamp
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+
+    let stats = object! {
+        "computationStarted" => u64::try_from(unix_timestamp).unwrap_or(u64::MAX),
+        "computationCancelled" => cmp.is_cancelled.is_cancelled(),
+        "isRunning" => cmp.thread.is_some(),
+        "elapsed" => cmp.elapsed_millis(),
+        "version" => VERSION.to_string(),
+    };
+    BackendResponse::ok(stats.to_string())
 }
 
 #[get("/get_control_stats")]
-async fn get_control_stats() -> BackendResponse {
-    let cmp = CONTROL_COMPUTATION.clone();
-    let cmp = cmp.read().unwrap();
-    if let Some(computation) = &*cmp {
-        let pstg = computation.graph.as_ref();
-        let unit = pstg.as_non_perturbable().mk_unit_colors();
-        if let Some(results) = computation.results.as_ref() {
-            let mut minimal_perturbation: Option<usize> = None;
-            let mut max_robustness: Option<f64> = None;
-            for (k, value) in results {
-                if k.len() < minimal_perturbation.unwrap_or(usize::MAX) {
-                    minimal_perturbation = Some(k.len());
-                }
+async fn get_control_stats(key: SessionKey, storage: &State<SessionStorage>) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+    let cmp_guard = state.control_computation_read();
+    let Some(cmp) = cmp_guard.as_ref() else {
+        return BackendResponse::err("No computation found.");
+    };
 
-                let p_card = value.exact_cardinality() * 1_000_000u32;
-                let u_card = unit.exact_cardinality();
-
-                let robustness: BigUint = p_card / u_card;
-                let robustness: f64 = robustness.to_f64().unwrap_or(f64::NAN) / 1_000_000.0;
-
-                if robustness > max_robustness.unwrap_or(0.0) {
-                    max_robustness = Some(robustness);
-                }
+    let unit = cmp.graph.as_non_perturbable().mk_unit_colors();
+    if let Some(results) = cmp.results.as_ref() {
+        let mut minimal_perturbation: Option<usize> = None;
+        let mut max_robustness: Option<f64> = None;
+        for (k, value) in results {
+            if k.len() < minimal_perturbation.unwrap_or(usize::MAX) {
+                minimal_perturbation = Some(k.len());
             }
-            let elapsed = computation
-                .finished_timestamp
-                .unwrap() // Should be present if results are computed.
-                .duration_since(computation.timestamp)
-                .unwrap();
-            let elapsed = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
-            let stats = object! {
-                "allColorsCount": unit.exact_cardinality().to_usize().unwrap_or(usize::MAX),
-                "perturbationCount": results.len(),
-                "minimalPerturbationSize": minimal_perturbation,
-                "maximalPerturbationRobustness": max_robustness,
-                "elapsed": elapsed
-            };
-            BackendResponse::ok(stats.to_string())
-        } else {
-            BackendResponse::err("No results found.")
+
+            let p_card = value.exact_cardinality() * 1_000_000u32;
+            let u_card = unit.exact_cardinality();
+
+            let robustness: BigUint = p_card / u_card;
+            let robustness: f64 = robustness.to_f64().unwrap_or(f64::NAN) / 1_000_000.0;
+
+            if robustness > max_robustness.unwrap_or(0.0) {
+                max_robustness = Some(robustness);
+            }
         }
+        let stats = object! {
+            "allColorsCount": unit.exact_cardinality().to_usize().unwrap_or(usize::MAX),
+            "perturbationCount": results.len(),
+            "minimalPerturbationSize": minimal_perturbation,
+            "maximalPerturbationRobustness": max_robustness,
+            "elapsed": cmp.elapsed_millis(),
+        };
+        BackendResponse::ok(stats.to_string())
     } else {
-        BackendResponse::err("No computation found.")
+        BackendResponse::err("No results found.")
     }
 }
 
 #[get("/get_control_results")]
-async fn get_control_results() -> BackendResponse {
-    let cmp = CONTROL_COMPUTATION.clone();
-    let cmp = cmp.read().unwrap();
-    if let Some(computation) = &*cmp {
-        let pstg = computation.graph.as_ref();
-        let unit = pstg.as_non_perturbable().mk_unit_colors();
-        if let Some(results) = computation.results.as_ref() {
-            let mut response = JsonValue::new_array();
-            for (key, value) in results {
-                // The following method always give an approximation up to 6 decimal places, even if the
-                // cardinality would overflow to f64::infinity.
+async fn get_control_results(key: SessionKey, storage: &State<SessionStorage>) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+    let cmp_guard = state.control_computation_read();
+    let Some(cmp) = cmp_guard.as_ref() else {
+        return BackendResponse::err("No computation found.");
+    };
 
-                let p_card = value.exact_cardinality() * 1_000_000u32;
-                let u_card = unit.exact_cardinality();
+    let unit = cmp.graph.as_non_perturbable().mk_unit_colors();
+    if let Some(results) = cmp.results.as_ref() {
+        let mut response = JsonValue::new_array();
+        for (key, value) in results {
+            // The following method always gives an approximation up to 6 decimal places, even if the
+            // cardinality overflows to f64::infinity.
 
-                let robustness: BigUint = p_card / u_card;
-                let robustness: f64 = robustness.to_f64().unwrap_or(f64::NAN) / 1_000_000.0;
-                response
-                    .push(object! {
-                        "perturbation": key.clone(),
-                        "color_count": value.exact_cardinality().to_u64().unwrap_or(u64::MAX),
-                        "robustness": robustness,
-                    })
-                    .unwrap();
-            }
-            BackendResponse::ok(response.to_string())
-        } else {
-            BackendResponse::err("No results found.")
+            let p_card = value.exact_cardinality() * 1_000_000u32;
+            let u_card = unit.exact_cardinality();
+
+            let robustness: BigUint = p_card / u_card;
+            let robustness: f64 = robustness.to_f64().unwrap_or(f64::NAN) / 1_000_000.0;
+            response
+                .push(object! {
+                    "perturbation": key.clone(),
+                    "color_count": value.exact_cardinality().to_u64().unwrap_or(u64::MAX),
+                    "robustness": robustness,
+                })
+                .unwrap();
         }
+        BackendResponse::ok(response.to_string())
     } else {
-        BackendResponse::err("No computation found.")
+        BackendResponse::err("No results found.")
     }
 }
 
 #[post("/cancel_control_computation")]
-async fn cancel_control_computation() -> BackendResponse {
-    let cmp = CONTROL_COMPUTATION.clone();
-    let cmp = cmp.read().unwrap();
-    if let Some(computation) = &*cmp {
-        computation.is_cancelled.cancel();
-        BackendResponse::ok("Cancelled")
-    } else {
-        BackendResponse::err("No computation is running.")
-    }
+async fn cancel_control_computation(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+    let cmp_guard = state.control_computation_read();
+    let Some(cmp) = cmp_guard.as_ref() else {
+        return BackendResponse::err("No computation found.");
+    };
+
+    cmp.is_cancelled.cancel();
+    BackendResponse::ok("Cancelled")
 }
 
 #[post(
@@ -1086,6 +1087,8 @@ async fn cancel_control_computation() -> BackendResponse {
     data = "<data>"
 )]
 async fn start_control_computation(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
     data: Data<'_>,
     // Type of oscillation that is admissible for the phenotype (allowed, required, forbidden).
     oscillation: &str,
@@ -1093,9 +1096,11 @@ async fn start_control_computation(
     min_robustness: f64,
     // Only compute perturbations with at most this many perturbed variables.
     max_size: usize,
-    // Only compute this many results.
+    // Limit the number of results.
     result_count: usize,
-) -> BackendResponse {
+) -> BackendResult {
+    let state = storage.get_with(key, Default::default);
+
     // This method:
     // 1. Reads a BN from the data stream.
     // 2. Reads algorithm configuration from arguments.
@@ -1106,17 +1111,8 @@ async fn start_control_computation(
     assert!(result_count > 0);
     assert!(min_robustness >= 0.0);
 
-    let mut stream = data.open(ByteUnit::Megabyte(10));
-    let mut aeon_string = String::new();
-    if let Err(error) = stream.read_to_string(&mut aeon_string).await {
-        return BackendResponse::err(format!("Cannot read model: {}", error));
-    }
-    let network = match BooleanNetwork::try_from(aeon_string.as_str()) {
-        Ok(network) => network,
-        Err(error) => {
-            return BackendResponse::err(format!("Invalid network: {}", error));
-        }
-    };
+    let aeon_string = load_string(data, MAX_MODEL_SIZE).await?;
+    let network = BooleanNetwork::try_from(aeon_string.as_str()).map_err(BackendResponse::err)?;
 
     // Read the input for the control procedure.
     let network_annotations = ModelAnnotation::from_model_string(aeon_string.as_str());
@@ -1129,7 +1125,7 @@ async fn start_control_computation(
             let is_controllable = vals.next();
             let phenotype_value = vals.next();
             if vals.next().is_some() {
-                return BackendResponse::err(format!(
+                return BackendResponse::err_result(format!(
                     "Invalid control annotation for variable {name}: {value}"
                 ));
             }
@@ -1137,7 +1133,7 @@ async fn start_control_computation(
                 Some("true") => controllable_vars.push(var),
                 Some("false") => (),
                 _ => {
-                    return BackendResponse::err(format!(
+                    return BackendResponse::err_result(format!(
                         "Invalid control annotation for variable {name}: {value}"
                     ));
                 }
@@ -1147,59 +1143,53 @@ async fn start_control_computation(
                 Some("false") => phenotype_subspace.push((var, false)),
                 Some("null") => (),
                 _ => {
-                    return BackendResponse::err(format!(
+                    return BackendResponse::err_result(format!(
                         "Invalid control annotation for variable {name}: {value}"
                     ));
                 }
             }
         }
     }
+
     let oscillation = match oscillation {
         "required" => PhenotypeOscillationType::Required,
         "forbidden" => PhenotypeOscillationType::Forbidden,
         "allowed" => PhenotypeOscillationType::Allowed,
-        _ => return BackendResponse::err(format!("Invalid oscillation value {oscillation}.")),
+        _ => {
+            return BackendResponse::err_result(format!(
+                "Invalid oscillation value {oscillation}."
+            ));
+        }
     };
 
     println!("Phenotype subset: {:?}", phenotype_subspace);
     println!("Controllable variables: {:?}", controllable_vars);
 
-    let cmp = CONTROL_COMPUTATION.clone();
-    // First, check if some other experiment is already running.
+    let mut cmp_guard = state.control_computation_write();
+
+    if let Some(computation) = cmp_guard.as_ref()
+        && computation.thread.is_some()
     {
-        let cmp = cmp.read().unwrap();
-        if let Some(computation) = &*cmp
-            && computation.thread.is_some()
-        {
-            return BackendResponse::err("Previous computation is still running.");
-        }
+        return BackendResponse::err_result("Previous computation is still running.");
     }
-    {
-        let mut cmp = cmp.write().unwrap();
-        if let Some(computation) = &*cmp {
-            // I know we just checked this, but there could be a race condition...
-            if computation.thread.is_some() {
-                return BackendResponse::err("Previous computation is still running.");
-            }
-        }
 
-        let pstg = PerturbationGraph::with_restricted_variables(&network, controllable_vars);
+    let pstg = PerturbationGraph::with_restricted_variables(&network, controllable_vars);
 
-        let cancel_flag = cancel_this::CancelAtomic::new();
-        let mut computation = ControlComputation {
-            timestamp: SystemTime::now(),
-            finished_timestamp: None,
-            input_model: aeon_string,
-            graph: Arc::new(pstg),
-            thread: None,
-            results: None,
-            is_cancelled: cancel_flag.clone(),
-        };
+    let cancel_flag = cancel_this::CancelAtomic::new();
+    let mut computation = ControlComputation {
+        timestamp: SystemTime::now(),
+        finished_timestamp: None,
+        input_model: aeon_string,
+        graph: pstg,
+        thread: None,
+        results: None,
+        is_cancelled: cancel_flag.clone(),
+    };
 
-        let thread_pstg = computation.graph.clone();
-
-        computation.thread = Some(std::thread::spawn(move || {
-            let pstg = thread_pstg;
+    let thread_state = state.clone();
+    computation.thread = Some(std::thread::spawn(move || {
+        let results = if let Some(cmp) = thread_state.control_computation_read().as_ref() {
+            let pstg = &cmp.graph;
 
             let phenotype = pstg
                 .as_original()
@@ -1229,26 +1219,26 @@ async fn start_control_computation(
                 },
             );
 
-            let results = results.unwrap_or_else(|partial| partial);
+            results.unwrap_or_else(|partial| partial)
+        } else {
+            panic!("Computation disappeared.");
+        };
 
-            let cmp = CONTROL_COMPUTATION.clone();
-            let mut cmp = cmp.write().unwrap();
-            if let Some(computation) = cmp.as_mut() {
-                computation.results = Some(results);
-                computation.finished_timestamp = Some(SystemTime::now());
-                computation.thread = None;
-            } else {
-                panic!("Computation disappeared!");
-            }
-        }));
+        let mut cmp_guard = thread_state.control_computation_write();
+        let Some(cmp) = cmp_guard.as_mut() else {
+            panic!("Computation disappeared.");
+        };
 
-        let start = computation.start_timestamp();
-        // Now write the new computation to the global state...
-        *cmp = Some(computation);
+        cmp.results = Some(results);
+        cmp.finished_timestamp = Some(SystemTime::now());
+        cmp.thread = None;
+    }));
 
-        BackendResponse::ok(object! { "timestamp" => start as u64 }.to_string())
-        // status of the computation can be obtained via ping...
-    }
+    let start = computation.start_timestamp();
+    // Now write the new computation to the global state...
+    *cmp_guard = Some(computation);
+
+    BackendResponse::ok_json_result(object! { "timestamp" => start as u64 })
 }
 
 /// Accept an Aeon model, parse it and start a new computation (if there is no computation running).
