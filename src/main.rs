@@ -29,7 +29,7 @@ use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGra
 use biodivine_pbn_control::control::PhenotypeOscillationType;
 use biodivine_pbn_control::perturbation::PerturbationGraph;
 use cancel_this::{Cancellable, CancellationTrigger};
-use computation_process::{Computable, Stateful};
+use computation_process::{Computable, Generatable, Incomplete, Stateful};
 use json::JsonValue;
 use lazy_static::lazy_static;
 use num_bigint::BigUint;
@@ -1332,20 +1332,40 @@ async fn start_computation(data: Data<'_>) -> BackendResponse {
                         let state = ItgrState::new(&graph, graph.unit_colored_vertices());
                         let mut itgr =
                             InterleavedTransitionGuidedReduction::configure(graph.as_ref(), state);
-                        let universe = itgr.compute()?;
+                        let universe = loop {
+                            match itgr.try_compute() {
+                                Ok(result) => break result,
+                                Err(Incomplete::Cancelled(c)) => return Err(c),
+                                Err(Incomplete::Suspended) => {
+                                    task_context.update_remaining(itgr.state().remaining());
+                                }
+                                Err(e) => panic!("{}", e),
+                            }
+                        };
+
                         let active_variables =
                             itgr.state().active_variables().collect::<BTreeSet<_>>();
 
                         // Then run Xie-Beerel to actually detect the components.
                         let mut config = AttractorConfig::new(graph.as_ref().clone());
                         config.active_variables = active_variables;
-                        let attractors = XieBeerelAttractors::configure(config, universe);
+                        let mut attractors = XieBeerelAttractors::configure(config, universe);
 
-                        for component in attractors {
-                            let component = component?;
-                            println!("Component {}", component.approx_cardinality());
-                            classifier.add_component(component, &graph);
+                        loop {
+                            match attractors.try_next() {
+                                None => break,
+                                Some(Ok(component)) => {
+                                    println!("Component {}", component.approx_cardinality());
+                                    classifier.add_component(component, &graph);
+                                }
+                                Some(Err(Incomplete::Cancelled(e))) => return Err(e),
+                                Some(Err(Incomplete::Suspended)) => {
+                                    task_context.update_remaining(attractors.state().remaining());
+                                }
+                                Some(Err(e)) => panic!("{}", e),
+                            }
                         }
+
                         Ok(())
                     });
 
@@ -1536,7 +1556,11 @@ fn all_options(_path: std::path::PathBuf) -> &'static str {
 
 #[launch]
 fn rocket() -> _ {
-    //test_main::run();
+    // Log all info events.
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Info)
+        .init();
+
     let address = std::env::var("AEON_ADDR").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port_from_args = {
         let mut args = std::env::args();

@@ -42,11 +42,17 @@ impl ProgressTracker {
     /// Update the number of remaining states.
     pub fn update_remaining(&self, remaining: &GraphColoredVertices) {
         let value = remaining.approx_cardinality();
+        let mut changed = false;
         {
             let mut remaining = self.remaining.lock().unwrap();
-            *remaining = value;
+            if *remaining != value {
+                *remaining = value;
+                changed = true;
+            }
         }
-        println!("Progress: {}", self.get_percent_string());
+        if changed {
+            println!("Progress: {}", self.get_percent_string());
+        }
     }
 
     /// Return a `[0,1]` fraction of the remaining state space.

@@ -18,7 +18,7 @@ lto = true
 [dependencies]
 biodivine-lib-bdd = "0.6.2"
 biodivine-lib-param-bn = "0.7.0"
-biodivine-algo-bdd-scc = "0.3.1"
+biodivine-algo-bdd-scc = "0.3.2"
 cancel-this = "0.4.0"
 computation-process = "0.2.0"
 rocket = "0.5.1"
@@ -33,5 +33,7 @@ biodivine-pbn-control = { git = "https://github.com/sybila/biodivine-pbn-control
 serde = { version = "1.0.215", features = ["derive"] }
 num-bigint = "0.4.6"
 num-traits = "0.2.19"
+env_logger = "0.11.8"
+log = "0.4.29"
 
 [dev-dependencies]
