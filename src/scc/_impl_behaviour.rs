@@ -13,3 +13,16 @@ impl TryFrom<&str> for Behaviour {
         }
     }
 }
+
+impl TryFrom<char> for Behaviour {
+    type Error = String;
+
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        match value {
+            'D' => Ok(Behaviour::Disorder),
+            'O' => Ok(Behaviour::Oscillation),
+            'S' => Ok(Behaviour::Stability),
+            _ => Err(format!("Invalid behavior: `{}`", value)),
+        }
+    }
+}

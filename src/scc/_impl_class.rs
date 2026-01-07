@@ -7,6 +7,16 @@ impl Class {
         Class(Vec::new())
     }
 
+    pub fn try_read_string<S: AsRef<str>>(value: S) -> Result<Class, String> {
+        let mut result = Class::new_empty();
+        for char in value.as_ref().chars() {
+            let behavior = Behaviour::try_from(char)?;
+            result.extend(behavior);
+        }
+
+        Ok(result)
+    }
+
     pub fn extend(&mut self, behaviour: Behaviour) {
         self.0.push(behaviour);
         self.0.sort();

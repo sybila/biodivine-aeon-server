@@ -5,13 +5,13 @@ extern crate rocket;
 extern crate json;
 
 use rocket::http::{ContentType, Header};
-use rocket::request::Request;
+use rocket::request::{FromRequest, Outcome, Request};
 use rocket::response::{self, Responder, Response};
 
 use biodivine_aeon_server::scc::{Behaviour, Class, Classifier};
 use biodivine_lib_param_bn::{BooleanNetwork, FnUpdate, ModelAnnotation};
 use regex::Regex;
-use std::convert::TryFrom;
+use std::convert::{Infallible, TryFrom};
 
 use biodivine_aeon_server::GraphTaskContext;
 use biodivine_aeon_server::bdt::{AttributeId, Bdt, BdtNodeId};
@@ -32,34 +32,87 @@ use cancel_this::{Cancellable, CancellationTrigger};
 use computation_process::{Computable, Generatable, Incomplete, Stateful};
 use json::JsonValue;
 use lazy_static::lazy_static;
+use moka::sync::Cache;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 use rocket::data::ByteUnit;
 use rocket::log::private::LevelFilter;
-use rocket::{Config, Data};
+use rocket::outcome::Outcome::Success;
+use rocket::{Config, Data, State};
 use rocket_cors::{AllowedOrigins, CorsOptions};
 use std::cmp::max;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::error::Error;
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 
+const MAX_MODEL_SIZE: ByteUnit = ByteUnit::Megabyte(10);
+
+/// Identifies each tab/session that connects to the server. If a session key is not included,
+/// defaults to the empty key ("global session").
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+struct SessionKey(String);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for SessionKey {
+    type Error = Infallible;
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        Success(
+            request
+                .headers()
+                .get_one("x-session-key")
+                .map(|it| SessionKey(it.to_string()))
+                .unwrap_or_default(),
+        )
+    }
+}
+
+/// Groups together all state previously stored globally.
+#[derive(Default)]
+struct SessionState {
+    /// Used to limit the amount of parallelism allowed to the update function checks (for large
+    /// models, the concurrency can cause unnecessary slowdowns).
+    update_function_lock: RwLock<bool>,
+    /// Stores the current metadata, state, or result of the attractor computation.
+    attractor_computation: RwLock<Option<AttractorComputation>>,
+}
+
+impl SessionState {
+    pub fn attractor_computation_read(&self) -> RwLockReadGuard<'_, Option<AttractorComputation>> {
+        self.attractor_computation
+            .read()
+            .expect("Correctness violation: Computation lock invalid.")
+    }
+
+    pub fn attractor_computation_write(
+        &self,
+    ) -> RwLockWriteGuard<'_, Option<AttractorComputation>> {
+        self.attractor_computation
+            .write()
+            .expect("Correctness violation: Computation lock invalid.")
+    }
+}
+
+/// Just a type-alias so that we don't need to write the full type into each request function.
+type SessionStorage = Cache<SessionKey, Arc<SessionState>>;
+
 /// Computation keeps all information
-struct Computation {
+struct AttractorComputation {
     timestamp: SystemTime,
     input_model: String,            // .aeon string representation of the model
     task: GraphTaskContext, // A task context which keeps track of progress and cancellation.
-    graph: Arc<SymbolicAsyncGraph>, // Model graph - used to create witnesses
-    classifier: Arc<Classifier>, // Classifier used to store the results of the computation
+    graph: SymbolicAsyncGraph, // Model graph - used to create witnesses
+    classifier: Classifier, // Classifier used to store the results of the computation
     thread: Option<JoinHandle<()>>, // A thread that is actually doing the computation (so that we can check if it is still running). If none, the computation is done.
-    error: Option<String>,          // A string error from the computation
     finished_timestamp: Option<SystemTime>, // A timestamp when the computation was completed (if done)
 }
 
-impl Computation {
+impl AttractorComputation {
     pub fn start_timestamp(&self) -> u128 {
         self.timestamp
             .duration_since(UNIX_EPOCH)
@@ -77,10 +130,8 @@ impl Computation {
 }
 
 lazy_static! {
-    static ref COMPUTATION: Arc<RwLock<Option<Computation>>> = Arc::new(RwLock::new(None));
     static ref CONTROL_COMPUTATION: Arc<RwLock<Option<ControlComputation>>> =
         Arc::new(RwLock::new(None));
-    static ref CHECK_UPDATE_FUNCTION_LOCK: Arc<RwLock<bool>> = Arc::new(RwLock::new(true));
     static ref TREE: Arc<RwLock<Option<Bdt>>> = Arc::new(RwLock::new(None));
 }
 
@@ -138,76 +189,71 @@ fn get_attributes(node_id: String) -> BackendResponse {
 }
 
 #[get("/get_stability_data/<node_id>/<behaviour_str>")]
-fn get_stability_data(node_id: String, behaviour_str: String) -> BackendResponse {
-    let behaviour = Behaviour::try_from(behaviour_str.as_str());
-    let behaviour = match behaviour {
-        Ok(behaviour) => Some(behaviour),
-        Err(error) => {
-            if behaviour_str == "total" {
-                None
-            } else {
-                return BackendResponse::err(error.as_str());
-            }
-        }
+fn get_stability_data(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    node_id: String,
+    behaviour_str: String,
+) -> BackendResult {
+    let state = storage.get_with(key, Default::default);
+
+    let behavior = if behaviour_str == "total" {
+        None
+    } else {
+        Some(Behaviour::try_from(behaviour_str.as_str()).map_err(BackendResponse::err)?)
     };
+
     // First, extract all colors in that tree node.
     let node_params = {
         let tree = TREE.clone();
-        let tree = tree.read().unwrap();
-        if let Some(tree) = &*tree {
-            let node = BdtNodeId::try_from_str(&node_id, tree);
-            let node = if let Some(n) = node {
-                n
-            } else {
-                return BackendResponse::err(format!("Invalid node id {}.", node_id));
-            };
-            tree.all_node_params(node)
-        } else {
-            return BackendResponse::err("No bifurcation tree found.");
-        }
-    };
-    // Then find all attractors of the graph
-    let cmp = COMPUTATION.read().unwrap();
-    if let Some(cmp) = &*cmp {
-        let classifier = &cmp.classifier;
-        let components = if let Some(behaviour) = behaviour {
-            classifier.export_components_with_class(behaviour)
-        } else {
-            classifier
-                .export_components()
-                .into_iter()
-                .map(|(c, _)| c)
-                .collect()
+        let tree = tree.read()?;
+        let Some(tree) = tree.as_ref() else {
+            return BackendResponse::err_result("No bifurcation tree found.");
         };
-        let graph = &cmp.graph;
-        // Now compute which attractors are actually relevant for the node colors
-        let components = components
-            .into_iter()
-            .filter_map(|attractor| {
-                attractor
-                    .intersect_colors(&node_params)
-                    .take_if(|it| !it.is_empty())
-            })
-            .collect::<Vec<_>>();
 
-        if components.is_empty() {
-            return BackendResponse::err("No attractors with this property.");
-        }
+        let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
+            return BackendResponse::err_result(format!("Invalid node id {}.", node_id));
+        };
 
-        let stability_data = compute_stability(graph, &components);
-        let mut response = JsonValue::new_array();
-        for variable in graph.variables() {
-            response
-                .push(object! {
-                    "variable": graph.get_variable_name(variable).clone(),
-                    "data": stability_data[&variable].to_json(),
-                })
-                .unwrap();
-        }
-        BackendResponse::ok(response.to_string())
-    } else {
-        BackendResponse::err("No attractor data found.")
+        tree.all_node_params(node)
+    };
+
+    // Then find all attractors of the graph
+    let cmp_guard = state.attractor_computation_read();
+    let Some(cmp) = cmp_guard.as_ref() else {
+        return BackendResponse::err_result("No attractor data found.");
+    };
+
+    let components = cmp
+        .classifier
+        .export_components_with_optional_class(behavior);
+
+    let graph = &cmp.graph;
+
+    // Now compute which attractors are actually relevant for the node colors
+    let components = components
+        .into_iter()
+        .filter_map(|attractor| {
+            attractor
+                .intersect_colors(&node_params)
+                .take_if(|it| !it.is_empty())
+        })
+        .collect::<Vec<_>>();
+
+    if components.is_empty() {
+        return BackendResponse::err_result("No attractors with this property.");
     }
+
+    let stability_data = compute_stability(graph, &components);
+    let mut response = JsonValue::new_array();
+    for variable in graph.variables() {
+        response.push(object! {
+            "variable": graph.get_variable_name(variable).clone(),
+            "data": stability_data[&variable].to_json(),
+        })?;
+    }
+
+    BackendResponse::ok_result(response.to_string())
 }
 
 #[post("/apply_attribute/<node_id>/<attribute_id>")]
@@ -339,12 +385,17 @@ fn max_parameter_cardinality(function: &FnUpdate) -> usize {
 /// Return cardinality of such model (i.e. the number of instantiations of this update function)
 /// or error if the update function (or model) is invalid.
 #[post("/check_update_function", format = "plain", data = "<data>")]
-async fn check_update_function(data: Data<'_>) -> BackendResponse {
+async fn check_update_function(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    data: Data<'_>,
+) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
     let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model size to 10MB
     let mut model_string = String::new();
     match stream.read_to_string(&mut model_string).await {
         Ok(_) => {
-            let lock = CHECK_UPDATE_FUNCTION_LOCK.clone();
+            let lock = &state.update_function_lock;
             let mut lock = lock.write().unwrap();
             let start = SystemTime::now();
             let graph = BooleanNetwork::try_from(model_string.as_str())
@@ -389,7 +440,9 @@ async fn check_update_function(data: Data<'_>) -> BackendResponse {
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[get("/ping")]
-fn ping() -> BackendResponse {
+fn ping(key: SessionKey, storage: &State<SessionStorage>) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+
     println!("...ping...");
     let mut response = object! {
         "timestamp" => json::Null,          // if there is some computation (not necessarily running, this is the time when it started
@@ -400,37 +453,20 @@ fn ping() -> BackendResponse {
         "num_classes" => json::Null,        // number of discovered classes so far
         "version" => VERSION.to_string(),   // current compute engine version for compatibility validation
     };
-    {
-        // Read data from current computation if available...
-        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-        let cmp = cmp.read().unwrap();
-        if let Some(computation) = &*cmp {
-            response["timestamp"] = (computation.start_timestamp() as u64).into();
-            response["is_cancelled"] = computation.task.is_cancelled().into();
-            response["progress"] = computation.task.get_percent_string().into();
-            response["is_running"] = computation.thread.is_some().into();
-            if let Some(error) = &computation.error {
-                response["error"] = error.clone().into();
-            }
-            if let Some(classes) = computation.classifier.try_get_num_classes() {
-                response["num_classes"] = classes.into();
-            }
+
+    let cmp_guard = state.attractor_computation_read();
+    if let Some(cmp) = cmp_guard.as_ref() {
+        response["timestamp"] = (cmp.start_timestamp() as u64).into();
+        response["is_cancelled"] = cmp.task.is_cancelled().into();
+        response["progress"] = cmp.task.get_percent_string().into();
+        response["is_running"] = cmp.thread.is_some().into();
+        if let Some(classes) = cmp.classifier.try_get_num_classes() {
+            response["num_classes"] = classes.into();
         }
     }
+
     BackendResponse::ok(response.to_string())
 }
-
-// Try to obtain current class data or none if classifier is busy
-/*fn try_get_result(classifier: &Classifier) -> Option<HashMap<Class, BddParams>> {
-    for _ in 0..5 {
-        if let Some(data) = classifier.try_export_result() {
-            return Some(data);
-        }
-        // wait a little - maybe the lock will become free
-        std::thread::sleep(Duration::new(1, 0));
-    }
-    return None;
-}*/
 
 fn try_get_class_params(classifier: &Classifier, class: &Class) -> Option<Option<GraphColors>> {
     for _ in 0..5 {
@@ -444,37 +480,38 @@ fn try_get_class_params(classifier: &Classifier, class: &Class) -> Option<Option
 }
 
 #[get("/get_results")]
-fn get_results() -> BackendResponse {
+fn get_results(key: SessionKey, storage: &State<SessionStorage>) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+
     let is_partial;
     let (data, elapsed) = {
-        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-        let cmp = cmp.read().unwrap();
-        if let Some(cmp) = &*cmp {
-            is_partial = cmp.thread.is_some();
-            let classes = &cmp.classifier;
-            let mut result = None;
-            for _ in 0..5 {
-                if let Some(data) = classes.try_export_result() {
-                    result = Some(data);
-                    break;
-                }
-                // wait a little - maybe the lock will become free
-                std::thread::sleep(Duration::new(1, 0));
-            }
-            if let Some(result) = result {
-                (
-                    result,
-                    cmp.end_timestamp().map(|t| t - cmp.start_timestamp()),
-                )
-            } else {
-                return BackendResponse::err(
-                    "Classification running. Cannot export components right now.",
-                );
-            }
-        } else {
+        let cmp_guard = state.attractor_computation_read();
+        let Some(cmp) = cmp_guard.as_ref() else {
             return BackendResponse::err("No results available.");
+        };
+
+        is_partial = cmp.thread.is_some();
+
+        // Repeatedly try to acquire the read lock to access results without deadlocking the request.
+        let mut result: Option<HashMap<Class, GraphColors>> = None;
+        for _ in 0..5 {
+            if let Some(data) = cmp.classifier.try_export_result() {
+                result = Some(data);
+                break;
+            }
+            std::thread::sleep(Duration::new(1, 0));
+        }
+
+        if let Some(result) = result {
+            let elapsed = cmp.end_timestamp().map(|t| t - cmp.start_timestamp());
+            (result, elapsed)
+        } else {
+            return BackendResponse::err(
+                "Classification running. Cannot export components right now.",
+            );
         }
     };
+
     let lines: Vec<String> = data
         .iter()
         .map(|(c, p)| {
@@ -506,7 +543,13 @@ fn get_results() -> BackendResponse {
 }
 
 #[get("/get_tree_witness/<node_id>")]
-fn get_tree_witness(node_id: String) -> BackendResponse {
+fn get_tree_witness(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    node_id: String,
+) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
     if let Some(tree) = &*tree {
@@ -518,7 +561,7 @@ fn get_tree_witness(node_id: String) -> BackendResponse {
         };
 
         if let Some(params) = tree.params_for_leaf(node) {
-            get_witness_network(params)
+            get_witness_network(&state, params)
         } else {
             BackendResponse::err("Given node is not an unprocessed node.")
         }
@@ -529,155 +572,134 @@ fn get_tree_witness(node_id: String) -> BackendResponse {
 
 #[get("/get_stability_witness/<node_id>/<behaviour_str>/<variable_str>/<vector_str>")]
 fn get_stability_witness(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
     node_id: String,
     behaviour_str: String,
     variable_str: String,
     vector_str: String,
-) -> BackendResponse {
-    let behaviour = Behaviour::try_from(behaviour_str.as_str());
-    let behaviour = match behaviour {
-        Ok(behaviour) => Some(behaviour),
-        Err(error) => {
-            if behaviour_str == "total" {
-                None
-            } else {
-                return BackendResponse::err(error.as_str());
-            }
-        }
+) -> BackendResult {
+    let state = storage.get_with(key, Default::default);
+
+    let behavior = if behaviour_str == "total" {
+        None
+    } else {
+        Some(Behaviour::try_from(behaviour_str.as_str()).map_err(BackendResponse::err)?)
     };
-    let vector = StabilityVector::try_from(vector_str.as_str());
-    let vector = match vector {
-        Ok(vector) => vector,
-        Err(error) => {
-            return BackendResponse::err(error.as_str());
-        }
-    };
+
+    let vector = StabilityVector::try_from(vector_str.as_str()).map_err(BackendResponse::err)?;
+
     // First, extract all colors in that tree node.
     let node_params = {
         let tree = TREE.clone();
-        let tree = tree.read().unwrap();
-        if let Some(tree) = &*tree {
-            let node = BdtNodeId::try_from_str(&node_id, tree);
-            let node = if let Some(n) = node {
-                n
-            } else {
-                return BackendResponse::err(format!("Invalid node id {}.", node_id));
-            };
-            tree.all_node_params(node)
-        } else {
-            return BackendResponse::err("No bifurcation tree found.");
-        }
+        let tree = tree.read()?;
+        let Some(tree) = tree.as_ref() else {
+            return BackendResponse::err_result("No bifurcation tree found.");
+        };
+
+        let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
+            return BackendResponse::err_result(format!("Invalid node id {}.", node_id));
+        };
+
+        tree.all_node_params(node)
     };
-    // Then find all attractors of the graph
-    let cmp = COMPUTATION.read().unwrap();
-    if let Some(cmp) = &*cmp {
-        let classifier = &cmp.classifier;
-        let components = if let Some(behaviour) = behaviour {
-            classifier.export_components_with_class(behaviour)
-        } else {
-            classifier
-                .export_components()
-                .into_iter()
-                .map(|(c, _)| c)
-                .collect()
-        };
-        let graph = &cmp.graph;
-        let variable = graph
-            .symbolic_context()
-            .find_network_variable(variable_str.as_str());
-        let variable = if let Some(variable) = variable {
-            variable
-        } else {
-            return BackendResponse::err(
-                format!("Unknown graph variable `{}`.", variable_str).as_str(),
-            );
-        };
 
-        // Now compute which attractors are actually relevant for the node colors
-        let components = components
-            .into_iter()
-            .filter_map(|attractor| {
-                attractor
-                    .intersect_colors(&node_params)
-                    .take_if(|it| !it.is_empty())
-            })
-            .collect::<Vec<_>>();
+    let cmp_guard = state.attractor_computation_read();
+    let Some(cmp) = cmp_guard.as_ref() else {
+        return BackendResponse::err_result("No attractor data found.");
+    };
 
-        let variable_stability = VariableStability::for_attractors(graph, &components, variable);
-        if let Some(colors) = &variable_stability[vector] {
-            get_witness_network(colors)
-        } else {
-            BackendResponse::err(
-                format!("No witness available for vector `{}`.", vector_str).as_str(),
-            )
-        }
+    let components = cmp
+        .classifier
+        .export_components_with_optional_class(behavior);
+
+    let variable = cmp
+        .graph
+        .symbolic_context()
+        .find_network_variable(variable_str.as_str());
+    let Some(variable) = variable else {
+        return BackendResponse::err_result(
+            format!("Unknown graph variable `{}`.", variable_str).as_str(),
+        );
+    };
+
+    // Now compute which attractors are actually relevant for the node colors
+    let components = components
+        .into_iter()
+        .filter_map(|attractor| {
+            attractor
+                .intersect_colors(&node_params)
+                .take_if(|it| !it.is_empty())
+        })
+        .collect::<Vec<_>>();
+
+    let variable_stability = VariableStability::for_attractors(&cmp.graph, &components, variable);
+    if let Some(colors) = &variable_stability[vector] {
+        Ok(get_witness_network(&state, colors))
     } else {
-        BackendResponse::err("No attractor data found.")
+        BackendResponse::err_result(
+            format!("No witness available for vector `{}`.", vector_str).as_str(),
+        )
     }
 }
 
 #[get("/get_witness/<class_str>")]
-fn get_witness(class_str: String) -> BackendResponse {
-    let mut class = Class::new_empty();
-    for char in class_str.chars() {
-        match char {
-            'D' => class.extend(Behaviour::Disorder),
-            'O' => class.extend(Behaviour::Oscillation),
-            'S' => class.extend(Behaviour::Stability),
-            _ => {
-                return BackendResponse::err("Invalid class.");
-            }
-        }
-    }
-    {
-        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-        let cmp = cmp.read().unwrap();
-        if let Some(cmp) = &*cmp {
-            let classifier = &cmp.classifier;
-            if let Some(has_class) = try_get_class_params(classifier, &class) {
-                if let Some(class) = has_class {
-                    get_witness_network(&class)
-                } else {
-                    BackendResponse::err("Specified class has no witness.")
-                }
-            } else {
-                BackendResponse::err(
-                    "Classification in progress. Cannot extract witness right now.",
-                )
-            }
-        } else {
-            BackendResponse::err("No results available.")
-        }
+fn get_witness(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    class_str: String,
+) -> BackendResult {
+    let state = storage.get_with(key, Default::default);
+    let class = Class::try_read_string(class_str).map_err(BackendResponse::err)?;
+    let cmp_guard = state.attractor_computation_read();
+    let Some(cmp) = cmp_guard.as_ref() else {
+        return BackendResponse::err_result("No results available.");
+    };
+
+    let Some(has_class) = try_get_class_params(&cmp.classifier, &class) else {
+        return BackendResponse::err_result(
+            "Classification in progress. Cannot extract witness right now.",
+        );
+    };
+
+    if let Some(class) = has_class {
+        Ok(get_witness_network(&state, &class))
+    } else {
+        BackendResponse::err_result("Specified class has no witness.")
     }
 }
 
-fn get_witness_network(colors: &GraphColors) -> BackendResponse {
-    let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-    let cmp = cmp.read().unwrap();
-    if let Some(cmp) = &*cmp {
-        let graph = &cmp.graph;
-        let witness = graph.pick_witness(colors);
-        let layout = read_layout(cmp.input_model.as_str());
-        let mut model_string = format!("{}", witness); // convert back to aeon
-        model_string += "\n";
-        for (var, (x, y)) in layout {
-            model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
-        }
-        let (name, description) = read_metadata(cmp.input_model.as_str());
-        if let Some(name) = name {
-            model_string += format!("#name:{}\n", name).as_str();
-        }
-        if let Some(description) = description {
-            model_string += format!("#description:{}\n", description).as_str();
-        }
-        BackendResponse::ok(object! { "model" => model_string }.to_string())
-    } else {
-        BackendResponse::err("No results available.")
+fn get_witness_network(state: &SessionState, colors: &GraphColors) -> BackendResponse {
+    let cmp_guard = state.attractor_computation_read();
+    let Some(cmp) = cmp_guard.as_ref() else {
+        return BackendResponse::err("No results available.");
+    };
+
+    let witness = cmp.graph.pick_witness(colors);
+    let layout = read_layout(cmp.input_model.as_str());
+    let mut model_string = format!("{}", witness); // convert back to aeon
+    model_string += "\n";
+    for (var, (x, y)) in layout {
+        model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
     }
+    let (name, description) = read_metadata(cmp.input_model.as_str());
+    if let Some(name) = name {
+        model_string += format!("#name:{}\n", name).as_str();
+    }
+    if let Some(description) = description {
+        model_string += format!("#description:{}\n", description).as_str();
+    }
+    BackendResponse::ok_json(object! { "model" => model_string })
 }
 
 #[get("/get_tree_attractors/<node_id>")]
-fn get_tree_attractors(node_id: String) -> BackendResponse {
+fn get_tree_attractors(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    node_id: String,
+) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
     if let Some(tree) = &*tree {
@@ -689,7 +711,7 @@ fn get_tree_attractors(node_id: String) -> BackendResponse {
         };
 
         if let Some(params) = tree.params_for_leaf(node) {
-            get_witness_attractors(params)
+            get_witness_attractors(&state, params)
         } else {
             BackendResponse::err("Given node is not an unprocessed node.")
         }
@@ -700,135 +722,111 @@ fn get_tree_attractors(node_id: String) -> BackendResponse {
 
 #[get("/get_stability_attractors/<node_id>/<behaviour_str>/<variable_str>/<vector_str>")]
 fn get_stability_attractors(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
     node_id: String,
     behaviour_str: String,
     variable_str: String,
     vector_str: String,
-) -> BackendResponse {
-    let behaviour = Behaviour::try_from(behaviour_str.as_str());
-    let behaviour = match behaviour {
-        Ok(behaviour) => Some(behaviour),
-        Err(error) => {
-            if behaviour_str == "total" {
-                None
-            } else {
-                return BackendResponse::err(error.as_str());
-            }
-        }
+) -> BackendResult {
+    let state = storage.get_with(key, Default::default);
+
+    let behavior = if behaviour_str == "total" {
+        None
+    } else {
+        Some(Behaviour::try_from(behaviour_str.as_str()).map_err(BackendResponse::err)?)
     };
-    let vector = StabilityVector::try_from(vector_str.as_str());
-    let vector = match vector {
-        Ok(vector) => vector,
-        Err(error) => {
-            return BackendResponse::err(error.as_str());
-        }
-    };
+
+    let vector = StabilityVector::try_from(vector_str.as_str()).map_err(BackendResponse::err)?;
+
     // First, extract all colors in that tree node.
     let node_params = {
         let tree = TREE.clone();
-        let tree = tree.read().unwrap();
-        if let Some(tree) = &*tree {
-            let node = BdtNodeId::try_from_str(&node_id, tree);
-            let node = if let Some(n) = node {
-                n
-            } else {
-                return BackendResponse::err(format!("Invalid node id {}.", node_id));
-            };
-            tree.all_node_params(node)
-        } else {
-            return BackendResponse::err("No bifurcation tree found.");
-        }
+        let tree = tree.read()?;
+        let Some(tree) = tree.as_ref() else {
+            return BackendResponse::err_result("No bifurcation tree found.");
+        };
+
+        let Some(node) = BdtNodeId::try_from_str(&node_id, tree) else {
+            return BackendResponse::err_result(format!("Invalid node id {}.", node_id));
+        };
+
+        tree.all_node_params(node)
     };
+
     // Then find all attractors of the graph
-    let cmp = COMPUTATION.read().unwrap();
-    if let Some(cmp) = &*cmp {
-        let classifier = &cmp.classifier;
-        let components = if let Some(behaviour) = behaviour {
-            classifier.export_components_with_class(behaviour)
-        } else {
-            classifier
-                .export_components()
-                .into_iter()
-                .map(|(c, _)| c)
-                .collect()
-        };
-        let graph = &cmp.graph;
-        let variable = graph
-            .symbolic_context()
-            .find_network_variable(variable_str.as_str());
-        let variable = if let Some(variable) = variable {
-            variable
-        } else {
-            return BackendResponse::err(
-                format!("Unknown graph variable `{}`.", variable_str).as_str(),
-            );
-        };
+    let cmp_guard = state.attractor_computation_read();
+    let Some(cmp) = cmp_guard.as_ref() else {
+        return BackendResponse::err_result("No attractor data found.");
+    };
 
-        // Now compute which attractors are actually relevant for the node colors
-        let components = components
-            .into_iter()
-            .filter_map(|attractor| {
-                attractor
-                    .intersect_colors(&node_params)
-                    .take_if(|it| !it.is_empty())
-            })
-            .collect::<Vec<_>>();
+    let components = cmp
+        .classifier
+        .export_components_with_optional_class(behavior);
 
-        let variable_stability = VariableStability::for_attractors(graph, &components, variable);
-        if let Some(colors) = &variable_stability[vector] {
-            get_witness_attractors(colors)
-        } else {
-            BackendResponse::err(
-                format!("No witness available for vector `{}`.", vector_str).as_str(),
-            )
-        }
+    let variable = cmp
+        .graph
+        .symbolic_context()
+        .find_network_variable(variable_str.as_str());
+    let Some(variable) = variable else {
+        return BackendResponse::err_result(
+            format!("Unknown graph variable `{}`.", variable_str).as_str(),
+        );
+    };
+
+    // Now compute which attractors are actually relevant for the node colors
+    let components = components
+        .into_iter()
+        .filter_map(|attractor| {
+            attractor
+                .intersect_colors(&node_params)
+                .take_if(|it| !it.is_empty())
+        })
+        .collect::<Vec<_>>();
+
+    let variable_stability = VariableStability::for_attractors(&cmp.graph, &components, variable);
+    if let Some(colors) = &variable_stability[vector] {
+        Ok(get_witness_attractors(&state, colors))
     } else {
-        BackendResponse::err("No attractor data found.")
+        BackendResponse::err_result(
+            format!("No witness available for vector `{}`.", vector_str).as_str(),
+        )
     }
 }
 
 type EdgeList = Vec<(ArrayBitVector, ArrayBitVector)>;
 
 #[get("/get_attractors/<class_str>")]
-fn get_attractors(class_str: String) -> BackendResponse {
-    let mut class = Class::new_empty();
-    for char in class_str.chars() {
-        match char {
-            'D' => class.extend(Behaviour::Disorder),
-            'O' => class.extend(Behaviour::Oscillation),
-            'S' => class.extend(Behaviour::Stability),
-            _ => {
-                return BackendResponse::err("Invalid class.");
-            }
-        }
-    }
-    {
-        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-        let cmp = cmp.read().unwrap();
-        if let Some(cmp) = &*cmp {
-            let classifier = &cmp.classifier;
-            if let Some(has_class) = try_get_class_params(classifier, &class) {
-                if let Some(class) = has_class {
-                    get_witness_attractors(&class)
-                } else {
-                    BackendResponse::err("Specified class has no witness.")
-                }
-            } else {
-                BackendResponse::err(
-                    "Classification still in progress. Cannot explore attractors now.",
-                )
-            }
-        } else {
-            BackendResponse::err("No results available.")
-        }
+fn get_attractors(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    class_str: String,
+) -> BackendResult {
+    let state = storage.get_with(key, Default::default);
+    let class = Class::try_read_string(class_str).map_err(BackendResponse::err)?;
+
+    let cmp_guard = state.attractor_computation_read();
+    let Some(cmp) = cmp_guard.as_ref() else {
+        return BackendResponse::err_result("No results available.");
+    };
+
+    let Some(has_class) = try_get_class_params(&cmp.classifier, &class) else {
+        return BackendResponse::err_result(
+            "Classification still in progress. Cannot explore attractors now.",
+        );
+    };
+
+    if let Some(class) = has_class {
+        Ok(get_witness_attractors(state.as_ref(), &class))
+    } else {
+        BackendResponse::err_result("Specified class has no witness.")
     }
 }
 
-fn get_witness_attractors(f_colors: &GraphColors) -> BackendResponse {
+fn get_witness_attractors(state: &SessionState, f_colors: &GraphColors) -> BackendResponse {
     {
         // Variables prefixed with f_ are from the original fully parametrised graph.
-        let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-        let cmp = cmp.read().unwrap();
+        let cmp = state.attractor_computation_read();
         if let Some(cmp) = &*cmp {
             let f_classifier = &cmp.classifier;
             let graph = &cmp.graph;
@@ -1255,192 +1253,135 @@ async fn start_control_computation(
 
 /// Accept an Aeon model, parse it and start a new computation (if there is no computation running).
 #[post("/start_computation", format = "plain", data = "<data>")]
-async fn start_computation(data: Data<'_>) -> BackendResponse {
-    let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model to 10MB
-    let mut aeon_string = String::new();
-    if let Err(error) = stream.read_to_string(&mut aeon_string).await {
-        return BackendResponse::err(format!("Cannot read model: {}", error));
-    }
-    let network = match BooleanNetwork::try_from(aeon_string.as_str()) {
-        Ok(network) => network,
-        Err(error) => {
-            return BackendResponse::err(format!("Invalid network: {}", error));
-        }
-    };
-    let graph = match SymbolicAsyncGraph::new(&network) {
-        Ok(graph) => graph,
-        Err(error) => {
-            return BackendResponse::err(format!("Cannot create graph: {}", error));
-        }
-    };
-    // Now we can try to start the computation...
-    let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
+async fn start_computation(
+    key: SessionKey,
+    storage: &State<SessionStorage>,
+    data: Data<'_>,
+) -> BackendResult {
+    let state = storage.get_with(key, Default::default);
+
+    let aeon_string = load_string(data, MAX_MODEL_SIZE).await?;
+    let network = BooleanNetwork::try_from(aeon_string.as_str()).map_err(BackendResponse::err)?;
+    let graph = SymbolicAsyncGraph::new(&network).map_err(BackendResponse::err)?;
+
+    let mut cmp = state.attractor_computation_write();
+
     // First, check if some other experiment is already running.
+    if let Some(cmp) = cmp.as_ref()
+        && cmp.thread.is_some()
     {
-        let cmp = cmp.read().unwrap();
-        if let Some(computation) = &*cmp
-            && computation.thread.is_some()
-        {
-            return BackendResponse::err(
-                "Previous computation is still running. Cancel it before starting a new one.",
-            );
-        }
+        return BackendResponse::err_result(
+            "Previous computation is still running. Cancel it before starting a new one.",
+        );
     }
-    {
-        // Now actually get the write lock, but check again because race conditions...
-        let mut cmp = cmp.write().unwrap();
-        if let Some(computation) = &*cmp
-            && computation.thread.is_some()
-        {
-            return BackendResponse::err(
-                "Previous computation is still running. Cancel it before starting a new one.",
-            );
-        }
-        let mut new_cmp = Computation {
-            timestamp: SystemTime::now(),
-            task: GraphTaskContext::new(),
-            input_model: aeon_string.clone(),
-            classifier: Arc::new(Classifier::new(&graph)),
-            graph: Arc::new(graph),
-            thread: None,
-            error: None,
-            finished_timestamp: None,
-        };
-        // Prepare thread - not that we have computation locked, so the thread
-        // will have to wait for us to end before writing down the graph and other
-        // stuff.
-        let thread_graph = new_cmp.graph.clone();
-        let thread_classifier = new_cmp.classifier.clone();
-        let cmp_thread = std::thread::spawn(move || {
-            let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
 
-            let graph = thread_graph;
-            let classifier = thread_classifier;
+    // A fresh computation that we will fill with data.
+    let mut new_cmp = AttractorComputation {
+        timestamp: SystemTime::now(),
+        task: GraphTaskContext::new(),
+        input_model: aeon_string.clone(),
+        classifier: Classifier::new(&graph),
+        graph,
+        thread: None,
+        finished_timestamp: None,
+    };
 
-            if let Some(cmp) = cmp.read().unwrap().as_ref() {
-                // TODO: Note that this holds the read-lock on computation
-                // for the  whole time, which is mostly ok because it can be
-                // cancelled without write-lock, but we should find a
-                // way to avoid this!
-                let task_context = &cmp.task;
-                task_context.init_progress(&graph);
+    let start = u64::try_from(new_cmp.start_timestamp()).unwrap_or(u64::MAX);
 
-                // Now we can actually start the computation...
+    // Prepare a computation thread - not that while we hold the write lock, the thread
+    // can do some initial steps, but it has to wait before it can report any results.
+    let thread_state = state.clone();
+    let cmp_thread = std::thread::spawn(move || {
+        // Note that this holds the read-lock for the whole duration of the computation. However,
+        // since cancellation is possible with only a read lock, this is fine, and it guarantees
+        // a new computation can never be created unless the previous one is canceled.
+        if let Some(cmp) = thread_state.attractor_computation_read().as_ref() {
+            let task_context = &cmp.task;
+            let graph = &cmp.graph;
+            let classifier = &cmp.classifier;
 
-                let cancelled: Cancellable<()> =
-                    cancel_this::on_trigger(task_context.is_cancelled.clone(), || {
-                        // First, perform ITGR reduction.
-                        let state = ItgrState::new(&graph, graph.unit_colored_vertices());
-                        let mut itgr =
-                            InterleavedTransitionGuidedReduction::configure(graph.as_ref(), state);
-                        let universe = loop {
-                            match itgr.try_compute() {
-                                Ok(result) => break result,
-                                Err(Incomplete::Cancelled(c)) => return Err(c),
-                                Err(Incomplete::Suspended) => {
-                                    task_context.update_remaining(itgr.state().remaining());
-                                }
-                                Err(e) => panic!("{}", e),
-                            }
-                        };
-
-                        let active_variables =
-                            itgr.state().active_variables().collect::<BTreeSet<_>>();
-
-                        // Then run Xie-Beerel to actually detect the components.
-                        let mut config = AttractorConfig::new(graph.as_ref().clone());
-                        config.active_variables = active_variables;
-                        let mut attractors = XieBeerelAttractors::configure(config, universe);
-
-                        loop {
-                            match attractors.try_next() {
-                                None => break,
-                                Some(Ok(component)) => {
-                                    println!("Component {}", component.approx_cardinality());
-                                    classifier.add_component(component, &graph);
-                                }
-                                Some(Err(Incomplete::Cancelled(e))) => return Err(e),
-                                Some(Err(Incomplete::Suspended)) => {
-                                    task_context.update_remaining(attractors.state().remaining());
-                                }
-                                Some(Err(e)) => panic!("{}", e),
-                            }
+            // Upon cancellation, the code should continue normally with partial results
+            // (i.e., anything that was computed before cancellation).
+            let _: Cancellable<()> = cancel_this::on_trigger(cmp.task.is_cancelled.clone(), || {
+                // First, perform ITGR reduction.
+                let state = ItgrState::new(graph, graph.unit_colored_vertices());
+                let mut itgr = InterleavedTransitionGuidedReduction::configure(graph, state);
+                let universe = loop {
+                    match itgr.try_compute() {
+                        Ok(result) => break result,
+                        Err(Incomplete::Cancelled(c)) => return Err(c),
+                        Err(Incomplete::Suspended) => {
+                            task_context.update_remaining(itgr.state().remaining());
                         }
+                        Err(e) => panic!("{}", e),
+                    }
+                };
 
-                        Ok(())
-                    });
+                let active_variables = itgr.state().active_variables().collect::<BTreeSet<_>>();
 
-                // The code should continue normally with partial results (i.e. anything that
-                // was computed before cancellation).
-                if cancelled.is_err() {
-                    println!("Computation stopping. Cancelled.");
+                // Then run Xie-Beerel to actually detect the components.
+                let mut config = AttractorConfig::new(graph.clone());
+                config.active_variables = active_variables;
+                let mut attractors = XieBeerelAttractors::configure(config, universe);
+
+                loop {
+                    match attractors.try_next() {
+                        None => break,
+                        Some(Ok(component)) => {
+                            println!("Component {}", component.approx_cardinality());
+                            classifier.add_component(component, graph);
+                        }
+                        Some(Err(Incomplete::Cancelled(e))) => return Err(e),
+                        Some(Err(Incomplete::Suspended)) => {
+                            task_context.update_remaining(attractors.state().remaining());
+                        }
+                        Some(Err(e)) => panic!("{}", e),
+                    }
                 }
-            }
 
-            {
-                if let Some(cmp) = cmp.write().unwrap().as_mut() {
-                    cmp.finished_timestamp = Some(SystemTime::now());
-                } else {
-                    panic!("Cannot finish computation. No computation found.")
-                }
-            }
-
-            {
-                let result = classifier.export_result();
-                let tree = TREE.clone();
-                let mut tree = tree.write().unwrap();
-                *tree = Some(Bdt::new_from_graph(result, &graph, &network));
-                println!("Saved decision tree");
-            }
+                Ok(())
+            });
 
             println!("Component search done...");
 
-            {
-                // Remove reference to thread, since we are done now...
-                if let Some(cmp) = cmp.write().unwrap().as_mut() {
-                    cmp.thread = None;
-                } else {
-                    panic!("Cannot finalize thread. No computation found.");
-                };
-            }
-        });
-        new_cmp.thread = Some(cmp_thread);
+            // Once computation is complete, we can convert the result into a decision tree:
+            let result = classifier.export_result();
+            let tree = TREE.clone();
+            let mut tree = tree.write().unwrap();
+            *tree = Some(Bdt::new_from_graph(result, graph, &network));
+            println!("Saved decision tree");
+        } else {
+            panic!("Computation disappeared!");
+        };
 
-        let start = new_cmp.start_timestamp();
-        // Now write the new computation to the global state...
-        *cmp = Some(new_cmp);
+        // Once the computation is done, we remove the thread reference and record overall time:
+        if let Some(cmp) = thread_state.attractor_computation_write().as_mut() {
+            cmp.thread = None;
+            cmp.finished_timestamp = Some(SystemTime::now());
+        } else {
+            panic!("Computation disappeared!");
+        }
+    });
 
-        BackendResponse::ok(object! { "timestamp" => start as u64 }.to_string())
-        // status of the computation can be obtained via ping...
-    }
+    new_cmp.thread = Some(cmp_thread);
+
+    // Now write the new computation to the global state...
+    *cmp = Some(new_cmp);
+
+    BackendResponse::ok_json_result(object! { "timestamp" => start })
 }
 
 #[post("/cancel_computation", format = "plain")]
-fn cancel_computation() -> BackendResponse {
-    let cmp: Arc<RwLock<Option<Computation>>> = COMPUTATION.clone();
-    {
-        // first just check there is something to cancel
-        let cmp = cmp.read().unwrap();
-        if let Some(cmp) = &*cmp {
-            if cmp.thread.is_none() {
-                return BackendResponse::err("Nothing to cancel. Computation already done.");
-            }
-            if cmp.task.is_cancelled() {
-                return BackendResponse::err("Computation already cancelled.");
-            }
-        } else {
-            return BackendResponse::err("No computation to cancel.");
+fn cancel_computation(key: SessionKey, storage: &State<SessionStorage>) -> BackendResponse {
+    let state = storage.get_with(key, Default::default);
+    match state.attractor_computation_read().as_ref() {
+        None => err_response("No computation to cancel."),
+        Some(cmp) if cmp.thread.is_none() => err_response("Nothing to cancel, computation done."),
+        Some(cmp) if cmp.task.is_cancelled() => err_response("Computation already cancelled."),
+        Some(cmp) => {
+            cmp.task.cancel();
+            BackendResponse::ok("\"ok\"")
         }
-    }
-    let cmp = cmp.read().unwrap();
-    if let Some(cmp) = &*cmp {
-        if cmp.thread.is_none() {
-            return BackendResponse::err("Nothing to cancel. Computation already done.");
-        }
-        cmp.task.cancel();
-        BackendResponse::ok("\"ok\"")
-    } else {
-        BackendResponse::err("No computation to cancel.")
     }
 }
 
@@ -1448,25 +1389,19 @@ fn cancel_computation() -> BackendResponse {
 /// If everything goes well, return a standard result object with a parsed model, or
 /// error if something fails.
 #[post("/sbml_to_aeon", format = "plain", data = "<data>")]
-async fn sbml_to_aeon(data: Data<'_>) -> BackendResponse {
-    let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model to 10MB
-    let mut sbml_string = String::new();
-    match stream.read_to_string(&mut sbml_string).await {
-        Ok(_) => {
-            match BooleanNetwork::try_from_sbml(&sbml_string) {
-                Ok((model, layout)) => {
-                    let mut model_string = format!("{}", model); // convert back to aeon
-                    model_string += "\n";
-                    for (var, (x, y)) in layout {
-                        model_string += format!("#position:{}:{},{}\n", var, x, y).as_str();
-                    }
-                    BackendResponse::ok(object! { "model" => model_string }.to_string())
-                }
-                Err(error) => BackendResponse::err(&error),
-            }
-        }
-        Err(error) => BackendResponse::err(format!("{}", error)),
+async fn sbml_to_aeon(data: Data<'_>) -> BackendResult {
+    // Read network from data stream.
+    let sbml_string = load_string(data, MAX_MODEL_SIZE).await?;
+    let (model, layout) =
+        BooleanNetwork::try_from_sbml(sbml_string.as_str()).map_err(BackendResponse::err)?;
+
+    let mut model_str = format!("{}", model); // convert back to aeon
+    model_str += "\n";
+    for (var, (x, y)) in layout {
+        model_str += format!("#position:{}:{},{}\n", var, x, y).as_str();
     }
+
+    BackendResponse::ok_json_result(object! { "model" => model_str })
 }
 
 /// Try to read the model layout metadata from the given aeon file.
@@ -1506,46 +1441,29 @@ fn read_metadata(aeon_string: &str) -> (Option<String>, Option<String>) {
 /// which will then be translated into SBML (XML) representation.
 /// Preserve layout metadata.
 #[post("/aeon_to_sbml", format = "plain", data = "<data>")]
-async fn aeon_to_sbml(data: Data<'_>) -> BackendResponse {
-    let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model to 10MB
-    let mut aeon_string = String::new();
-    match stream.read_to_string(&mut aeon_string).await {
-        Ok(_) => match BooleanNetwork::try_from(aeon_string.as_str()) {
-            Ok(network) => {
-                let layout = read_layout(&aeon_string);
-                let sbml_string = network.to_sbml(Some(&layout));
-                BackendResponse::ok(object! { "model" => sbml_string }.to_string())
-            }
-            Err(error) => BackendResponse::err(&error),
-        },
-        Err(error) => BackendResponse::err(format!("{}", error)),
-    }
+async fn aeon_to_sbml(data: Data<'_>) -> BackendResult {
+    let aeon_string = load_string(data, MAX_MODEL_SIZE).await?;
+    let network = BooleanNetwork::try_from(aeon_string.as_str()).map_err(BackendResponse::err)?;
+
+    let layout = read_layout(&aeon_string);
+    let sbml_string = network.to_sbml(Some(&layout));
+    BackendResponse::ok_json_result(object! { "model" => sbml_string })
 }
 
 /// Accept an Aeon file and create an SBML version with all parameters instantiated (a witness model).
 /// Note that this can take quite a while for large models since we have to actually build
 /// the unit BDD right now (in the future, we might opt to use a SAT solver which might be faster).
 #[post("/aeon_to_sbml_instantiated", format = "plain", data = "<data>")]
-async fn aeon_to_sbml_instantiated(data: Data<'_>) -> BackendResponse {
-    let mut stream = data.open(ByteUnit::Megabyte(10)); // limit model to 10MB
-    let mut aeon_string = String::new();
-    match stream.read_to_string(&mut aeon_string).await {
-        Ok(_) => {
-            match BooleanNetwork::try_from(aeon_string.as_str())
-                .and_then(|it| SymbolicAsyncGraph::new(&it))
-            {
-                Ok(graph) => {
-                    let witness = graph.pick_witness(graph.unit_colors());
-                    let layout = read_layout(&aeon_string);
-                    BackendResponse::ok(
-                        object! { "model" => witness.to_sbml(Some(&layout)) }.to_string(),
-                    )
-                }
-                Err(error) => BackendResponse::err(&error),
-            }
-        }
-        Err(error) => BackendResponse::err(format!("{}", error)),
-    }
+async fn aeon_to_sbml_instantiated(data: Data<'_>) -> BackendResult {
+    let aeon_string = load_string(data, MAX_MODEL_SIZE).await?;
+    let graph = BooleanNetwork::try_from(aeon_string.as_str())
+        .and_then(|it| SymbolicAsyncGraph::new(&it))
+        .map_err(BackendResponse::err)?;
+
+    let witness = graph.pick_witness(graph.unit_colors());
+    let layout = read_layout(&aeon_string);
+    let sbml_string = witness.to_sbml(Some(&layout));
+    BackendResponse::ok_json_result(object! { "model" => sbml_string })
 }
 
 // An empty endpoint that will respond to all OPTIONS requests positively,
@@ -1553,6 +1471,16 @@ async fn aeon_to_sbml_instantiated(data: Data<'_>) -> BackendResponse {
 #[options("/<_path..>")]
 fn all_options(_path: std::path::PathBuf) -> &'static str {
     "" // Respond to all OPTIONS requests with an empty 200 response
+}
+
+/// Read a string from the give data bytes with a specified size limit.
+async fn load_string(data: Data<'_>, limit: ByteUnit) -> Result<String, BackendResponse> {
+    let mut stream = data.open(limit);
+    let mut string = String::new();
+    match stream.read_to_string(&mut string).await {
+        Ok(_) => Ok(string),
+        Err(error) => Err(error.into()),
+    }
 }
 
 #[launch]
@@ -1581,8 +1509,14 @@ fn rocket() -> _ {
 
     let cors = CorsOptions::default().allowed_origins(AllowedOrigins::all());
 
+    let session_storage: Cache<SessionKey, Arc<SessionState>> = Cache::builder()
+        .max_capacity(1000) // 1000 sessions should be fine for local usage.
+        .time_to_idle(Duration::from_mins(10)) // 10 minutes idle time should hopefully by ok, we'll see..
+        .build();
+
     rocket::custom(config)
         .attach(cors.to_cors().unwrap())
+        .manage(session_storage)
         .mount(
             "/",
             routes![
@@ -1618,6 +1552,8 @@ fn rocket() -> _ {
         )
 }
 
+type BackendResult = Result<BackendResponse, BackendResponse>;
+
 struct BackendResponse {
     message: String,
 }
@@ -1629,6 +1565,10 @@ impl BackendResponse {
         }
     }
 
+    fn ok_json(value: JsonValue) -> Self {
+        Self::ok(value.to_string())
+    }
+
     fn err<S: AsRef<str>>(message: S) -> Self {
         BackendResponse {
             message: object! {
@@ -1638,6 +1578,29 @@ impl BackendResponse {
             .to_string(),
         }
     }
+
+    fn err_result<S: AsRef<str>>(message: S) -> BackendResult {
+        Err(BackendResponse::err(message))
+    }
+
+    fn ok_result<S: AsRef<str>>(message: S) -> BackendResult {
+        Ok(BackendResponse::ok(message))
+    }
+
+    fn ok_json_result(value: JsonValue) -> BackendResult {
+        Ok(BackendResponse::ok_json(value))
+    }
+}
+
+impl<T: Error> From<T> for BackendResponse {
+    fn from(value: T) -> Self {
+        BackendResponse::err(value.to_string())
+    }
+}
+
+/// Just a helper to reduce verbosity of creating error responses.
+fn err_response<S: AsRef<str>>(message: S) -> BackendResponse {
+    BackendResponse::err(message)
 }
 
 impl<'r, 's: 'r> Responder<'r, 's> for BackendResponse {

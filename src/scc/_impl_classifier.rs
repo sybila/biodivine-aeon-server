@@ -69,6 +69,22 @@ impl Classifier {
             .collect()
     }
 
+    /// An extension of [`Self::export_components_with_class`] that simply returns all
+    /// component sets when no class is given.
+    pub fn export_components_with_optional_class(
+        &self,
+        class: Option<Behaviour>,
+    ) -> Vec<GraphColoredVertices> {
+        if let Some(behaviour) = class {
+            self.export_components_with_class(behaviour)
+        } else {
+            self.export_components()
+                .into_iter()
+                .map(|(c, _)| c)
+                .collect()
+        }
+    }
+
     /// Static function to classify just one component and immediately obtain results.
     pub fn classify_component(
         component: &GraphColoredVertices,
