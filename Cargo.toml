@@ -12,22 +12,24 @@ rustdoc-args = ["--html-in-header", "docs-head.html"]
 [profile.release]
 # This is important for profiling - otherwise we would get unreadable traces.
 #debug = true
-# This gives a marginally better runtime, but a much, much longer compile times, so disabled by default.
-#lto = true
+# LTO is required for `computation-process` algorithms to work as best as they can.
+lto = true
 
 [dependencies]
-biodivine-lib-bdd = "0.5.22"
-biodivine-lib-param-bn = "0.5.13"
+biodivine-lib-bdd = "0.6.2"
+biodivine-lib-param-bn = "0.7.0"
+biodivine-algo-bdd-scc = "0.3.1"
+cancel-this = "0.4.0"
+computation-process = "0.2.0"
 rocket = "0.5.1"
 rocket_cors = "0.6.0"
 json = "0.12.4"
 regex = "1.11.1"
 rand = "0.8.5"
-futures = "0.3.31"
 tokio = "1.41.1"
 fixed-map = "0.9.5"
 lazy_static = "1.5.0"
-biodivine-pbn-control = { git = "https://github.com/sybila/biodivine-pbn-control", rev = "8ea98af977b43b5bdffd9455e824922be8eda97a" }
+biodivine-pbn-control = { git = "https://github.com/sybila/biodivine-pbn-control", rev = "9e31bab9d000266ea25c35cc752c69077973d43c" }
 serde = { version = "1.0.215", features = ["derive"] }
 num-bigint = "0.4.6"
 num-traits = "0.2.19"

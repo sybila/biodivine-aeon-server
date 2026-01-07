@@ -1,11 +1,14 @@
-use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
-use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
 use biodivine_aeon_server::scc::{Behaviour, Classifier};
 use biodivine_aeon_server::GraphTaskContext;
+use biodivine_algo_bdd_scc::attractor::{
+    AttractorConfig, InterleavedTransitionGuidedReduction, ItgrState, XieBeerelAttractors,
+};
 use biodivine_lib_param_bn::biodivine_std::bitvector::BitVector;
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::SymbolicAsyncGraph;
 use biodivine_lib_param_bn::BooleanNetwork;
+use computation_process::{Computable, Stateful};
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::io::Read;
 use std::time::SystemTime;
@@ -43,29 +46,27 @@ fn main() {
     // Now we can actually start the computation...
 
     // First, perform ITGR reduction.
-    let (universe, active_variables) = interleaved_transition_guided_reduction(
-        &task_context,
-        &graph,
-        graph.mk_unit_colored_vertices(),
-    );
+    let state = ItgrState::new(&graph, graph.unit_colored_vertices());
+    let mut itgr = InterleavedTransitionGuidedReduction::configure(&graph, state);
+    let universe = itgr.compute().expect("Cancellation disabled.");
+    let active_variables = itgr.state().active_variables().collect::<BTreeSet<_>>();
 
     // Then run Xie-Beerel to actually detect the components.
-    xie_beerel_attractors(
-        &task_context,
-        &graph,
-        &universe,
-        &active_variables,
-        |component| {
-            println!("Found attractor... {}", component.approx_cardinality());
-            println!("Remaining: {}", task_context.get_percent_string());
-            println!(
-                "Unique states: {}",
-                component.vertices().approx_cardinality()
-            );
-            println!("Unique colors: {}", component.colors().approx_cardinality());
-            classifier.add_component(component, &graph);
-        },
-    );
+    let mut config = AttractorConfig::new(graph.clone());
+    config.active_variables = active_variables;
+    let attractors = XieBeerelAttractors::configure(config, universe);
+
+    for component in attractors {
+        let component = component.expect("Cancellation disabled.");
+        println!("Found attractor... {}", component.approx_cardinality());
+        println!("Remaining: {}", task_context.get_percent_string());
+        println!(
+            "Unique states: {}",
+            component.vertices().approx_cardinality()
+        );
+        println!("Unique colors: {}", component.colors().approx_cardinality());
+        classifier.add_component(component, &graph);
+    }
 
     classifier.print();
 

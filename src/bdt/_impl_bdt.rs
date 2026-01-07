@@ -47,12 +47,12 @@ impl Bdt {
     }
 
     /// Iterator over all valid node ids in this tree.
-    pub fn nodes(&self) -> BdtNodeIds {
+    pub fn nodes(&self) -> BdtNodeIds<'_> {
         self.storage.keys().map(|x| BdtNodeId(*x))
     }
 
     /// Iterator over all attribute ids in this tree.
-    pub fn attributes(&self) -> AttributeIds {
+    pub fn attributes(&self) -> AttributeIds<'_> {
         (0..self.attributes.len()).map(AttributeId)
     }
 

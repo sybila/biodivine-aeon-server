@@ -13,10 +13,6 @@ pub mod asymptotic_behaviour;
 /// directly.
 pub mod reachability;
 
-/// Symbolic algorithms for detecting attractors. Includes Xie-Beerel forward-backward algorithm
-/// and transition guided reduction with parallelism and interleaving.
-pub mod attractors;
-
 /// **(internal)** Implementation of a `SymbolicCounter` that provides a very basic usage
 /// example of `IncrementalClassifier` for counting the number of encounters of a particular
 /// member of a symbolic set.

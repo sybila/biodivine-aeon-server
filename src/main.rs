@@ -15,27 +15,29 @@ use std::convert::TryFrom;
 
 use biodivine_aeon_server::bdt::{AttributeId, Bdt, BdtNodeId};
 use biodivine_aeon_server::control::ControlComputation;
-use biodivine_aeon_server::scc::algo_interleaved_transition_guided_reduction::interleaved_transition_guided_reduction;
 use biodivine_aeon_server::scc::algo_stability_analysis::{
     compute_stability, StabilityVector, VariableStability,
 };
-use biodivine_aeon_server::scc::algo_xie_beerel::xie_beerel_attractors;
 use biodivine_aeon_server::util::functional::Functional;
 use biodivine_aeon_server::GraphTaskContext;
+use biodivine_algo_bdd_scc::attractor::{
+    AttractorConfig, InterleavedTransitionGuidedReduction, ItgrState, XieBeerelAttractors,
+};
 use biodivine_lib_param_bn::biodivine_std::bitvector::{ArrayBitVector, BitVector};
 use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
 use biodivine_pbn_control::control::PhenotypeOscillationType;
 use biodivine_pbn_control::perturbation::PerturbationGraph;
+use computation_process::{Computable, Stateful};
 use json::JsonValue;
 use lazy_static::lazy_static;
-use num_bigint::BigInt;
+use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 use rocket::data::ByteUnit;
 use rocket::{Config, Data};
 use rocket_cors::{AllowedOrigins, CorsOptions};
 use std::cmp::max;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
@@ -82,29 +84,29 @@ lazy_static! {
     static ref TREE: Arc<RwLock<Option<Bdt>>> = Arc::new(RwLock::new(None));
 }
 
-/// Decision tree API design:
-///    - /get_bifurcation_tree: Obtain the full tree currently managed by the server.
-///    Initially, this is just the root node, however, it can also be a full tree, because
-///    the client can be refreshed and then it loads the correct data again. Returns array of Tree
-///    node objects.
-///    - /get_attributes/<node_id>: Obtain a list of attributes that can be applied to an unprocessed
-///    node. (This can take a while for large models) Returns an array of attribute objects.
-///    - /apply_attribute/<node_id>/<attribute_id>: Apply an attribute to an unprocessed node,
-///    replacing it with a decision and adding two new child nodes. Returns an array of tree nodes
-///    that have changed (i.e. the unprocessed node is now a decision node, and it has two children
-///    now)
-///    - /revert_decision/<node_id>: Turn a decision node back into unprocessed node. This is done
-///    recursively, so any children are deleted as well. Returns a
-///    { node: UnprocessedNode, removed: array(usize) } - unprocessed node is the new node that
-///    replaces the decision node, removed is an array of node ids that are deleted from the tree.
-/// Models:
-///    - Tree node (three types):
-///      - Leaf node: { type: "leaf", id: usize, class: ClassString, cardinality: f64 }
-///      - Decision node: { type: "decision", id: usize, attribute_name: String, left: usize, right: usize }
-///      - Unprocessed node: { type: "unprocessed", id: usize, classes: ClassList }
-///    - Attribute { id: usize, name: String, gain: f64, left: ClassList, right: ClassList }
-///    - Class list: array({ class: ClassString, cardinality: f64 })
-///
+// Decision tree API design:
+//    - /get_bifurcation_tree: Obtain the full tree currently managed by the server.
+//    Initially, this is just the root node, however, it can also be a full tree, because
+//    the client can be refreshed and then it loads the correct data again. Returns array of Tree
+//    node objects.
+//    - /get_attributes/<node_id>: Obtain a list of attributes that can be applied to an unprocessed
+//    node. (This can take a while for large models) Returns an array of attribute objects.
+//    - /apply_attribute/<node_id>/<attribute_id>: Apply an attribute to an unprocessed node,
+//    replacing it with a decision and adding two new child nodes. Returns an array of tree nodes
+//    that have changed (i.e. the unprocessed node is now a decision node, and it has two children
+//    now)
+//    - /revert_decision/<node_id>: Turn a decision node back into unprocessed node. This is done
+//    recursively, so any children are deleted as well. Returns a
+//    { node: UnprocessedNode, removed: array(usize) } - unprocessed node is the new node that
+//    replaces the decision node, removed is an array of node ids that are deleted from the tree.
+// Models:
+//    - Tree node (three types):
+//      - Leaf node: { type: "leaf", id: usize, class: ClassString, cardinality: f64 }
+//      - Decision node: { type: "decision", id: usize, attribute_name: String, left: usize, right: usize }
+//      - Unprocessed node: { type: "unprocessed", id: usize, classes: ClassList }
+//    - Attribute { id: usize, name: String, gain: f64, left: ClassList, right: ClassList }
+//    - Class list: array({ class: ClassString, cardinality: f64 })
+//
 
 /// Obtain the graph structure of the decision tree as a list of nodes.
 #[get("/get_bifurcation_tree")]
@@ -244,7 +246,7 @@ fn apply_attribute(node_id: String, attribute_id: String) -> BackendResponse {
 fn revert_decision(node_id: String) -> BackendResponse {
     let tree = TREE.clone();
     let mut tree = tree.write().unwrap();
-    return if let Some(tree) = tree.as_mut() {
+    if let Some(tree) = tree.as_mut() {
         let node = BdtNodeId::try_from_str(&node_id, tree);
         let node = if let Some(node) = node {
             node
@@ -263,7 +265,7 @@ fn revert_decision(node_id: String) -> BackendResponse {
         BackendResponse::ok(response.to_string())
     } else {
         BackendResponse::err("No tree present. Run computation first.")
-    };
+    }
 }
 
 #[post("/auto_expand/<node_id>/<depth>")]
@@ -507,7 +509,7 @@ fn get_results() -> BackendResponse {
 fn get_tree_witness(node_id: String) -> BackendResponse {
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
-    return if let Some(tree) = &*tree {
+    if let Some(tree) = &*tree {
         let node = BdtNodeId::try_from_str(&node_id, tree);
         let node = if let Some(node) = node {
             node
@@ -522,7 +524,7 @@ fn get_tree_witness(node_id: String) -> BackendResponse {
         }
     } else {
         BackendResponse::err("No tree present. Run computation first.")
-    };
+    }
 }
 
 #[get("/get_stability_witness/<node_id>/<behaviour_str>/<variable_str>/<vector_str>")]
@@ -678,7 +680,7 @@ fn get_witness_network(colors: &GraphColors) -> BackendResponse {
 fn get_tree_attractors(node_id: String) -> BackendResponse {
     let tree = TREE.clone();
     let tree = tree.read().unwrap();
-    return if let Some(tree) = &*tree {
+    if let Some(tree) = &*tree {
         let node = BdtNodeId::try_from_str(&node_id, tree);
         let node = if let Some(value) = node {
             value
@@ -693,7 +695,7 @@ fn get_tree_attractors(node_id: String) -> BackendResponse {
         }
     } else {
         BackendResponse::err("No tree present. Run computation first.")
-    };
+    }
 }
 
 #[get("/get_stability_attractors/<node_id>/<behaviour_str>/<variable_str>/<vector_str>")]
@@ -1001,10 +1003,10 @@ async fn get_control_stats() -> BackendResponse {
                     minimal_perturbation = Some(k.len());
                 }
 
-                let p_card = value.exact_cardinality() * 1_000_000;
+                let p_card = value.exact_cardinality() * 1_000_000u32;
                 let u_card = unit.exact_cardinality();
 
-                let robustness: BigInt = p_card / u_card;
+                let robustness: BigUint = p_card / u_card;
                 let robustness: f64 = robustness.to_f64().unwrap_or(f64::NAN) / 1_000_000.0;
 
                 if robustness > max_robustness.unwrap_or(0.0) {
@@ -1046,10 +1048,10 @@ async fn get_control_results() -> BackendResponse {
                 // The following method always give an approximation up to 6 decimal places, even if the
                 // cardinality would overflow to f64::infinity.
 
-                let p_card = value.exact_cardinality() * 1_000_000;
+                let p_card = value.exact_cardinality() * 1_000_000u32;
                 let u_card = unit.exact_cardinality();
 
-                let robustness: BigInt = p_card / u_card;
+                let robustness: BigUint = p_card / u_card;
                 let robustness: f64 = robustness.to_f64().unwrap_or(f64::NAN) / 1_000_000.0;
                 response
                     .push(object! {
@@ -1219,11 +1221,12 @@ async fn start_control_computation(
                 &phenotype,
                 oscillation,
                 Some(&admissible_perturbations),
+                pstg.mk_unit_colored_vertices().vertices(),
                 Some(min_robustness),
                 Some(result_count),
                 true,
                 |partial| {
-                    if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    if cancel_flag.load(Relaxed) {
                         Err(partial.clone())
                     } else {
                         Ok(())
@@ -1328,23 +1331,22 @@ async fn start_computation(data: Data<'_>) -> BackendResponse {
                 // Now we can actually start the computation...
 
                 // First, perform ITGR reduction.
-                let (universe, active_variables) = interleaved_transition_guided_reduction(
-                    task_context,
-                    &graph,
-                    graph.mk_unit_colored_vertices(),
-                );
+                let state = ItgrState::new(&graph, graph.unit_colored_vertices());
+                let mut itgr =
+                    InterleavedTransitionGuidedReduction::configure(graph.as_ref(), state);
+                let universe = itgr.compute().expect("Cancellation disabled.");
+                let active_variables = itgr.state().active_variables().collect::<BTreeSet<_>>();
 
                 // Then run Xie-Beerel to actually detect the components.
-                xie_beerel_attractors(
-                    task_context,
-                    &graph,
-                    &universe,
-                    &active_variables,
-                    |component| {
-                        println!("Component {}", component.approx_cardinality());
-                        classifier.add_component(component, &graph);
-                    },
-                );
+                let mut config = AttractorConfig::new(graph.as_ref().clone());
+                config.active_variables = active_variables;
+                let attractors = XieBeerelAttractors::configure(config, universe);
+
+                for component in attractors {
+                    let component = component.expect("Cancellation disabled.");
+                    println!("Component {}", component.approx_cardinality());
+                    classifier.add_component(component, &graph);
+                }
             }
 
             {
