@@ -10,7 +10,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-20.04
+          - platform: ubuntu-22.04
             artifact_name: biodivine-aeon-server
             asset_name: aeon-compute-engine-linux
           - platform: windows-latest
