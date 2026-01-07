@@ -5,10 +5,6 @@ authors = ["Samuel Pastva <daemontus@gmail.com>"]
 edition = "2024"
 default-run = "biodivine-aeon-server"
 
-# Enable rich docs for some online docs autogen services.
-[package.metadata.docs.rs]
-rustdoc-args = ["--html-in-header", "docs-head.html"]
-
 [profile.release]
 # This is important for profiling - otherwise we would get unreadable traces.
 #debug = true
