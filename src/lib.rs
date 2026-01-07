@@ -2,7 +2,6 @@
 extern crate json;
 
 use crate::scc::ProgressTracker;
-use std::sync::atomic::AtomicBool;
 
 /// Contains all non-trivial long-running symbolic algorithms that are used within AEON.
 pub mod algorithms;
@@ -21,6 +20,6 @@ mod _impl_graph_task_context;
 /// We use this to avoid passing each context variable as a (mutable) reference. It is also easier
 /// to implement some utility methods this way.
 pub struct GraphTaskContext {
-    is_cancelled: AtomicBool,
+    pub is_cancelled: cancel_this::CancelAtomic,
     progress: ProgressTracker,
 }

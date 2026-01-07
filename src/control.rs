@@ -1,7 +1,6 @@
 use biodivine_lib_param_bn::symbolic_async_graph::GraphColors;
 use biodivine_pbn_control::perturbation::PerturbationGraph;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,7 +12,7 @@ pub struct ControlComputation {
     pub graph: Arc<PerturbationGraph>,
     pub thread: Option<JoinHandle<()>>,
     pub results: Option<Vec<(HashMap<String, bool>, GraphColors)>>,
-    pub is_cancelled: Arc<AtomicBool>,
+    pub is_cancelled: cancel_this::CancelAtomic,
 }
 
 impl ControlComputation {

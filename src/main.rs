@@ -28,6 +28,7 @@ use biodivine_lib_param_bn::biodivine_std::traits::Set;
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColors, SymbolicAsyncGraph};
 use biodivine_pbn_control::control::PhenotypeOscillationType;
 use biodivine_pbn_control::perturbation::PerturbationGraph;
+use cancel_this::{Cancellable, CancellationTrigger};
 use computation_process::{Computable, Stateful};
 use json::JsonValue;
 use lazy_static::lazy_static;
@@ -40,8 +41,6 @@ use std::cmp::max;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -977,7 +976,7 @@ async fn get_control_computation_status() -> BackendResponse {
             .as_millis();
         let stats = object! {
             "computationStarted" => u64::try_from(unix_timestamp).unwrap_or(u64::MAX),
-            "computationCancelled" => computation.is_cancelled.load(Relaxed),
+            "computationCancelled" => computation.is_cancelled.is_cancelled(),
             "isRunning" => computation.thread.is_some(),
             "elapsed" => elapsed,
             "version" => VERSION.to_string(),
@@ -1075,9 +1074,7 @@ async fn cancel_control_computation() -> BackendResponse {
     let cmp = CONTROL_COMPUTATION.clone();
     let cmp = cmp.read().unwrap();
     if let Some(computation) = &*cmp {
-        computation
-            .is_cancelled
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        computation.is_cancelled.cancel();
         BackendResponse::ok("Cancelled")
     } else {
         BackendResponse::err("No computation is running.")
@@ -1189,7 +1186,7 @@ async fn start_control_computation(
 
         let pstg = PerturbationGraph::with_restricted_variables(&network, controllable_vars);
 
-        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag = cancel_this::CancelAtomic::new();
         let mut computation = ControlComputation {
             timestamp: SystemTime::now(),
             finished_timestamp: None,
@@ -1203,7 +1200,6 @@ async fn start_control_computation(
         let thread_pstg = computation.graph.clone();
 
         computation.thread = Some(std::thread::spawn(move || {
-            let cancel_flag = cancel_flag.clone();
             let pstg = thread_pstg;
 
             let phenotype = pstg
@@ -1226,7 +1222,7 @@ async fn start_control_computation(
                 Some(result_count),
                 true,
                 |partial| {
-                    if cancel_flag.load(Relaxed) {
+                    if cancel_flag.is_cancelled() {
                         Err(partial.clone())
                     } else {
                         Ok(())
@@ -1326,26 +1322,37 @@ async fn start_computation(data: Data<'_>) -> BackendResponse {
                 // cancelled without write-lock, but we should find a
                 // way to avoid this!
                 let task_context = &cmp.task;
-                task_context.restart(&graph);
+                task_context.init_progress(&graph);
 
                 // Now we can actually start the computation...
 
-                // First, perform ITGR reduction.
-                let state = ItgrState::new(&graph, graph.unit_colored_vertices());
-                let mut itgr =
-                    InterleavedTransitionGuidedReduction::configure(graph.as_ref(), state);
-                let universe = itgr.compute().expect("Cancellation disabled.");
-                let active_variables = itgr.state().active_variables().collect::<BTreeSet<_>>();
+                let cancelled: Cancellable<()> =
+                    cancel_this::on_trigger(task_context.is_cancelled.clone(), || {
+                        // First, perform ITGR reduction.
+                        let state = ItgrState::new(&graph, graph.unit_colored_vertices());
+                        let mut itgr =
+                            InterleavedTransitionGuidedReduction::configure(graph.as_ref(), state);
+                        let universe = itgr.compute()?;
+                        let active_variables =
+                            itgr.state().active_variables().collect::<BTreeSet<_>>();
 
-                // Then run Xie-Beerel to actually detect the components.
-                let mut config = AttractorConfig::new(graph.as_ref().clone());
-                config.active_variables = active_variables;
-                let attractors = XieBeerelAttractors::configure(config, universe);
+                        // Then run Xie-Beerel to actually detect the components.
+                        let mut config = AttractorConfig::new(graph.as_ref().clone());
+                        config.active_variables = active_variables;
+                        let attractors = XieBeerelAttractors::configure(config, universe);
 
-                for component in attractors {
-                    let component = component.expect("Cancellation disabled.");
-                    println!("Component {}", component.approx_cardinality());
-                    classifier.add_component(component, &graph);
+                        for component in attractors {
+                            let component = component?;
+                            println!("Component {}", component.approx_cardinality());
+                            classifier.add_component(component, &graph);
+                        }
+                        Ok(())
+                    });
+
+                // The code should continue normally with partial results (i.e. anything that
+                // was computed before cancellation).
+                if cancelled.is_err() {
+                    println!("Computation stopping. Cancelled.");
                 }
             }
 
@@ -1409,11 +1416,8 @@ fn cancel_computation() -> BackendResponse {
         if cmp.thread.is_none() {
             return BackendResponse::err("Nothing to cancel. Computation already done.");
         }
-        if cmp.task.cancel() {
-            BackendResponse::ok("\"ok\"")
-        } else {
-            BackendResponse::err("Computation already cancelled.")
-        }
+        cmp.task.cancel();
+        BackendResponse::ok("\"ok\"")
     } else {
         BackendResponse::err("No computation to cancel.")
     }

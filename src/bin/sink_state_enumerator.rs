@@ -41,7 +41,7 @@ fn main() {
 
     let classifier = Classifier::new(&graph);
     let task_context = GraphTaskContext::new();
-    task_context.restart(&graph);
+    task_context.init_progress(&graph);
 
     // Now we can actually start the computation...
 
