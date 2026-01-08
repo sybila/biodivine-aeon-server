@@ -1,5 +1,5 @@
 name = "aeon-compute-engine"
-version = "0.7.0"
+version = "0.7.1"
 out-dir = "./dist"
 binaries-dir = "./target/release"
 before-packaging-command = "cargo build --release"
