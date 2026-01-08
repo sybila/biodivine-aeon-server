@@ -28,12 +28,12 @@ jobs:
       - name: Install packager
         run: cargo install cargo-packager --locked
       - name: compile binary
-        run: cargo packager --release ${{ matrix.os == 'macos-latest' && '--config ./packager.macos.toml' || '--config ./packager.toml' }}
+        run: cargo packager --release ${{ matrix.platform == 'macos-latest' && '--config ./packager.macos.toml' || '--config ./packager.toml' }}
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: "dist/**"
+          file: "dist/*.{dmg,deb,exe,AppImage}"
           file_glob: true
           overwrite: true
           tag: ${{ github.ref }}
