@@ -25,12 +25,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
+      - name: Install packager
+        run: cargo install cargo-packager --locked
       - name: compile binary
-        run: cargo build --release
+        run: cargo packager --release ${{ matrix.os == 'macos-latest' && '--config ./packager.macos.toml' || '--config ./packager.toml' }}
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target/release/${{ matrix.artifact_name }}
-          asset_name: ${{ matrix.asset_name }}
+          file: "dist/**"
+          file_glob: true
+          overwrite: true
           tag: ${{ github.ref }}

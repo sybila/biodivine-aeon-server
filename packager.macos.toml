@@ -1,0 +1,10 @@
+name = "aeon-compute-engine"
+version = "0.7.0"
+out-dir = "./dist"
+binaries-dir = "./target/release"
+before-packaging-command = "cargo build --release"
+product-name = "AEON Compute Engine"
+identifier = "cz.muni.fi.sybila.aeon.server"
+resources = ["Cargo.toml", "src", "128x128.png", "scripts"]
+icons = ["icons/*"]
+binaries = [ { main = false, path = "biodivine-aeon-server"}, { main = true, path = "launcher"} ]
