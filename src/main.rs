@@ -496,7 +496,7 @@ fn ping(key: SessionKey, storage: &State<SessionStorage>) -> BackendResponse {
     if let Some(cmp) = cmp_guard.as_ref() {
         response["timestamp"] = (cmp.start_timestamp() as u64).into();
         response["is_cancelled"] = cmp.task.is_cancelled().into();
-        response["progress"] = cmp.task.get_percent_string().into();
+        response["progress"] = cmp.task.get_progress_string().into();
         response["is_running"] = cmp.thread.is_some().into();
         if let Some(classes) = cmp.classifier.try_get_num_classes() {
             response["num_classes"] = classes.into();
@@ -1265,10 +1265,13 @@ async fn start_computation(
         );
     }
 
+    let task = GraphTaskContext::new();
+    task.init_progress(&graph);
+
     // A fresh computation that we will fill with data.
     let mut new_cmp = AttractorComputation {
         timestamp: SystemTime::now(),
-        task: GraphTaskContext::new(),
+        task,
         input_model: aeon_string.clone(),
         classifier: Classifier::new(&graph),
         graph,
@@ -1319,6 +1322,7 @@ async fn start_computation(
                         None => break,
                         Some(Ok(component)) => {
                             println!("Component {}", component.approx_cardinality());
+                            cmp.task.increment_result_count();
                             classifier.add_component(component, graph);
                         }
                         Some(Err(Incomplete::Cancelled(e))) => return Err(e),

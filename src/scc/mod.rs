@@ -1,6 +1,8 @@
 use biodivine_lib_param_bn::symbolic_async_graph::{GraphColoredVertices, GraphColors};
+use num_bigint::BigUint;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicUsize;
 
 mod _impl_behaviour;
 /// **(internal)** Utility methods for the behavior `Class`.
@@ -26,6 +28,7 @@ pub struct Classifier {
 }
 
 pub struct ProgressTracker {
-    total: Mutex<f64>,
-    remaining: Mutex<f64>,
+    total: Mutex<BigUint>,
+    remaining: Mutex<BigUint>,
+    results: AtomicUsize,
 }

@@ -59,7 +59,7 @@ fn main() {
     for component in attractors {
         let component = component.expect("Cancellation disabled.");
         println!("Found attractor... {}", component.approx_cardinality());
-        println!("Remaining: {}", task_context.get_percent_string());
+        println!("Remaining: {}", task_context.get_progress_string());
         println!(
             "Unique states: {}",
             component.vertices().approx_cardinality()

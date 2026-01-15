@@ -37,8 +37,12 @@ impl GraphTaskContext {
         self.progress.update_remaining(remaining);
     }
 
+    pub fn increment_result_count(&self) {
+        self.progress.increment_result_count();
+    }
+
     /// Output a string that represents the percentage of remaining state space.
-    pub fn get_percent_string(&self) -> String {
-        self.progress.get_percent_string()
+    pub fn get_progress_string(&self) -> String {
+        self.progress.get_progress_string()
     }
 }
