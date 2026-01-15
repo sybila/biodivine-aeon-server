@@ -1,7 +1,7 @@
 [package]
 name = "biodivine-aeon-server"
 # When changing, also update the versions in packager.*.toml files
-version = "0.7.1"
+version = "0.7.2"
 authors = ["Samuel Pastva <daemontus@gmail.com>"]
 edition = "2024"
 default-run = "biodivine-aeon-server"
