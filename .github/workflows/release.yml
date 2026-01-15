@@ -29,11 +29,33 @@ jobs:
         run: cargo install cargo-packager --locked
       - name: compile binary
         run: cargo packager --release ${{ matrix.platform == 'macos-latest' && '--config ./packager.macos.toml' || '--config ./packager.toml' }}
+      - name: Create compute-engine zip (Linux/macOS)
+        if: matrix.platform != 'windows-latest'
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" == "macos-latest" ]; then
+            zip compute-engine-macos.zip target/release/biodivine-aeon-server
+          else
+            zip compute-engine-linux.zip target/release/biodivine-aeon-server
+          fi
+      - name: Create compute-engine zip (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target/release/biodivine-aeon-server.exe -DestinationPath compute-engine-windows.zip -Force
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: "dist/*.{dmg,deb,exe,AppImage}"
+          file_glob: true
+          overwrite: true
+          tag: ${{ github.ref }}
+      - name: Upload compute-engine zip to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: "compute-engine-*.zip"
           file_glob: true
           overwrite: true
           tag: ${{ github.ref }}
